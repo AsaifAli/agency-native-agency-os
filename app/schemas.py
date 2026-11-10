@@ -1,6 +1,6 @@
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
-from app.models import DataClass, Role, ApprovalStatus
+from app.models import DataClass, Role, ApprovalStatus, ExecutionStatus
 
 class WorkspaceCreate(BaseModel):
     name: str = Field(min_length=2, max_length=200)
@@ -91,3 +91,32 @@ class EvaluationOut(BaseModel):
     metrics: dict
     gate_results: dict
     created_at: datetime
+
+
+class ExecutionCreate(BaseModel):
+    workspace_id: str
+    task_id: str
+    agent_id: str
+    idempotency_key: str = Field(min_length=8, max_length=160)
+    max_attempts: int = Field(default=3, ge=1, le=10)
+
+
+class ExecutionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    workspace_id: str
+    task_id: str
+    agent_id: str
+    runtime: str
+    data_class: DataClass
+    status: ExecutionStatus
+    attempt_count: int
+    max_attempts: int
+    error_code: str | None
+    error_message: str | None
+    queued_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    created_at: datetime
+    updated_at: datetime

@@ -1,7 +1,10 @@
 import enum
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, DateTime, Boolean, ForeignKey, Text, Enum, JSON, UniqueConstraint, Index
+from sqlalchemy import (
+    String, DateTime, Boolean, ForeignKey, Text, Enum, JSON,
+    UniqueConstraint, Index, CheckConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db import Base
 
@@ -26,6 +29,26 @@ class ApprovalStatus(str, enum.Enum):
     pending = "pending"
     approved = "approved"
     rejected = "rejected"
+
+
+class ExecutionStatus(str, enum.Enum):
+    queued = "queued"
+    claimed = "claimed"
+    running = "running"
+    retry_wait = "retry_wait"
+    succeeded = "succeeded"
+    failed = "failed"
+    cancelled = "cancelled"
+
+
+class ExecutionAttemptStatus(str, enum.Enum):
+    queued = "queued"
+    claimed = "claimed"
+    running = "running"
+    succeeded = "succeeded"
+    failed = "failed"
+    abandoned = "abandoned"
+
 
 class Organization(Base):
     __tablename__ = "organizations"
@@ -80,6 +103,141 @@ class Task(Base):
     status: Mapped[str] = mapped_column(String(40), default="queued")
     created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class Execution(Base):
+    __tablename__ = "executions"
+    __table_args__ = (
+        UniqueConstraint(
+            "org_id", "idempotency_key",
+            name="uq_execution_org_idempotency",
+        ),
+        CheckConstraint("max_attempts >= 1", name="ck_execution_max_attempts"),
+        CheckConstraint("attempt_count >= 0", name="ck_execution_attempt_count"),
+        Index(
+            "ix_execution_org_workspace_status_created",
+            "org_id", "workspace_id", "status", "created_at",
+        ),
+        Index("ix_execution_task_id", "task_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    org_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id"), nullable=False, index=True
+    )
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("tasks.id"), nullable=False
+    )
+    agent_id: Mapped[str] = mapped_column(
+        ForeignKey("agents.id"), nullable=False
+    )
+    requested_by: Mapped[str] = mapped_column(
+        ForeignKey("users.id"), nullable=False
+    )
+
+    idempotency_key: Mapped[str] = mapped_column(
+        String(160), nullable=False
+    )
+    runtime: Mapped[str] = mapped_column(String(80), nullable=False)
+    data_class: Mapped[DataClass] = mapped_column(
+        Enum(DataClass), nullable=False
+    )
+    client_authorized: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+
+    status: Mapped[ExecutionStatus] = mapped_column(
+        Enum(ExecutionStatus), default=ExecutionStatus.queued, nullable=False
+    )
+    attempt_count: Mapped[int] = mapped_column(default=0, nullable=False)
+    max_attempts: Mapped[int] = mapped_column(default=3, nullable=False)
+
+    # Only sanitized, allowlisted metadata belongs here.
+    # Do not store raw prompts, secrets or unrestricted client payloads.
+    request_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    queued_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now, nullable=False
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now, onupdate=now, nullable=False
+    )
+
+
+class ExecutionAttempt(Base):
+    __tablename__ = "execution_attempts"
+    __table_args__ = (
+        UniqueConstraint(
+            "execution_id", "attempt_number",
+            name="uq_execution_attempt_number",
+        ),
+        CheckConstraint(
+            "attempt_number >= 1",
+            name="ck_execution_attempt_number",
+        ),
+        Index(
+            "ix_execution_attempt_status_lease",
+            "status", "lease_expires_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    execution_id: Mapped[str] = mapped_column(
+        ForeignKey("executions.id"), nullable=False, index=True
+    )
+
+    attempt_number: Mapped[int] = mapped_column(nullable=False)
+    worker_id: Mapped[str | None] = mapped_column(
+        String(160), nullable=True
+    )
+    runtime: Mapped[str] = mapped_column(String(80), nullable=False)
+
+    status: Mapped[ExecutionAttemptStatus] = mapped_column(
+        Enum(ExecutionAttemptStatus),
+        default=ExecutionAttemptStatus.queued,
+        nullable=False,
+    )
+
+    external_run_id: Mapped[str | None] = mapped_column(
+        String(200), nullable=True
+    )
+
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    heartbeat_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now, nullable=False
+    )
 
 class Approval(Base):
     __tablename__ = "approvals"
