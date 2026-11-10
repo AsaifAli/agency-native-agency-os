@@ -1,0 +1,30 @@
+import argparse
+from app.db import Base, engine, SessionLocal
+from app.models import Organization, User, Membership, Workspace, Role
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--email", required=True)
+    parser.add_argument("--org-name", required=True)
+    args = parser.parse_args()
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    try:
+        email = args.email.lower()
+        user = db.query(User).filter_by(email=email).first()
+        if not user:
+            user = User(email=email, display_name="Founder")
+            db.add(user)
+            db.flush()
+        org = Organization(name=args.org_name)
+        db.add(org)
+        db.flush()
+        db.add(Membership(org_id=org.id, user_id=user.id, role=Role.owner))
+        db.add(Workspace(org_id=org.id, name="Main Workspace"))
+        db.commit()
+        print(f"Created org_id={org.id} user={email}")
+    finally:
+        db.close()
+
+if __name__ == "__main__":
+    main()

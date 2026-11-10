@@ -1,0 +1,8 @@
+"use client";
+import {useEffect,useState} from "react";import Page from "@/components/page";import {api,orgId,Workspace} from "@/lib/api";
+export default function Organization(){const [items,setItems]=useState<Workspace[]>([]),[name,setName]=useState("Client Delivery"),[err,setErr]=useState("");
+ async function load(){try{setItems(await api<Workspace[]>(`/v1/orgs/${orgId()}/workspaces`))}catch(e){setErr((e as Error).message)}}
+ useEffect(()=>{if(orgId())load();else setErr("Configure NEXT_PUBLIC_ORG_ID in .env.local")},[]);
+ async function create(){try{await api(`/v1/orgs/${orgId()}/workspaces`,{method:"POST",body:JSON.stringify({name})});setName("");load()}catch(e){setErr((e as Error).message)}}
+ return <Page eyebrow="ORGANIZATION" title="Organization & workspaces" description="Manage the organizational boundary and workspace containers."><div className="panel"><div className="panel-head"><div className="panel-title">Create workspace</div></div><div className="toolbar"><input className="field" value={name} onChange={e=>setName(e.target.value)} placeholder="Workspace name"/><button className="button" onClick={create} disabled={!name.trim()}>Create workspace</button></div>{err&&<div className="error">{err}</div>}<div className="table-wrap"><table className="data-table"><thead><tr><th>Workspace</th><th>ID</th><th>Created</th></tr></thead><tbody>{items.map(w=><tr key={w.id}><td>{w.name}</td><td className="muted">{w.id}</td><td>{new Date(w.created_at).toLocaleDateString()}</td></tr>)}</tbody></table>{!items.length&&<div className="empty">No workspaces returned.</div>}</div></div></Page>
+}

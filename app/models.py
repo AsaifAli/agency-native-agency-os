@@ -1,0 +1,129 @@
+import enum
+import uuid
+from datetime import datetime, timezone
+from sqlalchemy import String, DateTime, Boolean, ForeignKey, Text, Enum, JSON, UniqueConstraint, Index
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from app.db import Base
+
+def uid(): return str(uuid.uuid4())
+def now(): return datetime.now(timezone.utc)
+
+class Role(str, enum.Enum):
+    owner = "owner"
+    admin = "admin"
+    operator = "operator"
+    reviewer = "reviewer"
+    viewer = "viewer"
+
+class DataClass(str, enum.Enum):
+    synthetic = "synthetic"
+    public = "public"
+    commercial = "commercial"
+    confidential = "confidential"
+    regulated = "regulated"
+
+class ApprovalStatus(str, enum.Enum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+
+class Organization(Base):
+    __tablename__ = "organizations"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    email: Mapped[str] = mapped_column(String(320), unique=True, index=True, nullable=False)
+    display_name: Mapped[str] = mapped_column(String(200), default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+class Membership(Base):
+    __tablename__ = "memberships"
+    __table_args__ = (UniqueConstraint("org_id", "user_id", name="uq_membership_org_user"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    role: Mapped[Role] = mapped_column(Enum(Role), default=Role.viewer, nullable=False)
+
+class Workspace(Base):
+    __tablename__ = "workspaces"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+class Agent(Base):
+    __tablename__ = "agents"
+    __table_args__ = (UniqueConstraint("org_id", "workspace_id", "name", name="uq_agent_workspace_name"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True, nullable=False)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    department: Mapped[str] = mapped_column(String(100), default="Engineering")
+    instructions: Mapped[str] = mapped_column(Text, default="")
+    runtime: Mapped[str] = mapped_column(String(80), default="claude_managed_agents")
+    data_class: Mapped[DataClass] = mapped_column(Enum(DataClass), default=DataClass.synthetic)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+class Task(Base):
+    __tablename__ = "tasks"
+    __table_args__ = (Index("ix_task_org_workspace_status", "org_id", "workspace_id", "status"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True, nullable=False)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), index=True, nullable=False)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(40), default="queued")
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+class Approval(Base):
+    __tablename__ = "approvals"
+    __table_args__ = (UniqueConstraint("org_id", "idempotency_key", name="uq_approval_org_idempotency"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True, nullable=False)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), index=True, nullable=False)
+    action_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    request_payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    resource_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    status: Mapped[ApprovalStatus] = mapped_column(Enum(ApprovalStatus), default=ApprovalStatus.pending)
+    requested_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    decided_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    decision_note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True, nullable=False)
+    workspace_id: Mapped[str | None] = mapped_column(ForeignKey("workspaces.id"), nullable=True)
+    actor_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    event_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    resource_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    resource_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class EvaluationRun(Base):
+    __tablename__ = "evaluation_runs"
+    __table_args__ = (
+        Index("ix_eval_org_workspace_created", "org_id", "workspace_id", "created_at"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True, nullable=False)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), index=True, nullable=False)
+    task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id"), nullable=True)
+    pack_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    score: Mapped[float] = mapped_column(nullable=False)
+    passed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    metrics: Mapped[dict] = mapped_column(JSON, default=dict)
+    gate_results: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)

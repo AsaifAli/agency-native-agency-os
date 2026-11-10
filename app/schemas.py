@@ -1,0 +1,93 @@
+from datetime import datetime
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from app.models import DataClass, Role, ApprovalStatus
+
+class WorkspaceCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=200)
+class WorkspaceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    org_id: str
+    name: str
+    created_at: datetime
+
+class AgentCreate(BaseModel):
+    workspace_id: str
+    name: str = Field(min_length=2, max_length=200)
+    department: str = "Engineering"
+    instructions: str = ""
+    runtime: str = "claude_managed_agents"
+    data_class: DataClass = DataClass.synthetic
+class AgentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    workspace_id: str
+    name: str
+    department: str
+    runtime: str
+    data_class: DataClass
+    enabled: bool
+
+class TaskCreate(BaseModel):
+    workspace_id: str
+    title: str = Field(min_length=2, max_length=300)
+    description: str = ""
+class TaskOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    workspace_id: str
+    title: str
+    description: str
+    status: str
+    created_at: datetime
+
+class ApprovalDecision(BaseModel):
+    decision: ApprovalStatus
+    note: str = ""
+class AuditOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    event_type: str
+    resource_type: str
+    resource_id: str
+    payload: dict
+    created_at: datetime
+
+class ApprovalCreate(BaseModel):
+    workspace_id: str
+    action_type: str = Field(min_length=3, max_length=100)
+    resource_id: str = Field(min_length=1, max_length=36)
+    idempotency_key: str = Field(min_length=8, max_length=160)
+    request_payload: dict = Field(default_factory=dict)
+
+class ApprovalOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    workspace_id: str
+    action_type: str
+    resource_id: str
+    status: ApprovalStatus
+    request_payload: dict
+    requested_by: str
+    decision_note: str
+    created_at: datetime
+
+
+class EvaluationCreate(BaseModel):
+    workspace_id: str
+    pack_name: str = Field(min_length=2, max_length=100)
+    expected: dict = Field(default_factory=dict)
+    actual: dict = Field(default_factory=dict)
+    task_id: str | None = None
+
+class EvaluationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    workspace_id: str
+    task_id: str | None
+    pack_name: str
+    score: float
+    passed: bool
+    metrics: dict
+    gate_results: dict
+    created_at: datetime
