@@ -29,6 +29,7 @@ from app.worker_service import (
     fail_execution,
     heartbeat_execution,
     promote_due_retries,
+    recover_expired_execution_leases,
     start_execution,
 )
 
@@ -815,3 +816,194 @@ def test_promote_due_retries_respects_limit(worker_context):
     assert sum(
         item.status == ExecutionStatus.retry_wait for item in executions
     ) == 1
+
+def test_recovery_abandons_expired_claimed_attempt(worker_context):
+    ctx = worker_context
+    db = ctx["db"]
+
+    execution = create_worker_execution(ctx)
+    db.commit()
+
+    claimed = claim_next_execution(
+        db,
+        worker_id="worker-expired-claimed",
+        lease_seconds=60,
+    )
+    assert claimed is not None
+
+    execution, attempt = claimed
+    attempt.lease_expires_at = datetime.now(timezone.utc) - timedelta(
+        seconds=5
+    )
+    db.commit()
+
+    recovered = recover_expired_execution_leases(
+        db,
+        base_delay_seconds=5,
+        max_delay_seconds=30,
+    )
+
+    assert recovered == 1
+    assert execution.status == ExecutionStatus.retry_wait
+    assert attempt.status == ExecutionAttemptStatus.abandoned
+    assert attempt.lease_expires_at is None
+    assert attempt.error_code == "WORKER_LEASE_EXPIRED"
+    assert execution.next_retry_at is not None
+
+    db.commit()
+
+    abandoned_event = (
+        db.query(AuditEvent)
+        .filter_by(
+            org_id=ctx["org_id"],
+            event_type="execution.attempt_abandoned",
+            resource_type="execution_attempt",
+            resource_id=attempt.id,
+        )
+        .one()
+    )
+
+    assert abandoned_event.payload["worker_id"] == "worker-expired-claimed"
+
+
+def test_recovery_abandons_expired_running_attempt(worker_context):
+    ctx = worker_context
+    db = ctx["db"]
+
+    execution, attempt, worker_id = start_running_attempt(ctx)
+
+    attempt.lease_expires_at = datetime.now(timezone.utc) - timedelta(
+        seconds=5
+    )
+    db.commit()
+
+    recovered = recover_expired_execution_leases(
+        db,
+        base_delay_seconds=5,
+        max_delay_seconds=30,
+    )
+
+    assert recovered == 1
+    assert execution.status == ExecutionStatus.retry_wait
+    assert attempt.status == ExecutionAttemptStatus.abandoned
+    assert execution.error_code == "WORKER_LEASE_EXPIRED"
+    assert execution.finished_at is None
+    assert execution.next_retry_at is not None
+
+    db.commit()
+
+    retry_event = (
+        db.query(AuditEvent)
+        .filter_by(
+            org_id=ctx["org_id"],
+            event_type="execution.retry_scheduled",
+            resource_type="execution",
+            resource_id=execution.id,
+        )
+        .one()
+    )
+
+    assert retry_event.payload["recovery_reason"] == "expired_worker_lease"
+    assert retry_event.payload["worker_id"] == worker_id
+
+
+def test_recovery_fails_execution_when_attempts_exhausted(worker_context):
+    ctx = worker_context
+    db = ctx["db"]
+
+    execution, attempt, _ = start_running_attempt(
+        ctx,
+        max_attempts=1,
+    )
+
+    attempt.lease_expires_at = datetime.now(timezone.utc) - timedelta(
+        seconds=5
+    )
+    db.commit()
+
+    recovered = recover_expired_execution_leases(db)
+
+    assert recovered == 1
+    assert execution.status == ExecutionStatus.failed
+    assert execution.attempt_count == execution.max_attempts == 1
+    assert execution.finished_at is not None
+    assert execution.next_retry_at is None
+    assert attempt.status == ExecutionAttemptStatus.abandoned
+    assert attempt.error_code == "WORKER_LEASE_EXPIRED"
+
+    db.commit()
+
+    failed_event = (
+        db.query(AuditEvent)
+        .filter_by(
+            org_id=ctx["org_id"],
+            event_type="execution.failed",
+            resource_type="execution",
+            resource_id=execution.id,
+        )
+        .one()
+    )
+
+    assert failed_event.payload["attempts_exhausted"] is True
+    assert failed_event.payload["recovery_reason"] == "expired_worker_lease"
+
+
+def test_recovery_ignores_unexpired_worker_lease(worker_context):
+    ctx = worker_context
+    db = ctx["db"]
+
+    execution = create_worker_execution(ctx)
+    db.commit()
+
+    claimed = claim_next_execution(
+        db,
+        worker_id="worker-active-lease",
+        lease_seconds=120,
+    )
+    assert claimed is not None
+
+    execution, attempt = claimed
+    db.commit()
+
+    recovered = recover_expired_execution_leases(db)
+
+    assert recovered == 0
+    assert execution.status == ExecutionStatus.claimed
+    assert attempt.status == ExecutionAttemptStatus.claimed
+    assert attempt.lease_expires_at is not None
+
+
+def test_recovery_respects_limit(worker_context):
+    ctx = worker_context
+    db = ctx["db"]
+
+    expired_attempts = []
+
+    for _ in range(2):
+        execution, attempt, _ = start_running_attempt(ctx)
+
+        attempt.lease_expires_at = datetime.now(timezone.utc) - timedelta(
+            seconds=5
+        )
+        expired_attempts.append((execution, attempt))
+
+    db.commit()
+
+    recovered = recover_expired_execution_leases(
+        db,
+        limit=1,
+    )
+
+    assert recovered == 1
+
+    abandoned_count = sum(
+        attempt.status == ExecutionAttemptStatus.abandoned
+        for _, attempt in expired_attempts
+    )
+    running_count = sum(
+        execution.status == ExecutionStatus.running
+        for execution, _ in expired_attempts
+    )
+
+    assert abandoned_count == 1
+    assert running_count == 1

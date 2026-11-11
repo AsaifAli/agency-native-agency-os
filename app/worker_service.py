@@ -521,3 +521,209 @@ def promote_due_retries(
         db.flush()
 
     return len(executions)
+
+def recover_expired_execution_leases(
+    db: Session,
+    *,
+    limit: int = 100,
+    base_delay_seconds: int = 30,
+    max_delay_seconds: int = 3600,
+) -> int:
+    """
+    Recover executions whose active worker attempt has an expired lease.
+
+    Expired attempts become abandoned. Executions are either scheduled
+    for retry or marked failed when attempts are exhausted.
+
+    The caller owns the transaction and must commit or roll back.
+    """
+    if not isinstance(limit, int) or isinstance(limit, bool):
+        raise ValueError("limit must be an integer")
+
+    if not 1 <= limit <= 1000:
+        raise ValueError("limit must be between 1 and 1000")
+
+    if (
+        not isinstance(base_delay_seconds, int)
+        or isinstance(base_delay_seconds, bool)
+        or not isinstance(max_delay_seconds, int)
+        or isinstance(max_delay_seconds, bool)
+    ):
+        raise ValueError("Retry delays must be integers")
+
+    if base_delay_seconds < 1:
+        raise ValueError("base_delay_seconds must be at least 1")
+
+    if max_delay_seconds < base_delay_seconds:
+        raise ValueError(
+            "max_delay_seconds must be greater than or equal to "
+            "base_delay_seconds"
+        )
+
+    now = datetime.now(timezone.utc)
+
+    # Discover candidate execution IDs without locking attempts first.
+    # We subsequently lock each execution before its attempt, preserving
+    # the lock order used by the normal worker lifecycle.
+    candidate_ids = (
+        db.query(Execution.id)
+        .join(
+            ExecutionAttempt,
+            ExecutionAttempt.execution_id == Execution.id,
+        )
+        .filter(
+            Execution.status.in_(
+                (ExecutionStatus.claimed, ExecutionStatus.running)
+            ),
+            ExecutionAttempt.status.in_(
+                (
+                    ExecutionAttemptStatus.claimed,
+                    ExecutionAttemptStatus.running,
+                )
+            ),
+            ExecutionAttempt.lease_expires_at.is_not(None),
+            ExecutionAttempt.lease_expires_at <= now,
+        )
+        .distinct()
+        .order_by(Execution.id.asc())
+        .limit(limit)
+        .all()
+    )
+
+    recovered_count = 0
+
+    for (execution_id,) in candidate_ids:
+        # Lock execution first. PostgreSQL skips executions already
+        # being processed by another recovery or worker operation.
+        execution = (
+            db.query(Execution)
+            .filter(Execution.id == execution_id)
+            .with_for_update(skip_locked=True)
+            .one_or_none()
+        )
+
+        if execution is None:
+            continue
+
+        if execution.status not in (
+            ExecutionStatus.claimed,
+            ExecutionStatus.running,
+        ):
+            continue
+
+        # Lock and re-check the expired attempt after acquiring the
+        # execution lock. Another transaction may have renewed its lease.
+        attempt = (
+            db.query(ExecutionAttempt)
+            .filter(
+                ExecutionAttempt.execution_id == execution.id,
+                ExecutionAttempt.status.in_(
+                    (
+                        ExecutionAttemptStatus.claimed,
+                        ExecutionAttemptStatus.running,
+                    )
+                ),
+                ExecutionAttempt.lease_expires_at.is_not(None),
+                ExecutionAttempt.lease_expires_at <= now,
+            )
+            .order_by(
+                ExecutionAttempt.lease_expires_at.asc(),
+                ExecutionAttempt.id.asc(),
+            )
+            .with_for_update()
+            .first()
+        )
+
+        if attempt is None:
+            continue
+
+        error_code = "WORKER_LEASE_EXPIRED"
+        error_message = "Worker lease expired before attempt completion."
+
+        attempt.status = ExecutionAttemptStatus.abandoned
+        attempt.finished_at = now
+        attempt.lease_expires_at = None
+        attempt.error_code = error_code
+        attempt.error_message = error_message
+
+        execution.error_code = error_code
+        execution.error_message = error_message
+
+        retry_scheduled = execution.attempt_count < execution.max_attempts
+
+        record_event(
+            db,
+            execution.org_id,
+            None,
+            "execution.attempt_abandoned",
+            "execution_attempt",
+            attempt.id,
+            execution.workspace_id,
+            {
+                "execution_id": execution.id,
+                "attempt_number": attempt.attempt_number,
+                "worker_id": attempt.worker_id,
+                "error_code": error_code,
+            },
+        )
+
+        if retry_scheduled:
+            delay_seconds = min(
+                base_delay_seconds * (2 ** (attempt.attempt_number - 1)),
+                max_delay_seconds,
+            )
+
+            execution.status = ExecutionStatus.retry_wait
+            execution.next_retry_at = now + timedelta(
+                seconds=delay_seconds
+            )
+            execution.finished_at = None
+
+            record_event(
+                db,
+                execution.org_id,
+                None,
+                "execution.retry_scheduled",
+                "execution",
+                execution.id,
+                execution.workspace_id,
+                {
+                    "attempt_id": attempt.id,
+                    "attempt_number": attempt.attempt_number,
+                    "worker_id": attempt.worker_id,
+                    "error_code": error_code,
+                    "retry_delay_seconds": delay_seconds,
+                    "next_retry_at": execution.next_retry_at.isoformat(),
+                    "recovery_reason": "expired_worker_lease",
+                },
+            )
+        else:
+            execution.status = ExecutionStatus.failed
+            execution.next_retry_at = None
+            execution.finished_at = now
+
+            record_event(
+                db,
+                execution.org_id,
+                None,
+                "execution.failed",
+                "execution",
+                execution.id,
+                execution.workspace_id,
+                {
+                    "attempt_id": attempt.id,
+                    "attempt_number": attempt.attempt_number,
+                    "worker_id": attempt.worker_id,
+                    "error_code": error_code,
+                    "retryable": True,
+                    "attempts_exhausted": True,
+                    "recovery_reason": "expired_worker_lease",
+                },
+            )
+
+        recovered_count += 1
+
+    if recovered_count:
+        db.flush()
+
+    return recovered_count
