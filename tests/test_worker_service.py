@@ -1,4 +1,3 @@
-
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -22,40 +21,16 @@ from app.models import (
     Workspace,
 )
 from app.worker_service import (
-    LeaseExpired,
     InvalidExecutionState,
+    LeaseExpired,
     WorkerOwnershipError,
     claim_next_execution,
     complete_execution,
+    fail_execution,
     heartbeat_execution,
+    promote_due_retries,
     start_execution,
 )
-
-
-
-import uuid
-from datetime import datetime, timezone
-
-import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
-from app.db import Base
-from app.execution_service import create_execution
-from app.models import (
-    Agent,
-    AuditEvent,
-    DataClass,
-    Execution,
-    ExecutionAttempt,
-    ExecutionAttemptStatus,
-    ExecutionStatus,
-    Organization,
-    Task,
-    User,
-    Workspace,
-)
-from app.worker_service import claim_next_execution
 
 
 @pytest.fixture
@@ -350,6 +325,7 @@ def test_start_execution_transitions_claimed_to_running(worker_context):
     assert started_attempt.started_at is not None
     assert started_attempt.heartbeat_at is not None
     assert started_attempt.lease_expires_at is not None
+    assert started_execution.last_attempt_at is not None
 
     db.commit()
 
@@ -529,3 +505,313 @@ def test_complete_execution_rejects_non_dictionary_result(worker_context):
             worker_id="worker-lifecycle-1",
             result=["not", "a", "dictionary"],
         )
+
+
+def start_running_attempt(
+    ctx,
+    *,
+    max_attempts=3,
+    worker_id="worker-retry-test",
+):
+    """Create an execution, claim it and start its first attempt."""
+    db = ctx["db"]
+
+    execution = create_worker_execution(
+        ctx,
+        max_attempts=max_attempts,
+    )
+    db.commit()
+
+    claimed = claim_next_execution(
+        db,
+        worker_id=worker_id,
+        lease_seconds=120,
+    )
+    assert claimed is not None
+
+    execution, attempt = claimed
+    db.commit()
+
+    execution, attempt = start_execution(
+        db,
+        execution_id=execution.id,
+        attempt_id=attempt.id,
+        worker_id=worker_id,
+        lease_seconds=120,
+    )
+    db.commit()
+
+    return execution, attempt, worker_id
+
+
+def utc_datetime(value):
+    """Normalize SQLite and PostgreSQL datetime values for assertions."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def test_retryable_failure_schedules_retry(worker_context):
+    ctx = worker_context
+    db = ctx["db"]
+
+    execution, attempt, worker_id = start_running_attempt(ctx)
+
+    failed_execution, failed_attempt = fail_execution(
+        db,
+        execution_id=execution.id,
+        attempt_id=attempt.id,
+        worker_id=worker_id,
+        error_code="TEMPORARY_ERROR",
+        error_message="Synthetic temporary failure",
+        retryable=True,
+        base_delay_seconds=10,
+        max_delay_seconds=100,
+    )
+
+    assert failed_execution.status == ExecutionStatus.retry_wait
+    assert failed_execution.finished_at is None
+    assert failed_execution.next_retry_at is not None
+    assert failed_execution.error_code == "TEMPORARY_ERROR"
+    assert failed_execution.last_attempt_at is not None
+
+    assert failed_attempt.status == ExecutionAttemptStatus.failed
+    assert failed_attempt.finished_at is not None
+    assert failed_attempt.lease_expires_at is None
+
+    actual_delay = (
+        utc_datetime(failed_execution.next_retry_at)
+        - utc_datetime(failed_attempt.finished_at)
+    ).total_seconds()
+
+    assert 9 <= actual_delay <= 11
+
+    db.commit()
+
+    retry_event = db.query(AuditEvent).filter_by(
+        resource_id=execution.id,
+        event_type="execution.retry_scheduled",
+    ).one()
+
+    attempt_event = db.query(AuditEvent).filter_by(
+        resource_id=attempt.id,
+        event_type="execution.attempt_failed",
+    ).one()
+
+    assert retry_event.payload["error_code"] == "TEMPORARY_ERROR"
+    assert retry_event.payload["retry_delay_seconds"] == 10
+    assert attempt_event.payload["attempt_number"] == 1
+
+
+def test_non_retryable_failure_is_terminal(worker_context):
+    ctx = worker_context
+    db = ctx["db"]
+
+    execution, attempt, worker_id = start_running_attempt(ctx)
+
+    failed_execution, failed_attempt = fail_execution(
+        db,
+        execution_id=execution.id,
+        attempt_id=attempt.id,
+        worker_id=worker_id,
+        error_code="PERMANENT_ERROR",
+        error_message="Synthetic permanent failure",
+        retryable=False,
+    )
+
+    assert failed_execution.status == ExecutionStatus.failed
+    assert failed_execution.finished_at is not None
+    assert failed_execution.next_retry_at is None
+
+    assert failed_attempt.status == ExecutionAttemptStatus.failed
+    assert failed_attempt.lease_expires_at is None
+
+    db.commit()
+
+    event = db.query(AuditEvent).filter_by(
+        resource_id=execution.id,
+        event_type="execution.failed",
+    ).one()
+
+    assert event.payload["retryable"] is False
+
+
+def test_exhausted_attempts_produce_terminal_failure(worker_context):
+    ctx = worker_context
+    db = ctx["db"]
+
+    execution, attempt, worker_id = start_running_attempt(
+        ctx,
+        max_attempts=1,
+    )
+
+    failed_execution, _ = fail_execution(
+        db,
+        execution_id=execution.id,
+        attempt_id=attempt.id,
+        worker_id=worker_id,
+        error_code="ATTEMPT_LIMIT",
+        error_message="Attempt limit reached",
+        retryable=True,
+        base_delay_seconds=10,
+    )
+
+    assert failed_execution.attempt_count == 1
+    assert failed_execution.max_attempts == 1
+    assert failed_execution.status == ExecutionStatus.failed
+    assert failed_execution.finished_at is not None
+    assert failed_execution.next_retry_at is None
+
+
+def test_second_attempt_uses_exponential_backoff(worker_context):
+    ctx = worker_context
+    db = ctx["db"]
+
+    execution, first_attempt, worker_id = start_running_attempt(
+        ctx,
+        max_attempts=3,
+    )
+
+    fail_execution(
+        db,
+        execution_id=execution.id,
+        attempt_id=first_attempt.id,
+        worker_id=worker_id,
+        error_code="TEMPORARY_ERROR",
+        error_message="First failure",
+        retryable=True,
+        base_delay_seconds=10,
+        max_delay_seconds=100,
+    )
+    db.commit()
+
+    # Make the scheduled retry due.
+    execution.next_retry_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    db.commit()
+
+    assert promote_due_retries(db) == 1
+    db.commit()
+
+    second_claim = claim_next_execution(
+        db,
+        worker_id="worker-retry-second",
+        lease_seconds=120,
+    )
+    assert second_claim is not None
+
+    execution, second_attempt = second_claim
+    db.commit()
+
+    start_execution(
+        db,
+        execution_id=execution.id,
+        attempt_id=second_attempt.id,
+        worker_id="worker-retry-second",
+        lease_seconds=120,
+    )
+    db.commit()
+
+    failed_execution, failed_attempt = fail_execution(
+        db,
+        execution_id=execution.id,
+        attempt_id=second_attempt.id,
+        worker_id="worker-retry-second",
+        error_code="TEMPORARY_ERROR",
+        error_message="Second failure",
+        retryable=True,
+        base_delay_seconds=10,
+        max_delay_seconds=100,
+    )
+
+    assert failed_execution.attempt_count == 2
+    assert failed_execution.status == ExecutionStatus.retry_wait
+
+    actual_delay = (
+        utc_datetime(failed_execution.next_retry_at)
+        - utc_datetime(failed_attempt.finished_at)
+    ).total_seconds()
+
+    assert 19 <= actual_delay <= 21
+
+
+def test_promote_due_retries_queues_only_due_executions(worker_context):
+    ctx = worker_context
+    db = ctx["db"]
+
+    due_execution, due_attempt, worker_id = start_running_attempt(ctx)
+    future_execution, future_attempt, future_worker = start_running_attempt(ctx)
+
+    fail_execution(
+        db,
+        execution_id=due_execution.id,
+        attempt_id=due_attempt.id,
+        worker_id=worker_id,
+        error_code="TEMPORARY_ERROR",
+        error_message="Due retry",
+        retryable=True,
+        base_delay_seconds=10,
+    )
+
+    fail_execution(
+        db,
+        execution_id=future_execution.id,
+        attempt_id=future_attempt.id,
+        worker_id=future_worker,
+        error_code="TEMPORARY_ERROR",
+        error_message="Future retry",
+        retryable=True,
+        base_delay_seconds=3600,
+    )
+    db.commit()
+
+    due_execution.next_retry_at = datetime.now(timezone.utc) - timedelta(
+        seconds=1
+    )
+    db.commit()
+
+    promoted_count = promote_due_retries(db, limit=100)
+
+    assert promoted_count == 1
+    assert due_execution.status == ExecutionStatus.queued
+    assert due_execution.next_retry_at is None
+
+    assert future_execution.status == ExecutionStatus.retry_wait
+    assert future_execution.next_retry_at is not None
+
+
+def test_promote_due_retries_respects_limit(worker_context):
+    ctx = worker_context
+    db = ctx["db"]
+
+    executions = []
+
+    for _ in range(2):
+        execution, attempt, worker_id = start_running_attempt(ctx)
+
+        fail_execution(
+            db,
+            execution_id=execution.id,
+            attempt_id=attempt.id,
+            worker_id=worker_id,
+            error_code="TEMPORARY_ERROR",
+            error_message="Due retry",
+            retryable=True,
+            base_delay_seconds=10,
+        )
+
+        execution.next_retry_at = datetime.now(timezone.utc) - timedelta(
+            seconds=1
+        )
+        executions.append(execution)
+
+    db.commit()
+
+    promoted_count = promote_due_retries(db, limit=1)
+
+    assert promoted_count == 1
+    assert sum(
+        item.status == ExecutionStatus.queued for item in executions
+    ) == 1
+    assert sum(
+        item.status == ExecutionStatus.retry_wait for item in executions
+    ) == 1

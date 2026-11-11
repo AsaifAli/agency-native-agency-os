@@ -199,7 +199,11 @@ def start_execution(
     now = datetime.now(timezone.utc)
 
     execution.status = ExecutionStatus.running
-    execution.started_at = now
+
+    if execution.started_at is None:
+        execution.started_at = now
+
+    execution.last_attempt_at = now
 
     attempt.status = ExecutionAttemptStatus.running
     attempt.started_at = now
@@ -319,3 +323,201 @@ def complete_execution(
     )
 
     return execution, attempt
+
+
+def fail_execution(
+    db: Session,
+    *,
+    execution_id: str,
+    attempt_id: str,
+    worker_id: str,
+    error_code: str,
+    error_message: str,
+    retryable: bool = True,
+    base_delay_seconds: int = 30,
+    max_delay_seconds: int = 3600,
+) -> tuple[Execution, ExecutionAttempt]:
+    """
+    Record a failed attempt and either schedule a retry or fail permanently.
+
+    The caller owns the transaction and must commit or roll back.
+    Error messages must be sanitized by the caller before persistence.
+    """
+    if (
+        not isinstance(base_delay_seconds, int)
+        or isinstance(base_delay_seconds, bool)
+        or not isinstance(max_delay_seconds, int)
+        or isinstance(max_delay_seconds, bool)
+    ):
+        raise ValueError("Retry delays must be integers")
+
+    if not isinstance(retryable, bool):
+        raise ValueError("retryable must be a boolean")
+    if not error_code or len(error_code) > 100:
+        raise ValueError("error_code must contain 1-100 characters")
+
+    if not isinstance(error_message, str):
+        raise ValueError("error_message must be a string")
+
+    if base_delay_seconds < 1:
+        raise ValueError("base_delay_seconds must be at least 1")
+
+    if max_delay_seconds < base_delay_seconds:
+        raise ValueError(
+            "max_delay_seconds must be greater than or equal to base_delay_seconds"
+        )
+
+    execution, attempt = _get_owned_execution_attempt(
+        db,
+        execution_id=execution_id,
+        attempt_id=attempt_id,
+        worker_id=worker_id,
+    )
+
+    if execution.status != ExecutionStatus.running:
+        raise InvalidExecutionState("Execution is not running")
+
+    if attempt.status != ExecutionAttemptStatus.running:
+        raise InvalidExecutionState("Attempt is not running")
+
+    now = datetime.now(timezone.utc)
+
+    execution.error_code = error_code
+    execution.error_message = error_message
+
+    attempt.status = ExecutionAttemptStatus.failed
+    attempt.finished_at = now
+    attempt.lease_expires_at = None
+    attempt.heartbeat_at = now
+    attempt.error_code = error_code
+    attempt.error_message = error_message
+
+    retry_scheduled = (
+        retryable and execution.attempt_count < execution.max_attempts
+    )
+
+    if retry_scheduled:
+        delay_seconds = min(
+            base_delay_seconds * (2 ** (attempt.attempt_number - 1)),
+            max_delay_seconds,
+        )
+
+        execution.status = ExecutionStatus.retry_wait
+        execution.next_retry_at = now + timedelta(seconds=delay_seconds)
+        execution.finished_at = None
+
+        record_event(
+            db,
+            execution.org_id,
+            None,
+            "execution.retry_scheduled",
+            "execution",
+            execution.id,
+            execution.workspace_id,
+            {
+                "attempt_id": attempt.id,
+                "attempt_number": attempt.attempt_number,
+                "worker_id": worker_id,
+                "error_code": error_code,
+                "retry_delay_seconds": delay_seconds,
+                "next_retry_at": execution.next_retry_at.isoformat(),
+            },
+        )
+    else:
+        execution.status = ExecutionStatus.failed
+        execution.next_retry_at = None
+        execution.finished_at = now
+
+        record_event(
+            db,
+            execution.org_id,
+            None,
+            "execution.failed",
+            "execution",
+            execution.id,
+            execution.workspace_id,
+            {
+                "attempt_id": attempt.id,
+                "attempt_number": attempt.attempt_number,
+                "worker_id": worker_id,
+                "error_code": error_code,
+                "retryable": retryable,
+                "attempts_exhausted": (
+                    execution.attempt_count >= execution.max_attempts
+                ),
+            },
+        )
+
+    record_event(
+        db,
+        execution.org_id,
+        None,
+        "execution.attempt_failed",
+        "execution_attempt",
+        attempt.id,
+        execution.workspace_id,
+        {
+            "execution_id": execution.id,
+            "attempt_number": attempt.attempt_number,
+            "worker_id": worker_id,
+            "error_code": error_code,
+        },
+    )
+
+    return execution, attempt
+
+def promote_due_retries(
+    db: Session,
+    *,
+    limit: int = 100,
+) -> int:
+    """
+    Move due retry_wait executions back to queued.
+
+    Workers still claim executions through claim_next_execution().
+    The caller owns the transaction and must commit or roll back.
+    """
+    if not 1 <= limit <= 1000:
+        raise ValueError("limit must be between 1 and 1000")
+
+    now = datetime.now(timezone.utc)
+
+    executions = (
+        db.query(Execution)
+        .filter(
+            Execution.status == ExecutionStatus.retry_wait,
+            Execution.next_retry_at.is_not(None),
+            Execution.next_retry_at <= now,
+        )
+        .order_by(
+            Execution.next_retry_at.asc(),
+            Execution.created_at.asc(),
+            Execution.id.asc(),
+        )
+        .with_for_update(skip_locked=True)
+        .limit(limit)
+        .all()
+    )
+
+    for execution in executions:
+        execution.status = ExecutionStatus.queued
+        execution.next_retry_at = None
+        execution.queued_at = now
+
+        record_event(
+            db,
+            execution.org_id,
+            None,
+            "execution.retry_queued",
+            "execution",
+            execution.id,
+            execution.workspace_id,
+            {
+                "attempt_count": execution.attempt_count,
+            },
+        )
+
+    if executions:
+        db.flush()
+
+    return len(executions)

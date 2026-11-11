@@ -119,6 +119,12 @@ class Execution(Base):
             "org_id", "workspace_id", "status", "created_at",
         ),
         Index("ix_execution_task_id", "task_id"),
+        Index(
+            "ix_execution_status_retry_queued",
+            "status",
+            "next_retry_at",
+            "queued_at",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
@@ -154,6 +160,12 @@ class Execution(Base):
     )
     attempt_count: Mapped[int] = mapped_column(default=0, nullable=False)
     max_attempts: Mapped[int] = mapped_column(default=3, nullable=False)
+    next_retry_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Only sanitized, allowlisted metadata belongs here.
     # Do not store raw prompts, secrets or unrestricted client payloads.
