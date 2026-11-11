@@ -1,0 +1,141 @@
+
+import logging
+import time
+from threading import Event
+from typing import Callable
+
+from sqlalchemy.orm import Session
+
+from app.config import settings
+from app.db import SessionLocal
+from app.worker.processor import process_one_execution
+from app.worker_service import (
+    promote_due_retries,
+    recover_expired_execution_leases,
+)
+
+logger = logging.getLogger(__name__)
+
+SessionFactory = Callable[[], Session]
+ExecutionProcessor = Callable[..., str | None]
+
+
+def _run_maintenance(
+    session_factory: SessionFactory,
+    batch_size: int,
+) -> tuple[int, int]:
+    """Run retry promotion and lease recovery in separate transactions."""
+
+    with session_factory() as db:
+        promoted_count = promote_due_retries(
+            db,
+            limit=batch_size,
+        )
+        db.commit()
+
+    with session_factory() as db:
+        recovered_count = recover_expired_execution_leases(
+            db,
+            limit=batch_size,
+        )
+        db.commit()
+
+    return promoted_count, recovered_count
+
+
+def run_worker(
+    stop_event: Event,
+    worker_id: str,
+    session_factory: SessionFactory = SessionLocal,
+    processor: ExecutionProcessor = process_one_execution,
+    lease_seconds: int | None = None,
+    poll_interval_seconds: float | None = None,
+    maintenance_interval_seconds: int | None = None,
+    maintenance_batch_size: int | None = None,
+    clock: Callable[[], float] = time.monotonic,
+) -> None:
+    """Run the worker polling loop until a stop signal is received."""
+
+    if not isinstance(worker_id, str) or not worker_id.strip():
+        raise ValueError("worker_id must be a non-empty string")
+
+    if len(worker_id) > 160:
+        raise ValueError("worker_id must be 160 characters or fewer")
+
+    lease_seconds = (
+        settings.worker_lease_seconds
+        if lease_seconds is None
+        else lease_seconds
+    )
+    poll_interval_seconds = (
+        settings.worker_poll_interval_seconds
+        if poll_interval_seconds is None
+        else poll_interval_seconds
+    )
+    maintenance_interval_seconds = (
+        settings.worker_maintenance_interval_seconds
+        if maintenance_interval_seconds is None
+        else maintenance_interval_seconds
+    )
+    maintenance_batch_size = (
+        settings.worker_maintenance_batch_size
+        if maintenance_batch_size is None
+        else maintenance_batch_size
+    )
+
+    if not 15 <= lease_seconds <= 3600:
+        raise ValueError("lease_seconds must be between 15 and 3600")
+
+    if not 0.1 <= poll_interval_seconds <= 60:
+        raise ValueError(
+            "poll_interval_seconds must be between 0.1 and 60"
+        )
+
+    if maintenance_interval_seconds < 1:
+        raise ValueError(
+            "maintenance_interval_seconds must be at least 1"
+        )
+
+    if not 1 <= maintenance_batch_size <= 1000:
+        raise ValueError(
+            "maintenance_batch_size must be between 1 and 1000"
+        )
+
+    next_maintenance_at = 0.0
+
+    logger.info("Worker started: worker_id=%s", worker_id)
+
+    while not stop_event.is_set():
+        now = clock()
+
+        if now >= next_maintenance_at:
+            promoted, recovered = _run_maintenance(
+                session_factory=session_factory,
+                batch_size=maintenance_batch_size,
+            )
+
+            if promoted or recovered:
+                logger.info(
+                    "Worker maintenance completed: "
+                    "promoted=%s recovered=%s",
+                    promoted,
+                    recovered,
+                )
+
+            next_maintenance_at = (
+                clock() + maintenance_interval_seconds
+            )
+
+        if stop_event.is_set():
+            break
+
+        execution_id = processor(
+            worker_id=worker_id,
+            lease_seconds=lease_seconds,
+            session_factory=session_factory,
+        )
+
+        if execution_id is None:
+            stop_event.wait(poll_interval_seconds)
+
+    logger.info("Worker stopping: worker_id=%s", worker_id)

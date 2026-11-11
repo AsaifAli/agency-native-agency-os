@@ -119,6 +119,12 @@ class Execution(Base):
             "org_id", "workspace_id", "status", "created_at",
         ),
         Index("ix_execution_task_id", "task_id"),
+        Index(
+            "ix_execution_status_retry_queued",
+            "status",
+            "next_retry_at",
+            "queued_at",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
@@ -154,6 +160,12 @@ class Execution(Base):
     )
     attempt_count: Mapped[int] = mapped_column(default=0, nullable=False)
     max_attempts: Mapped[int] = mapped_column(default=3, nullable=False)
+    next_retry_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Only sanitized, allowlisted metadata belongs here.
     # Do not store raw prompts, secrets or unrestricted client payloads.
@@ -239,22 +251,51 @@ class ExecutionAttempt(Base):
         DateTime(timezone=True), default=now, nullable=False
     )
 
+
 class Approval(Base):
     __tablename__ = "approvals"
-    __table_args__ = (UniqueConstraint("org_id", "idempotency_key", name="uq_approval_org_idempotency"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "org_id",
+            "idempotency_key",
+            name="uq_approval_org_idempotency",
+        ),
+    )
+
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
-    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True, nullable=False)
-    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), index=True, nullable=False)
+    org_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id"), index=True, nullable=False
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id"), index=True, nullable=False
+    )
     action_type: Mapped[str] = mapped_column(String(100), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
     request_payload: Mapped[dict] = mapped_column(JSON, default=dict)
     resource_id: Mapped[str] = mapped_column(String(36), nullable=False)
-    status: Mapped[ApprovalStatus] = mapped_column(Enum(ApprovalStatus), default=ApprovalStatus.pending)
-    requested_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
-    decided_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    status: Mapped[ApprovalStatus] = mapped_column(
+        Enum(ApprovalStatus), default=ApprovalStatus.pending
+    )
+    requested_by: Mapped[str] = mapped_column(
+        ForeignKey("users.id"), nullable=False
+    )
+    decided_by: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
     decision_note: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
-    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    consumed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    consumed_by: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+
 
 class AuditEvent(Base):
     __tablename__ = "audit_events"

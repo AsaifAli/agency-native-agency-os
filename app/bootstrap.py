@@ -1,5 +1,5 @@
 import argparse
-from app.db import Base, engine, SessionLocal
+from app.db import SessionLocal
 from app.models import Organization, User, Membership, Workspace, Role
 
 def main():
@@ -7,7 +7,6 @@ def main():
     parser.add_argument("--email", required=True)
     parser.add_argument("--org-name", required=True)
     args = parser.parse_args()
-    Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
         email = args.email.lower()
