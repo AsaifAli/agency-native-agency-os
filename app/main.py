@@ -4,8 +4,10 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
-from app.db import Base, engine, get_db
+from app.db import get_db
 from app.config import settings
 from app.auth import (
     get_principal,
@@ -75,8 +77,6 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
 )
 
-# Development bootstrap only. Production schema changes must use Alembic.
-Base.metadata.create_all(bind=engine)
 
 
 @app.post("/v1/auth/dev-token")
@@ -100,10 +100,19 @@ def create_dev_token(email: str, db: Session = Depends(get_db)):
 
 
 @app.get("/health")
-def health():
+def health(db: Session = Depends(get_db)):
+    try:
+        db.execute(text("SELECT 1"))
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Database unavailable",
+        ) from exc
+
     return {
         "status": "ok",
         "service": "agency-os-api",
+        "database": "ok",
     }
 
 
@@ -506,7 +515,7 @@ def decide_approval(
     p: Principal = Depends(get_principal),
 ):
     role = require_membership(org_id, p, db)
-    require_role(role, {Role.owner, Role.admin, Role.reviewer})
+    require_role(role, {Role.owner})
 
     if body.decision == ApprovalStatus.pending:
         raise HTTPException(
