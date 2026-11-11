@@ -33,6 +33,13 @@ from app.worker_service import (
     start_execution,
 )
 
+import time
+from threading import Event
+
+from app.integrations.runtime import ExecutionResult
+from app.worker import processor as processor_module
+from app.worker.processor import LeaseHeartbeat, process_one_execution, HeartbeatRenewalError
+
 
 @pytest.fixture
 def worker_context(tmp_path):
@@ -1007,3 +1014,498 @@ def test_recovery_respects_limit(worker_context):
 
     assert abandoned_count == 1
     assert running_count == 1
+
+
+def mock_worker_context(ctx):
+    """Create a valid execution, then route it to the local mock runtime."""
+    execution = create_worker_execution(ctx)
+
+    # Keep execution creation subject to the real runtime policy.
+    execution.runtime = "mock"
+    ctx["db"].commit()
+
+    session_factory = sessionmaker(
+        bind=ctx["db"].get_bind(),
+        autoflush=False,
+        autocommit=False,
+    )
+
+    return execution, session_factory
+
+
+def test_processor_completes_mock_execution(worker_context):
+    ctx = worker_context
+    execution, session_factory = mock_worker_context(ctx)
+
+    processed_id = process_one_execution(
+        worker_id="processor-test-1",
+        session_factory=session_factory,
+    )
+
+    assert processed_id == execution.id
+
+    ctx["db"].expire_all()
+    saved_execution = ctx["db"].get(Execution, execution.id)
+
+    assert saved_execution.status == ExecutionStatus.succeeded
+    assert saved_execution.result["provider"] == "mock"
+    assert saved_execution.result["status"] == "succeeded"
+
+    attempt = (
+        ctx["db"].query(ExecutionAttempt)
+        .filter_by(execution_id=execution.id)
+        .one()
+    )
+    assert attempt.status == ExecutionAttemptStatus.succeeded
+    assert attempt.lease_expires_at is None
+
+
+def test_processor_rejects_unsupported_runtime(worker_context):
+    ctx = worker_context
+    execution = create_worker_execution(ctx)
+    ctx["db"].commit()
+
+    session_factory = sessionmaker(
+        bind=ctx["db"].get_bind(),
+        autoflush=False,
+        autocommit=False,
+    )
+
+    processed_id = process_one_execution(
+        worker_id="processor-test-2",
+        session_factory=session_factory,
+    )
+
+    assert processed_id == execution.id
+
+    ctx["db"].expire_all()
+    saved_execution = ctx["db"].get(Execution, execution.id)
+
+    assert saved_execution.status == ExecutionStatus.failed
+    assert saved_execution.error_code == "RUNTIME_NOT_CONFIGURED"
+
+    attempt = (
+        ctx["db"].query(ExecutionAttempt)
+        .filter_by(execution_id=execution.id)
+        .one()
+    )
+    assert attempt.status == ExecutionAttemptStatus.failed
+
+
+def test_processor_sanitizes_runtime_failure(worker_context, monkeypatch):
+    ctx = worker_context
+    execution, session_factory = mock_worker_context(ctx)
+
+    class BrokenRuntime:
+        def start(self, request):
+            raise RuntimeError("provider token=must-not-be-persisted")
+
+    monkeypatch.setattr(
+        "app.worker.processor.get_runtime",
+        lambda runtime_name: BrokenRuntime(),
+    )
+
+    processed_id = process_one_execution(
+        worker_id="processor-test-3",
+        session_factory=session_factory,
+    )
+
+    assert processed_id == execution.id
+
+    ctx["db"].expire_all()
+    saved_execution = ctx["db"].get(Execution, execution.id)
+
+    assert saved_execution.status == ExecutionStatus.retry_wait
+    assert saved_execution.error_code == "RUNTIME_ERROR"
+    assert saved_execution.error_message == (
+        "The runtime encountered an execution error."
+    )
+    assert "must-not-be-persisted" not in saved_execution.error_message
+
+    attempt = (
+        ctx["db"].query(ExecutionAttempt)
+        .filter_by(execution_id=execution.id)
+        .one()
+    )
+    assert attempt.status == ExecutionAttemptStatus.failed
+
+
+def test_processor_returns_none_when_queue_is_empty(worker_context):
+    ctx = worker_context
+
+    session_factory = sessionmaker(
+        bind=ctx["db"].get_bind(),
+        autoflush=False,
+        autocommit=False,
+    )
+
+    result = process_one_execution(
+        worker_id="processor-test-4",
+        session_factory=session_factory,
+    )
+
+    assert result is None
+
+    assert (
+        ctx["db"].query(ExecutionAttempt).count()
+        == 0
+    )
+
+def test_lease_heartbeat_renews_active_attempt(worker_context):
+    ctx = worker_context
+    execution = create_worker_execution(ctx)
+    ctx["db"].commit()
+
+    session_factory = sessionmaker(
+        bind=ctx["db"].get_bind(),
+        autoflush=False,
+        autocommit=False,
+    )
+
+    with session_factory() as db:
+        claimed = claim_next_execution(
+            db,
+            worker_id="heartbeat-test",
+            lease_seconds=15,
+        )
+        assert claimed is not None
+        _, attempt = claimed
+        execution_id = execution.id
+        attempt_id = attempt.id
+        db.commit()
+
+    with session_factory() as db:
+        start_execution(
+            db,
+            execution_id=execution_id,
+            attempt_id=attempt_id,
+            worker_id="heartbeat-test",
+            lease_seconds=15,
+        )
+        db.commit()
+
+    with session_factory() as db:
+        original_attempt = db.get(ExecutionAttempt, attempt_id)
+        original_lease = original_attempt.lease_expires_at
+
+    heartbeat = LeaseHeartbeat(
+        session_factory=session_factory,
+        execution_id=execution_id,
+        attempt_id=attempt_id,
+        worker_id="heartbeat-test",
+        lease_seconds=15,
+        interval_seconds=0.02,
+    )
+
+    heartbeat.start()
+    time.sleep(0.10)
+    heartbeat.stop()
+    heartbeat.assert_healthy()
+
+    with session_factory() as db:
+        renewed_attempt = db.get(ExecutionAttempt, attempt_id)
+
+        assert renewed_attempt.lease_expires_at > original_lease
+
+@pytest.mark.parametrize("runtime_raises", [False, True])
+def test_processor_does_not_persist_after_heartbeat_failure(
+    worker_context,
+    monkeypatch,
+    runtime_raises,
+):
+    ctx = worker_context
+    execution, session_factory = mock_worker_context(ctx)
+
+    heartbeat_failed = Event()
+
+    def failing_heartbeat(*args, **kwargs):
+        heartbeat_failed.set()
+        raise LeaseExpired("Simulated heartbeat failure")
+
+    monkeypatch.setattr(
+        processor_module,
+        "heartbeat_execution",
+        failing_heartbeat,
+    )
+
+    class WaitingRuntime:
+        def start(self, request):
+            assert heartbeat_failed.wait(timeout=2)
+
+            if runtime_raises:
+                raise RuntimeError("Simulated runtime failure")
+
+            return ExecutionResult(
+                provider="mock",
+                external_run_id="mock-heartbeat-test",
+                status="succeeded",
+                detail="Test result",
+            )
+
+    monkeypatch.setattr(
+        processor_module,
+        "get_runtime",
+        lambda runtime_name: WaitingRuntime(),
+    )
+
+    with pytest.raises(LeaseExpired):
+        process_one_execution(
+            worker_id="heartbeat-failure-test",
+            session_factory=session_factory,
+            heartbeat_interval_seconds=0.01,
+        )
+
+    ctx["db"].expire_all()
+    saved_execution = ctx["db"].get(Execution, execution.id)
+
+    assert saved_execution.status == ExecutionStatus.running
+    assert saved_execution.result is None
+    assert saved_execution.error_code is None
+
+    attempt = (
+        ctx["db"].query(ExecutionAttempt)
+        .filter_by(execution_id=execution.id)
+        .one()
+    )
+
+    assert attempt.status == ExecutionAttemptStatus.running
+
+@pytest.mark.parametrize(
+    "status",
+    ["failed", "cancelled", "not_configured"],
+)
+def test_processor_classifies_unsuccessful_runtime_status(
+    worker_context,
+    monkeypatch,
+    status,
+):
+    ctx = worker_context
+    execution, session_factory = mock_worker_context(ctx)
+
+    class UnsuccessfulRuntime:
+        def start(self, request):
+            return ExecutionResult(
+                provider="mock",
+                external_run_id="mock-unsuccessful",
+                status=status,
+                detail="Runtime did not succeed.",
+            )
+
+    monkeypatch.setattr(
+        processor_module,
+        "get_runtime",
+        lambda runtime_name: UnsuccessfulRuntime(),
+    )
+
+    processed_id = process_one_execution(
+        worker_id="processor-unsuccessful-test",
+        session_factory=session_factory,
+    )
+
+    assert processed_id == execution.id
+
+    ctx["db"].expire_all()
+    saved = ctx["db"].get(Execution, execution.id)
+
+    assert saved.status == ExecutionStatus.retry_wait
+    assert saved.error_code == "RUNTIME_UNSUCCESSFUL"
+
+
+def test_processor_rejects_invalid_runtime_result(
+    worker_context,
+    monkeypatch,
+):
+    ctx = worker_context
+    execution, session_factory = mock_worker_context(ctx)
+
+    class InvalidRuntime:
+        def start(self, request):
+            return ExecutionResult(
+                provider="",
+                external_run_id=None,
+                status="succeeded",
+                detail="Invalid provider.",
+            )
+
+    monkeypatch.setattr(
+        processor_module,
+        "get_runtime",
+        lambda runtime_name: InvalidRuntime(),
+    )
+
+    processed_id = process_one_execution(
+        worker_id="processor-invalid-result-test",
+        session_factory=session_factory,
+    )
+
+    assert processed_id == execution.id
+
+    ctx["db"].expire_all()
+    saved = ctx["db"].get(Execution, execution.id)
+
+    assert saved.status == ExecutionStatus.retry_wait
+    assert saved.error_code == "RUNTIME_ERROR"
+
+def test_processor_does_not_persist_after_heartbeat_infrastructure_failure(
+    worker_context,
+    monkeypatch,
+):
+    ctx = worker_context
+    execution, session_factory = mock_worker_context(ctx)
+
+    heartbeat_failed = Event()
+
+    def failing_heartbeat(*args, **kwargs):
+        heartbeat_failed.set()
+        raise RuntimeError("Database connection unavailable")
+
+    monkeypatch.setattr(
+        processor_module,
+        "heartbeat_execution",
+        failing_heartbeat,
+    )
+
+    class WaitingRuntime:
+        def start(self, request):
+            assert heartbeat_failed.wait(timeout=2)
+            return ExecutionResult(
+                provider="mock",
+                external_run_id="mock-infrastructure-failure",
+                status="succeeded",
+                detail="Test result",
+            )
+
+    monkeypatch.setattr(
+        processor_module,
+        "get_runtime",
+        lambda runtime_name: WaitingRuntime(),
+    )
+
+    with pytest.raises(HeartbeatRenewalError):
+        process_one_execution(
+            worker_id="heartbeat-infrastructure-test",
+            session_factory=session_factory,
+            heartbeat_interval_seconds=0.01,
+        )
+
+    ctx["db"].expire_all()
+    saved = ctx["db"].get(Execution, execution.id)
+
+    assert saved.status == ExecutionStatus.running
+    assert saved.result is None
+    assert saved.error_code is None
+
+    attempt = (
+        ctx["db"].query(ExecutionAttempt)
+        .filter_by(execution_id=execution.id)
+        .one()
+    )
+    assert attempt.status == ExecutionAttemptStatus.running
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        ExecutionResult(
+            provider="p" * 81,
+            external_run_id=None,
+            status="succeeded",
+        ),
+        ExecutionResult(
+            provider="mock",
+            external_run_id="r" * 201,
+            status="succeeded",
+        ),
+        ExecutionResult(
+            provider="mock",
+            external_run_id=None,
+            status="succeeded",
+            detail="d" * 1001,
+        ),
+        ExecutionResult(
+            provider="",
+            external_run_id=None,
+            status="succeeded",
+        ),
+        ExecutionResult(
+            provider="mock",
+            external_run_id="",
+            status="succeeded",
+        ),
+    ],
+)
+def test_runtime_result_rejects_invalid_or_oversized_fields(result):
+    with pytest.raises(ValueError):
+        processor_module._serialize_result(result)
+
+
+def test_runtime_result_rejects_non_string_detail():
+    result = ExecutionResult(
+        provider="mock",
+        external_run_id=None,
+        status="succeeded",
+        detail=None,
+    )
+
+    with pytest.raises(ValueError):
+        processor_module._serialize_result(result)
+
+
+def test_runtime_result_preserves_valid_unicode():
+    result = ExecutionResult(
+        provider="mock",
+        external_run_id="run-123",
+        status="succeeded",
+        detail="Synthetic test output — café.",
+    )
+
+    payload = processor_module._serialize_result(result)
+
+    assert payload["detail"] == "Synthetic test output — café."
+
+def test_heartbeat_stop_raises_when_thread_does_not_stop(
+    monkeypatch,
+    worker_context,
+):
+    from app.worker.processor import HeartbeatShutdownError
+
+    ctx = worker_context
+
+    heartbeat = LeaseHeartbeat(
+        session_factory=lambda: ctx["db"],
+        execution_id="execution-test",
+        attempt_id="attempt-test",
+        worker_id="shutdown-test",
+        lease_seconds=15,
+        interval_seconds=1,
+    )
+
+    class StuckThread:
+        def join(self, timeout=None):
+            self.timeout = timeout
+
+        def is_alive(self):
+            return True
+
+    stuck_thread = StuckThread()
+    heartbeat._thread = stuck_thread
+
+    monkeypatch.setattr(
+        "app.worker.processor.settings.worker_heartbeat_shutdown_timeout_seconds",
+        0.01,
+    )
+
+    with pytest.raises(HeartbeatShutdownError):
+        heartbeat.stop()
+
+    assert stuck_thread.timeout == 0.01
+
+def test_runtime_result_rejects_oversized_utf8_payload():
+    result = ExecutionResult(
+        provider="mock",
+        external_run_id="run-123",
+        status="succeeded",
+        detail="😀" * 1000,
+    )
+
+    with pytest.raises(ValueError, match="permitted size"):
+        processor_module._serialize_result(result)
