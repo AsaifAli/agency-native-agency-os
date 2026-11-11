@@ -93,3 +93,229 @@ def claim_next_execution(
     )
 
     return execution, attempt
+
+
+class ExecutionNotFound(WorkerServiceError):
+    pass
+
+
+class AttemptNotFound(WorkerServiceError):
+    pass
+
+
+class WorkerOwnershipError(WorkerServiceError):
+    pass
+
+
+class InvalidExecutionState(WorkerServiceError):
+    pass
+
+
+class LeaseExpired(WorkerServiceError):
+    pass
+
+
+def _validate_lease_seconds(lease_seconds: int) -> None:
+    if not 15 <= lease_seconds <= 3600:
+        raise ValueError("lease_seconds must be between 15 and 3600")
+
+
+def _as_utc(value: datetime) -> datetime:
+    """Normalize database datetimes, including SQLite naive values."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _get_owned_execution_attempt(
+    db: Session,
+    *,
+    execution_id: str,
+    attempt_id: str,
+    worker_id: str,
+) -> tuple[Execution, ExecutionAttempt]:
+    if not worker_id or len(worker_id) > 160:
+        raise ValueError("worker_id must contain 1-160 characters")
+
+    execution = (
+        db.query(Execution)
+        .filter(Execution.id == execution_id)
+        .with_for_update()
+        .one_or_none()
+    )
+
+    if execution is None:
+        raise ExecutionNotFound("Execution not found")
+
+    attempt = (
+        db.query(ExecutionAttempt)
+        .filter(
+            ExecutionAttempt.id == attempt_id,
+            ExecutionAttempt.execution_id == execution_id,
+        )
+        .with_for_update()
+        .one_or_none()
+    )
+
+    if attempt is None:
+        raise AttemptNotFound("Attempt not found for this execution")
+
+    if attempt.worker_id != worker_id:
+        raise WorkerOwnershipError("Attempt belongs to another worker")
+
+    if attempt.lease_expires_at is None:
+        raise InvalidExecutionState("Attempt has no active lease")
+
+    if _as_utc(attempt.lease_expires_at) <= datetime.now(timezone.utc):
+        raise LeaseExpired("Worker lease has expired")
+
+    return execution, attempt
+
+
+def start_execution(
+    db: Session,
+    *,
+    execution_id: str,
+    attempt_id: str,
+    worker_id: str,
+    lease_seconds: int = 60,
+) -> tuple[Execution, ExecutionAttempt]:
+    """Transition a valid claimed execution and attempt to running."""
+    _validate_lease_seconds(lease_seconds)
+
+    execution, attempt = _get_owned_execution_attempt(
+        db,
+        execution_id=execution_id,
+        attempt_id=attempt_id,
+        worker_id=worker_id,
+    )
+
+    if execution.status != ExecutionStatus.claimed:
+        raise InvalidExecutionState("Execution is not claimed")
+
+    if attempt.status != ExecutionAttemptStatus.claimed:
+        raise InvalidExecutionState("Attempt is not claimed")
+
+    now = datetime.now(timezone.utc)
+
+    execution.status = ExecutionStatus.running
+    execution.started_at = now
+
+    attempt.status = ExecutionAttemptStatus.running
+    attempt.started_at = now
+    attempt.heartbeat_at = now
+    attempt.lease_expires_at = now + timedelta(seconds=lease_seconds)
+
+    record_event(
+        db,
+        execution.org_id,
+        None,
+        "execution.started",
+        "execution",
+        execution.id,
+        execution.workspace_id,
+        {
+            "attempt_id": attempt.id,
+            "attempt_number": attempt.attempt_number,
+            "worker_id": worker_id,
+        },
+    )
+
+    return execution, attempt
+
+
+def heartbeat_execution(
+    db: Session,
+    *,
+    execution_id: str,
+    attempt_id: str,
+    worker_id: str,
+    lease_seconds: int = 60,
+) -> tuple[Execution, ExecutionAttempt]:
+    """Renew the lease of an active claimed or running attempt."""
+    _validate_lease_seconds(lease_seconds)
+
+    execution, attempt = _get_owned_execution_attempt(
+        db,
+        execution_id=execution_id,
+        attempt_id=attempt_id,
+        worker_id=worker_id,
+    )
+
+    if execution.status not in (
+        ExecutionStatus.claimed,
+        ExecutionStatus.running,
+    ):
+        raise InvalidExecutionState("Execution is not active")
+
+    if attempt.status not in (
+        ExecutionAttemptStatus.claimed,
+        ExecutionAttemptStatus.running,
+    ):
+        raise InvalidExecutionState("Attempt is not active")
+
+    now = datetime.now(timezone.utc)
+
+    attempt.heartbeat_at = now
+    attempt.lease_expires_at = now + timedelta(seconds=lease_seconds)
+
+    return execution, attempt
+
+
+def complete_execution(
+    db: Session,
+    *,
+    execution_id: str,
+    attempt_id: str,
+    worker_id: str,
+    result: dict,
+) -> tuple[Execution, ExecutionAttempt]:
+    """Persist a successful result and complete the execution."""
+    if not isinstance(result, dict):
+        raise ValueError("result must be a dictionary")
+
+    execution, attempt = _get_owned_execution_attempt(
+        db,
+        execution_id=execution_id,
+        attempt_id=attempt_id,
+        worker_id=worker_id,
+    )
+
+    if execution.status != ExecutionStatus.running:
+        raise InvalidExecutionState("Execution is not running")
+
+    if attempt.status != ExecutionAttemptStatus.running:
+        raise InvalidExecutionState("Attempt is not running")
+
+    now = datetime.now(timezone.utc)
+
+    execution.status = ExecutionStatus.succeeded
+    execution.result = result
+    execution.finished_at = now
+    execution.error_code = None
+    execution.error_message = None
+
+    attempt.status = ExecutionAttemptStatus.succeeded
+    attempt.result = result
+    attempt.finished_at = now
+    attempt.lease_expires_at = None
+    attempt.heartbeat_at = now
+    attempt.error_code = None
+    attempt.error_message = None
+
+    record_event(
+        db,
+        execution.org_id,
+        None,
+        "execution.succeeded",
+        "execution",
+        execution.id,
+        execution.workspace_id,
+        {
+            "attempt_id": attempt.id,
+            "attempt_number": attempt.attempt_number,
+            "worker_id": worker_id,
+        },
+    )
+
+    return execution, attempt

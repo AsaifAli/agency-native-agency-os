@@ -1,6 +1,6 @@
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine
@@ -21,7 +21,15 @@ from app.models import (
     User,
     Workspace,
 )
-from app.worker_service import claim_next_execution
+from app.worker_service import (
+    LeaseExpired,
+    InvalidExecutionState,
+    WorkerOwnershipError,
+    claim_next_execution,
+    complete_execution,
+    heartbeat_execution,
+    start_execution,
+)
 
 
 
@@ -305,4 +313,219 @@ def test_claim_rejects_invalid_worker_parameters(
             worker_context["db"],
             worker_id=worker_id,
             lease_seconds=lease_seconds,
+        )
+
+def claim_for_lifecycle_test(ctx, worker_id="worker-lifecycle-1"):
+    execution = create_worker_execution(ctx)
+    ctx["db"].commit()
+
+    claimed = claim_next_execution(
+        ctx["db"],
+        worker_id=worker_id,
+        lease_seconds=60,
+    )
+    assert claimed is not None
+
+    ctx["db"].commit()
+    return claimed
+
+
+def test_start_execution_transitions_claimed_to_running(worker_context):
+    ctx = worker_context
+    db = ctx["db"]
+
+    execution, attempt = claim_for_lifecycle_test(ctx)
+
+    started_execution, started_attempt = start_execution(
+        db,
+        execution_id=execution.id,
+        attempt_id=attempt.id,
+        worker_id="worker-lifecycle-1",
+        lease_seconds=120,
+    )
+
+    assert started_execution.status == ExecutionStatus.running
+    assert started_execution.started_at is not None
+    assert started_attempt.status == ExecutionAttemptStatus.running
+    assert started_attempt.started_at is not None
+    assert started_attempt.heartbeat_at is not None
+    assert started_attempt.lease_expires_at is not None
+
+    db.commit()
+
+    event = db.query(AuditEvent).filter_by(
+        resource_id=execution.id,
+        event_type="execution.started",
+    ).one()
+
+    assert event.payload["attempt_id"] == attempt.id
+    assert event.payload["worker_id"] == "worker-lifecycle-1"
+
+
+def test_heartbeat_execution_renews_active_lease(worker_context):
+    ctx = worker_context
+    db = ctx["db"]
+
+    execution, attempt = claim_for_lifecycle_test(ctx)
+
+    start_execution(
+        db,
+        execution_id=execution.id,
+        attempt_id=attempt.id,
+        worker_id="worker-lifecycle-1",
+    )
+    db.commit()
+
+    old_lease = attempt.lease_expires_at
+
+    _, renewed_attempt = heartbeat_execution(
+        db,
+        execution_id=execution.id,
+        attempt_id=attempt.id,
+        worker_id="worker-lifecycle-1",
+        lease_seconds=180,
+    )
+
+    assert renewed_attempt.heartbeat_at is not None
+    assert renewed_attempt.lease_expires_at is not None
+
+    old_lease_utc = (
+        old_lease.replace(tzinfo=timezone.utc)
+        if old_lease.tzinfo is None
+        else old_lease.astimezone(timezone.utc)
+    )
+    renewed_lease_utc = (
+        renewed_attempt.lease_expires_at.replace(tzinfo=timezone.utc)
+        if renewed_attempt.lease_expires_at.tzinfo is None
+        else renewed_attempt.lease_expires_at.astimezone(timezone.utc)
+    )
+
+    assert renewed_lease_utc > old_lease_utc
+
+    db.commit()
+
+
+def test_complete_execution_persists_result_and_audit_event(worker_context):
+    ctx = worker_context
+    db = ctx["db"]
+
+    execution, attempt = claim_for_lifecycle_test(ctx)
+
+    start_execution(
+        db,
+        execution_id=execution.id,
+        attempt_id=attempt.id,
+        worker_id="worker-lifecycle-1",
+    )
+    db.commit()
+
+    result = {
+        "status": "completed",
+        "summary": "Synthetic test result",
+    }
+
+    completed_execution, completed_attempt = complete_execution(
+        db,
+        execution_id=execution.id,
+        attempt_id=attempt.id,
+        worker_id="worker-lifecycle-1",
+        result=result,
+    )
+
+    assert completed_execution.status == ExecutionStatus.succeeded
+    assert completed_execution.result == result
+    assert completed_execution.finished_at is not None
+
+    assert completed_attempt.status == ExecutionAttemptStatus.succeeded
+    assert completed_attempt.result == result
+    assert completed_attempt.finished_at is not None
+    assert completed_attempt.lease_expires_at is None
+
+    db.commit()
+
+    event = db.query(AuditEvent).filter_by(
+        resource_id=execution.id,
+        event_type="execution.succeeded",
+    ).one()
+
+    assert event.payload["attempt_id"] == attempt.id
+
+
+def test_worker_cannot_start_another_workers_attempt(worker_context):
+    ctx = worker_context
+    execution, attempt = claim_for_lifecycle_test(ctx)
+
+    with pytest.raises(WorkerOwnershipError):
+        start_execution(
+            ctx["db"],
+            execution_id=execution.id,
+            attempt_id=attempt.id,
+            worker_id="different-worker",
+        )
+
+
+def test_worker_cannot_heartbeat_expired_lease(worker_context):
+    ctx = worker_context
+    db = ctx["db"]
+
+    execution, attempt = claim_for_lifecycle_test(ctx)
+
+    attempt.lease_expires_at = datetime.now(timezone.utc) - timedelta(
+        seconds=30
+    )
+    db.commit()
+
+    with pytest.raises(LeaseExpired):
+        heartbeat_execution(
+            db,
+            execution_id=execution.id,
+            attempt_id=attempt.id,
+            worker_id="worker-lifecycle-1",
+        )
+
+
+def test_start_execution_rejects_already_running_execution(worker_context):
+    ctx = worker_context
+    db = ctx["db"]
+
+    execution, attempt = claim_for_lifecycle_test(ctx)
+
+    start_execution(
+        db,
+        execution_id=execution.id,
+        attempt_id=attempt.id,
+        worker_id="worker-lifecycle-1",
+    )
+    db.commit()
+
+    with pytest.raises(InvalidExecutionState):
+        start_execution(
+            db,
+            execution_id=execution.id,
+            attempt_id=attempt.id,
+            worker_id="worker-lifecycle-1",
+        )
+
+
+def test_complete_execution_rejects_non_dictionary_result(worker_context):
+    ctx = worker_context
+    db = ctx["db"]
+
+    execution, attempt = claim_for_lifecycle_test(ctx)
+
+    start_execution(
+        db,
+        execution_id=execution.id,
+        attempt_id=attempt.id,
+        worker_id="worker-lifecycle-1",
+    )
+    db.commit()
+
+    with pytest.raises(ValueError, match="result must be a dictionary"):
+        complete_execution(
+            db,
+            execution_id=execution.id,
+            attempt_id=attempt.id,
+            worker_id="worker-lifecycle-1",
+            result=["not", "a", "dictionary"],
         )
