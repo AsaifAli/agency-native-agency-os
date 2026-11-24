@@ -9,6 +9,7 @@ from app.auth import get_principal, has_founder_authority, require_membership, r
 from app.db import get_db
 from app.models import Role
 from app.audit import record_event
+from app.telephony.models import OutboxEvent
 from app.domain_models import Client, Contact, ContactActivity, Lead, LeadResearchRecord, OutreachDraft, Opportunity, Project, Milestone
 from app.domain_schemas import (
     ClientCreate, ClientOut, ContactCreate, ContactOut, ContactActivityCreate, ContactActivityOut, LeadCreate, LeadOut, LeadResearchCreate, LeadResearchOut, OutreachDraftCreate, OutreachDraftReview, OutreachDraftOut,
@@ -294,6 +295,13 @@ def create_lead_research(
            body.workspace_id, {"lead_id": lead.id, "fit_score": item.fit_score,
                                "confidence_score": item.confidence_score,
                                "source_count": len(references)})
+    db.add(OutboxEvent(
+        org_id=org_id, workspace_id=body.workspace_id,
+        event_type="revenue.lead_research_recorded", schema_version=1,
+        aggregate_type="lead_research", aggregate_id=item.id,
+        idempotency_key="lead-research-recorded:" + item.id,
+        payload={"lead_id": lead.id, "fit_score": item.fit_score},
+    ))
     db.commit()
     db.refresh(item)
     return item
@@ -357,6 +365,13 @@ def create_outreach_draft(
     _event(db, org_id, p.user.id, "outreach.draft_created", "outreach_draft", item.id,
            body.workspace_id, {"lead_id": lead.id, "channel": item.channel,
                                "source_research_count": len(item.source_research_ids)})
+    db.add(OutboxEvent(
+        org_id=org_id, workspace_id=body.workspace_id,
+        event_type="revenue.outreach_draft_created", schema_version=1,
+        aggregate_type="outreach_draft", aggregate_id=item.id,
+        idempotency_key="outreach-draft-created:" + item.id,
+        payload={"lead_id": lead.id, "channel": item.channel},
+    ))
     db.commit()
     db.refresh(item)
     return item
@@ -379,6 +394,13 @@ def review_outreach_draft(
     item.review_note = body.note
     _event(db, org_id, p.user.id, "outreach.draft_reviewed", "outreach_draft", item.id,
            item.workspace_id, {"decision": item.status})
+    db.add(OutboxEvent(
+        org_id=org_id, workspace_id=item.workspace_id,
+        event_type="revenue.outreach_draft_reviewed", schema_version=1,
+        aggregate_type="outreach_draft", aggregate_id=item.id,
+        idempotency_key="outreach-draft-reviewed:" + item.id,
+        payload={"decision": item.status},
+    ))
     db.commit()
     db.refresh(item)
     return item
