@@ -17,10 +17,6 @@ type Receipt = { id: string; invoice_id: string; external_reference: string; amo
 function money(amount: number, currency: string) {
   return new Intl.NumberFormat("en-IN", { style: "currency", currency }).format(amount / 100);
 }
-function localDateTime() {
-  const now = new Date();
-  return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0,16);
-}
 
 export default function InvoicesPage() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
