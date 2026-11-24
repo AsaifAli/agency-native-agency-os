@@ -1,5 +1,6 @@
 """Workspace-scoped Revenue and Delivery API routes."""
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -8,9 +9,9 @@ from app.auth import get_principal, has_founder_authority, require_membership, r
 from app.db import get_db
 from app.models import Role
 from app.audit import record_event
-from app.domain_models import Client, Contact, ContactActivity, Lead, Opportunity, Project, Milestone
+from app.domain_models import Client, Contact, ContactActivity, Lead, LeadResearchRecord, OutreachDraft, Opportunity, Project, Milestone
 from app.domain_schemas import (
-    ClientCreate, ClientOut, ContactCreate, ContactOut, ContactActivityCreate, ContactActivityOut, LeadCreate, LeadOut,
+    ClientCreate, ClientOut, ContactCreate, ContactOut, ContactActivityCreate, ContactActivityOut, LeadCreate, LeadOut, LeadResearchCreate, LeadResearchOut, OutreachDraftCreate, OutreachDraftReview, OutreachDraftOut,
     LeadStageUpdate, OpportunityCreate, OpportunityOut, OpportunityStageUpdate,
     ProjectCreate, ProjectOut, ProjectStatusUpdate, MilestoneCreate,
     MilestoneOut, MilestoneStatusUpdate,
@@ -243,6 +244,141 @@ def update_lead_stage(
     item.suppression_reason = body.suppression_reason if body.stage == "suppressed" else ""
     _event(db, org_id, p.user.id, "lead.stage_changed", "lead", item.id,
            item.workspace_id, {"stage": item.stage})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.get("/leads/{lead_id}/research", response_model=list[LeadResearchOut])
+def list_lead_research(
+    org_id: str, lead_id: str, workspace_id: str = Query(min_length=1),
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    require_membership(org_id, p, db)
+    _workspace(db, org_id, workspace_id)
+    _scoped_parent(db, Lead, object_id=lead_id, org_id=org_id,
+                   workspace_id=workspace_id, label="Lead")
+    return (db.query(LeadResearchRecord).filter_by(
+        org_id=org_id, workspace_id=workspace_id, lead_id=lead_id,
+    ).order_by(LeadResearchRecord.researched_at.desc()).limit(limit).all())
+
+
+@router.post("/lead-research", response_model=LeadResearchOut, status_code=201)
+def create_lead_research(
+    org_id: str, body: LeadResearchCreate,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    _write_access(org_id, p, db, body.workspace_id)
+    lead = _scoped_parent(db, Lead, object_id=body.lead_id, org_id=org_id,
+                          workspace_id=body.workspace_id, label="Lead")
+    if lead.stage == "suppressed":
+        raise HTTPException(409, "Suppressed leads cannot receive new research activity")
+    references = []
+    for source in body.source_references:
+        parsed = urlsplit(source.url)
+        if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+            raise HTTPException(422, "Research source references must be valid HTTPS URLs without embedded credentials")
+        references.append(source.model_dump(mode="json"))
+    item = LeadResearchRecord(
+        org_id=org_id, workspace_id=body.workspace_id, lead_id=lead.id,
+        summary=body.summary, fit_score=body.fit_score,
+        confidence_score=body.confidence_score, buying_signals=body.buying_signals,
+        risks=body.risks, source_references=references,
+        researched_at=body.researched_at or datetime.now(timezone.utc),
+        created_by=p.user.id,
+    )
+    db.add(item)
+    db.flush()
+    _event(db, org_id, p.user.id, "lead.research_recorded", "lead_research", item.id,
+           body.workspace_id, {"lead_id": lead.id, "fit_score": item.fit_score,
+                               "confidence_score": item.confidence_score,
+                               "source_count": len(references)})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.get("/outreach-drafts", response_model=list[OutreachDraftOut])
+def list_outreach_drafts(
+    workspace_id: str = Query(min_length=1), status: str | None = None,
+    limit: int = Query(default=100, ge=1, le=300),
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    require_membership(org_id, p, db)
+    _workspace(db, org_id, workspace_id)
+    query = db.query(OutreachDraft).filter_by(org_id=org_id, workspace_id=workspace_id)
+    if status:
+        query = query.filter_by(status=status)
+    return query.order_by(OutreachDraft.created_at.desc()).limit(limit).all()
+
+
+@router.post("/outreach-drafts", response_model=OutreachDraftOut, status_code=201)
+def create_outreach_draft(
+    org_id: str, body: OutreachDraftCreate,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    _write_access(org_id, p, db, body.workspace_id)
+    lead = _scoped_parent(db, Lead, object_id=body.lead_id, org_id=org_id,
+                          workspace_id=body.workspace_id, label="Lead")
+    if lead.stage in {"suppressed", "unqualified"}:
+        raise HTTPException(409, "Suppressed or unqualified leads cannot receive outreach drafts")
+    if body.contact_id:
+        contact = _scoped_parent(db, Contact, object_id=body.contact_id, org_id=org_id,
+                                 workspace_id=body.workspace_id, label="Contact")
+        if lead.contact_id != contact.id and (not lead.client_id or contact.client_id != lead.client_id):
+            raise HTTPException(422, "Outreach contact must be linked to the lead or its client")
+    elif body.channel == "email" and not lead.email:
+        raise HTTPException(422, "Email outreach drafts require a lead email or linked contact")
+    if body.contact_id and body.channel == "email":
+        contact = db.query(Contact).filter_by(
+            id=body.contact_id, org_id=org_id, workspace_id=body.workspace_id,
+        ).first()
+        if not contact.email:
+            raise HTTPException(422, "Selected contact has no email address")
+    if body.source_research_ids:
+        research = db.query(LeadResearchRecord.id).filter(
+            LeadResearchRecord.org_id == org_id,
+            LeadResearchRecord.workspace_id == body.workspace_id,
+            LeadResearchRecord.lead_id == lead.id,
+            LeadResearchRecord.id.in_(body.source_research_ids),
+        ).all()
+        if len(research) != len(set(body.source_research_ids)):
+            raise HTTPException(422, "Every cited research record must belong to this lead and workspace")
+    item = OutreachDraft(
+        org_id=org_id, workspace_id=body.workspace_id, lead_id=lead.id,
+        contact_id=body.contact_id, channel=body.channel, subject=body.subject.strip(),
+        body=body.body, personalization_basis=body.personalization_basis,
+        source_research_ids=list(dict.fromkeys(body.source_research_ids)),
+        created_by=p.user.id,
+    )
+    db.add(item)
+    db.flush()
+    _event(db, org_id, p.user.id, "outreach.draft_created", "outreach_draft", item.id,
+           body.workspace_id, {"lead_id": lead.id, "channel": item.channel,
+                               "source_research_count": len(item.source_research_ids)})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.post("/outreach-drafts/{draft_id}/review", response_model=OutreachDraftOut)
+def review_outreach_draft(
+    org_id: str, draft_id: str, body: OutreachDraftReview,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    item = db.query(OutreachDraft).filter_by(id=draft_id, org_id=org_id).with_for_update().first()
+    if item is None:
+        raise HTTPException(404, "Outreach draft not found")
+    require_founder_authority(db, org_id, p.user.id)
+    if item.status != "draft":
+        raise HTTPException(409, "Only an unreviewed draft can be reviewed")
+    item.status = "approved_draft" if body.decision == "approve_draft" else "rejected"
+    item.reviewed_by = p.user.id
+    item.reviewed_at = datetime.now(timezone.utc)
+    item.review_note = body.note
+    _event(db, org_id, p.user.id, "outreach.draft_reviewed", "outreach_draft", item.id,
+           item.workspace_id, {"decision": item.status})
     db.commit()
     db.refresh(item)
     return item
