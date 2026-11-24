@@ -295,6 +295,38 @@ class ScopeChangeRequest(Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+
+class RetainerServicePeriod(Base):
+    """Immutable commercial-period boundaries with founder-closed usage snapshots."""
+    __tablename__ = "retainer_service_periods"
+    __table_args__ = (
+        UniqueConstraint("org_id", "workspace_id", "contract_id", "period_number", name="uq_retainer_period_number"),
+        Index("ix_retainer_period_project_window", "org_id", "workspace_id", "project_id", "starts_at", "ends_at"),
+        CheckConstraint("period_number BETWEEN 1 AND 60", name="ck_retainer_period_number"),
+        CheckConstraint("included_hours >= 0 AND rollover_in_hours >= 0", name="ck_retainer_period_allowance"),
+        CheckConstraint("used_minutes >= 0 AND overage_minutes >= 0", name="ck_retainer_period_usage"),
+        CheckConstraint("status IN ('open','closed')", name="ck_retainer_period_status"),
+        CheckConstraint("ends_at > starts_at", name="ck_retainer_period_dates"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    contract_id: Mapped[str] = mapped_column(ForeignKey("contract_records.id", ondelete="RESTRICT"), nullable=False, index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True)
+    period_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    included_hours: Mapped[int] = mapped_column(Integer, nullable=False)
+    rollover_in_hours: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    used_minutes: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    overage_minutes: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="open", server_default="open", nullable=False)
+    closed_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
 class TimeEntry(Base):
     __tablename__ = "time_entries"
     __table_args__ = (
