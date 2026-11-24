@@ -402,15 +402,20 @@ def reject_proposal(
         id=body.approval_id, org_id=org_id, workspace_id=item.workspace_id,
         action_type="pricing.change", resource_id=item.id,
     ).with_for_update().first()
-    if approval is None or approval.status != ApprovalStatus.pending:
-        raise HTTPException(409, "Proposal approval is no longer pending")
-    approval.status = ApprovalStatus.rejected
-    approval.decided_by = p.user.id
-    approval.decision_note = body.note
-    approval.decided_at = datetime.now(timezone.utc)
+    if approval is None:
+        raise HTTPException(404, "Proposal approval not found")
+    if approval.status == ApprovalStatus.pending:
+        approval.status = ApprovalStatus.rejected
+        approval.decided_by = p.user.id
+        approval.decision_note = body.note
+        approval.decided_at = datetime.now(timezone.utc)
+    elif approval.status != ApprovalStatus.rejected or not approval.decided_by or not has_founder_authority(db, org_id, approval.decided_by):
+        raise HTTPException(409, "Proposal approval is no longer rejectable")
     item.status = "rejected"
     _event(db, org_id, p.user.id, "commercial.proposal_rejected", "proposal", item.id,
            item.workspace_id, {"approval_id": approval.id})
+    _outbox(db, org_id, item.workspace_id, "commercial.proposal_rejected", "proposal", item.id,
+            {"approval_id": approval.id})
     db.commit()
     db.refresh(item)
     return item
