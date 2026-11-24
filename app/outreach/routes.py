@@ -85,7 +85,7 @@ def _validate_message_sendability(db: Session, org_id: str, item: OutboundMessag
     if contact.email.lower().strip() != item.recipient.lower().strip():
         raise HTTPException(409, "Contact email changed; create a new draft to refresh the recipient snapshot")
     consent = _latest_consent(db, org_id, item.workspace_id, item.contact_id, "email")
-    if consent is None or consent.id != item.consent_id:
+    if consent is None or (item.consent_id is not None and consent.id != item.consent_id):
         raise HTTPException(403, "Current email consent evidence changed; create a new draft")
     if consent.status not in {"granted", "legitimate_interest_reviewed"}:
         raise HTTPException(403, "Email outreach blocked: current channel consent/basis is not eligible")
