@@ -289,7 +289,21 @@ def test_service_catalogue_draft_requires_founder_activation(client):
     )
     assert activated.status_code == 200, activated.text
     assert activated.json()["status"] == "active"
-    assert activated.json()["version"] == 2
+    assert activated.json()["version"] == 1
+
+    retired = client.patch(
+        f"/v1/orgs/{org}/operations/service-catalog/{offering_id}/status",
+        headers=headers(), json={"status": "retired"},
+    )
+    assert retired.status_code == 200, retired.text
+    revised = client.post(f"/v1/orgs/{org}/operations/service-catalog", headers=headers(), json={
+        "workspace_id": ws, "code": "workflow-build", "name": "Workflow Build v2",
+        "service_line": "AI Engineering", "description": "Revised workflow automation service offering.",
+        "pricing_model": "custom", "currency": "INR",
+    })
+    assert revised.status_code == 201, revised.text
+    assert revised.json()["version"] == 2
+    assert revised.json()["status"] == "draft"
 
 
 def test_time_and_cost_roll_up_to_project_financial_summary(client):
