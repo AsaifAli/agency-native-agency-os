@@ -21,6 +21,9 @@ from app.models import (
     Workspace,
 )
 from app.worker_service import claim_next_execution
+from datetime import datetime, timedelta, timezone
+from app.telephony.models import OutboxEvent
+from app.outbox_service import reconcile_outbox_events, claim_outbox_batch
 
 
 def test_postgres_workers_claim_different_executions(monkeypatch):
@@ -229,6 +232,253 @@ def test_postgres_workers_claim_different_executions(monkeypatch):
             except Exception:
                 cleanup.rollback()
                 raise
+            finally:
+                cleanup.close()
+
+        engine.dispose()
+
+def test_postgres_outbox_workers_claim_different_events(monkeypatch):
+    """PostgreSQL SKIP LOCKED prevents two dispatchers claiming one event."""
+    from app.telephony.models import OutboxEvent
+    from app.outbox_service import claim_outbox_batch
+
+    database_url = os.getenv("AGENCY_OS_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("Set AGENCY_OS_TEST_DATABASE_URL to run PostgreSQL outbox concurrency test")
+
+    parsed_url = make_url(database_url)
+    assert parsed_url.get_backend_name() == "postgresql"
+    assert parsed_url.database == "agency_os_worker_test", (
+        "Safety check: this test may only use agency_os_worker_test"
+    )
+
+    engine = create_engine(database_url, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    org_id = workspace_id = None
+    event_ids = []
+    suffix = uuid.uuid4().hex[:12]
+    try:
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT current_database()")).scalar_one() == "agency_os_worker_test"
+            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+
+        setup = Session()
+        try:
+            org = Organization(name=f"Outbox PG Test {suffix}")
+            setup.add(org)
+            setup.flush()
+            workspace = Workspace(id=f"outbox-pg-{suffix}", org_id=org.id, name="Outbox PG Test")
+            setup.add(workspace)
+            setup.flush()
+            org_id, workspace_id = org.id, workspace.id
+            for index in range(2):
+                event = OutboxEvent(
+                    org_id=org_id, workspace_id=workspace_id,
+                    event_type="test.postgres.claim", schema_version=1,
+                    aggregate_type="test", aggregate_id=f"aggregate-{index}-{suffix}",
+                    idempotency_key=f"outbox-pg-{suffix}-{index}", payload={"synthetic": True},
+                )
+                setup.add(event)
+                setup.flush()
+                event_ids.append(event.id)
+            setup.commit()
+        finally:
+            setup.close()
+
+        worker_a, worker_b = Session(), Session()
+        try:
+            worker_a.execute(text("SET LOCAL lock_timeout = '2s'"))
+            worker_b.execute(text("SET LOCAL lock_timeout = '2s'"))
+            claim_a = claim_outbox_batch(
+                worker_a, worker_id=f"outbox-a-{suffix}",
+                event_types={"test.postgres.claim"}, limit=1,
+            )
+            assert len(claim_a) == 1
+            claim_b = claim_outbox_batch(
+                worker_b, worker_id=f"outbox-b-{suffix}",
+                event_types={"test.postgres.claim"}, limit=1,
+            )
+            assert len(claim_b) == 1
+            assert claim_a[0].id != claim_b[0].id
+            assert {claim_a[0].id, claim_b[0].id} == set(event_ids)
+            worker_a.commit()
+            worker_b.commit()
+        finally:
+            worker_a.rollback()
+            worker_b.rollback()
+            worker_a.close()
+            worker_b.close()
+    finally:
+        if org_id:
+            cleanup = Session()
+            try:
+                cleanup.query(OutboxEvent).filter(OutboxEvent.id.in_(event_ids)).delete(synchronize_session=False)
+                cleanup.query(Workspace).filter(Workspace.id == workspace_id).delete(synchronize_session=False)
+                cleanup.query(Organization).filter(Organization.id == org_id).delete(synchronize_session=False)
+                cleanup.commit()
+            finally:
+                cleanup.close()
+        engine.dispose()
+
+
+def test_postgres_outbox_recovers_expired_lease_and_dead_letters_exhausted_event():
+    database_url = os.getenv("AGENCY_OS_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("Set AGENCY_OS_TEST_DATABASE_URL to run PostgreSQL recovery test")
+
+    parsed_url = make_url(database_url)
+    assert parsed_url.get_backend_name() == "postgresql"
+    assert parsed_url.database == "agency_os_worker_test", (
+        "Safety check: this test may only use agency_os_worker_test"
+    )
+
+    engine = create_engine(database_url, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    org_id = None
+    workspace_id = None
+    event_ids = []
+    suffix = uuid.uuid4().hex[:12]
+    event_type = f"test.postgres.recovery.{suffix}"
+
+    try:
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("SELECT current_database()")
+            ).scalar_one() == "agency_os_worker_test"
+
+            assert connection.execute(
+                text("SELECT version_num FROM alembic_version")
+            ).scalar_one()
+
+        setup = Session()
+        try:
+            org = Organization(name=f"Outbox Recovery Test {suffix}")
+            setup.add(org)
+            setup.flush()
+
+            workspace = Workspace(
+                id=f"outbox-recovery-{suffix}",
+                org_id=org.id,
+                name="Outbox Recovery Test",
+            )
+            setup.add(workspace)
+            setup.flush()
+
+            org_id = org.id
+            workspace_id = workspace.id
+            expired_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+
+            expired_event = OutboxEvent(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                event_type=event_type,
+                schema_version=1,
+                aggregate_type="test",
+                aggregate_id=f"expired-{suffix}",
+                idempotency_key=f"recovery-expired-{suffix}",
+                payload={"synthetic": True},
+                status="processing",
+                attempts=2,
+                max_attempts=8,
+                claimed_by=f"crashed-worker-{suffix}",
+                lease_expires_at=expired_at,
+            )
+
+            exhausted_event = OutboxEvent(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                event_type=event_type,
+                schema_version=1,
+                aggregate_type="test",
+                aggregate_id=f"exhausted-{suffix}",
+                idempotency_key=f"recovery-exhausted-{suffix}",
+                payload={"synthetic": True},
+                status="pending",
+                attempts=8,
+                max_attempts=8,
+            )
+
+            setup.add_all([expired_event, exhausted_event])
+            setup.flush()
+
+            event_ids.extend([expired_event.id, exhausted_event.id])
+            setup.commit()
+        finally:
+            setup.close()
+
+        recovery = Session()
+        try:
+            requeued, dead_lettered = reconcile_outbox_events(
+                recovery,
+                limit=10,
+            )
+            recovery.commit()
+
+            assert requeued == 1
+            assert dead_lettered == 1
+        finally:
+            recovery.close()
+
+        verification = Session()
+        try:
+            recovered = verification.query(OutboxEvent).filter(
+                OutboxEvent.id == event_ids[0]
+            ).one()
+
+            dead = verification.query(OutboxEvent).filter(
+                OutboxEvent.id == event_ids[1]
+            ).one()
+
+            assert recovered.status == "pending"
+            assert recovered.attempts == 2
+            assert recovered.claimed_by is None
+            assert recovered.lease_expires_at is None
+
+            assert dead.status == "dead_letter"
+            assert dead.attempts == dead.max_attempts
+            assert dead.claimed_by is None
+            assert dead.lease_expires_at is None
+        finally:
+            verification.close()
+
+        # Confirm that a recovered event can be claimed by a new worker.
+        claimant = Session()
+        try:
+            claimed = claim_outbox_batch(
+                claimant,
+                worker_id=f"recovery-worker-{suffix}",
+                event_types={event_type},
+                limit=10,
+            )
+
+            assert len(claimed) == 1
+            assert claimed[0].id == event_ids[0]
+            assert claimed[0].attempts == 3
+            assert claimed[0].idempotency_key == f"recovery-expired-{suffix}"
+
+            claimant.commit()
+        finally:
+            claimant.rollback()
+            claimant.close()
+
+    finally:
+        if org_id:
+            cleanup = Session()
+            try:
+                cleanup.query(OutboxEvent).filter(
+                    OutboxEvent.id.in_(event_ids)
+                ).delete(synchronize_session=False)
+
+                cleanup.query(Workspace).filter(
+                    Workspace.id == workspace_id
+                ).delete(synchronize_session=False)
+
+                cleanup.query(Organization).filter(
+                    Organization.id == org_id
+                ).delete(synchronize_session=False)
+
+                cleanup.commit()
             finally:
                 cleanup.close()
 

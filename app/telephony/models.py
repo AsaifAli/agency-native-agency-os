@@ -65,8 +65,21 @@ class OutboxEvent(Base):
     __tablename__ = "outbox_events"
     __table_args__ = (
         Index("ix_outbox_dispatch", "status", "available_at"),
+        Index(
+            "ix_outbox_lease_recovery",
+            "status",
+            "lease_expires_at",
+            "available_at",
+        ),
         UniqueConstraint("idempotency_key", name="uq_outbox_idempotency_key"),
-        CheckConstraint("status IN ('pending','processing','published','dead_letter')", name="ck_outbox_status"),
+        CheckConstraint(
+            "status IN ('pending','processing','published','dead_letter')",
+            name="ck_outbox_status",
+        ),
+        CheckConstraint(
+            "attempts >= 0 AND max_attempts >= 1",
+            name="ck_outbox_attempts",
+        ),
     )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
     org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), nullable=False, index=True)
@@ -79,5 +92,10 @@ class OutboxEvent(Base):
     payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending", server_default="pending")
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=8, server_default="8")
     available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    claimed_by: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)

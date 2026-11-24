@@ -86,6 +86,11 @@ def test_run_worker_runs_startup_maintenance_and_waits_when_idle(
         "recover_expired_execution_leases",
         recover,
     )
+    monkeypatch.setattr(
+        runner,
+        "reconcile_outbox_events",
+        Mock(return_value=(0, 0)),
+    )
 
     stop_event = StopAfterWait()
     processor = Mock(return_value=None)
@@ -110,7 +115,7 @@ def test_run_worker_runs_startup_maintenance_and_waits_when_idle(
         session_factory=session_factory,
     )
     assert stop_event.waited_for == [0.5]
-    assert len(sessions) == 2
+    assert len(sessions) == 3
     assert all(session.committed for session in sessions)
 
 
@@ -124,6 +129,11 @@ def test_run_worker_propagates_processor_failure(monkeypatch):
         runner,
         "recover_expired_execution_leases",
         Mock(return_value=0),
+    )
+    monkeypatch.setattr(
+        runner,
+        "reconcile_outbox_events",
+        Mock(return_value=(0, 0)),
     )
 
     stop_event = StopAfterWait()
@@ -150,3 +160,62 @@ def test_run_worker_rejects_invalid_worker_id():
             worker_id=" ",
             processor=Mock(),
         )
+
+
+def test_outbox_reconciliation_runs_without_registered_handlers(monkeypatch):
+    sessions = []
+    reconcile = Mock(return_value=(3, 2))
+    dispatch = Mock(return_value=(0, 0, 0))
+
+    def session_factory():
+        session = FakeSession()
+        sessions.append(session)
+        return session
+
+    monkeypatch.setattr(runner, "OUTBOX_HANDLERS", {})
+    monkeypatch.setattr(runner, "reconcile_outbox_events", reconcile)
+    monkeypatch.setattr(runner, "dispatch_outbox_batch", dispatch)
+
+    result = runner._run_outbox_maintenance(
+        session_factory,
+        worker_id="test-worker",
+        batch_size=25,
+    )
+
+    assert result == (0, 0, 2, 3)
+    assert len(sessions) == 1
+    assert sessions[0].committed
+    assert sessions[0].closed
+    reconcile.assert_called_once_with(sessions[0], limit=25)
+    dispatch.assert_not_called()
+
+
+def test_outbox_dispatch_runs_after_reconciliation_when_handlers_exist(
+    monkeypatch,
+):
+    sessions = []
+    handler = Mock()
+    handlers = {"test.event": handler}
+    reconcile = Mock(return_value=(1, 0))
+    dispatch = Mock(return_value=(4, 2, 1))
+
+    def session_factory():
+        session = FakeSession()
+        sessions.append(session)
+        return session
+
+    monkeypatch.setattr(runner, "OUTBOX_HANDLERS", handlers)
+    monkeypatch.setattr(runner, "reconcile_outbox_events", reconcile)
+    monkeypatch.setattr(runner, "dispatch_outbox_batch", dispatch)
+
+    result = runner._run_outbox_maintenance(
+        session_factory,
+        worker_id="test-worker",
+        batch_size=25,
+    )
+
+    assert result == (4, 2, 1, 1)
+    assert len(sessions) == 1
+    assert sessions[0].committed
+    dispatch.assert_called_once()
+    assert dispatch.call_args.kwargs["handlers"] is handlers

@@ -1,5 +1,6 @@
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import model_validator
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -30,5 +31,16 @@ class Settings(BaseSettings):
     worker_maintenance_batch_size: int = Field(
         default=100, ge=1, le=1000
     )
+    @model_validator(mode="after")
+    def validate_outbox_retry_settings(self):
+        if self.outbox_max_retry_seconds < self.outbox_base_retry_seconds:
+            raise ValueError(
+                "OUTBOX_MAX_RETRY_SECONDS must be greater than or equal "
+                "to OUTBOX_BASE_RETRY_SECONDS"
+            )
+        return self
+    outbox_lease_seconds: int = Field(default=120, ge=15, le=3600)
+    outbox_base_retry_seconds: int = Field(default=15, ge=1, le=3600)
+    outbox_max_retry_seconds: int = Field(default=3600, ge=1, le=86400)
 
 settings = Settings()
