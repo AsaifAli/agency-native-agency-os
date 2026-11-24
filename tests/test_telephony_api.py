@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime, timezone
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -30,7 +31,7 @@ def client():
     db.add(Membership(org_id=org.id, user_id=user.id, role=Role.owner)); db.flush()
     lead = Lead(org_id=org.id, workspace_id=ws.id, company_name="Acme", created_by=user.id)
     foreign_lead = Lead(org_id=other_org.id, workspace_id=other_ws.id, company_name="Foreign", created_by=user.id)
-    contact = Contact(org_id=org.id, workspace_id=ws.id, first_name="Consented", email="consented@example.test", phone="+919999999999", consent_status="granted", created_by=user.id)
+    contact = Contact(org_id=org.id, workspace_id=ws.id, first_name="Consented", email="consented@example.test", phone="+919999999999", consent_status="granted", phone_call_consent_status="granted", phone_call_consent_source="caller_requested_callback", phone_call_consent_recorded_at=datetime.now(timezone.utc), created_by=user.id)
     unconsented = Contact(org_id=org.id, workspace_id=ws.id, first_name="Unconsented", email="unconsented@example.test", phone="+918888888888", consent_status="unknown", created_by=user.id)
     db.add_all([lead, foreign_lead, contact, unconsented]); db.commit()
     app = FastAPI(); app.include_router(router)
