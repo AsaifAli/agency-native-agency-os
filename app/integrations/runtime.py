@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from typing import Callable
 
 from app.models import DataClass
-from app.policy import assert_managed_agents_eligible
 
 
 @dataclass
@@ -35,6 +34,10 @@ class RuntimeExecutionError(Exception):
     """The provider completed with an unsuccessful or unusable result."""
 
 
+class RuntimeNotConfiguredError(RuntimeExecutionError):
+    """The requested runtime or provider configuration is unavailable."""
+
+
 class RuntimeTransientError(RuntimeExecutionError):
     """A retryable provider/network failure."""
 
@@ -50,10 +53,7 @@ class AgentRuntime(ABC):
 
 class AgentSdkRuntime(AgentRuntime):
     def start(self, request: ExecutionRequest) -> ExecutionResult:
-        # Alternative route for workloads that cannot use Managed Agents.
         return ExecutionResult(
-            "claude_agent_sdk",
-            None,
-            "not_configured",
+            "claude_agent_sdk", None, "not_configured",
             "Self-managed runtime adapter is not configured.",
         )

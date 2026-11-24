@@ -5,11 +5,7 @@ import httpx
 import pytest
 
 from app.integrations.managed_agents import ManagedAgentsRuntime
-from app.integrations.runtime import (
-    ExecutionRequest,
-    RuntimeManualReviewRequired,
-    RuntimeTransientError,
-)
+from app.integrations.runtime import ExecutionRequest, RuntimeManualReviewRequired, RuntimeTransientError
 from app.models import DataClass
 
 
@@ -33,14 +29,10 @@ def config(**overrides):
 
 def request(**overrides):
     values = {
-        "org_id": "org-test",
-        "workspace_id": "ws-test",
-        "task_id": "task-test",
-        "agent_id": "agent-local",
-        "data_class": DataClass.synthetic,
-        "client_authorized": False,
-        "agent_name": "Research Analyst",
-        "agent_department": "Business Development",
+        "org_id": "org-test", "workspace_id": "ws-test",
+        "task_id": "task-test", "agent_id": "agent-local",
+        "data_class": DataClass.synthetic, "client_authorized": False,
+        "agent_name": "Research Analyst", "agent_department": "Business Development",
         "agent_instructions": "Research carefully.",
         "task_title": "Research target market",
         "task_description": "Prepare a synthetic test report.",
@@ -51,23 +43,21 @@ def request(**overrides):
     return ExecutionRequest(**values)
 
 
-def test_managed_agents_creates_bounded_toolless_session_and_persists_id():
-    seen = []
-    persisted = []
+def test_managed_agents_uses_precreated_agent_and_persists_session_id():
+    seen, persisted = [], []
 
     def handler(req):
         seen.append(req)
         if req.method == "POST" and req.url.path == "/v1/sessions":
             body = json.loads(req.content)
-            assert body["agent"]["tools"] == []
-            assert body["agent"]["mcp_servers"] == []
-            assert body["agent"]["skills"] == []
-            assert body["budget"]["max_list_cost"] == {
-                "amount": "250",
-                "currency": "USD",
-            }
-            assert body["initial_events"][0]["type"] == "user.message"
-            assert "Research target market" in body["initial_events"][0]["content"][0]["text"]
+            assert body["agent"] == "agent_test"
+            assert isinstance(body["agent"], str)
+            assert "tools" not in body and "mcp_servers" not in body and "skills" not in body
+            assert body["budget"]["max_list_cost"] == {"amount": "250", "currency": "USD"}
+            message = body["initial_events"][0]["content"][0]["text"]
+            assert "Research target market" in message
+            assert "Research Analyst" in message
+            assert "Research carefully." in message
             assert req.headers["authorization"] == "Bearer test-key"
             assert req.headers["anthropic-beta"] == "managed-agents-2026-04-01"
             return httpx.Response(200, json={"id": "sesn_test", "status": "running"})
@@ -82,14 +72,10 @@ def test_managed_agents_creates_bounded_toolless_session_and_persists_id():
 
     runtime = ManagedAgentsRuntime(
         config(),
-        client_factory=lambda: httpx.Client(
-            base_url="https://api.anthropic.com",
-            transport=httpx.MockTransport(handler),
-        ),
+        client_factory=lambda: httpx.Client(base_url="https://api.anthropic.com", transport=httpx.MockTransport(handler)),
         sleep=lambda _seconds: None,
     )
     result = runtime.start(request(persist_external_run_id=persisted.append))
-
     assert result.provider == "claude_managed_agents"
     assert result.external_run_id == "sesn_test"
     assert result.status == "succeeded"
@@ -114,39 +100,29 @@ def test_managed_agents_resumes_persisted_session_without_creating_another():
 
     runtime = ManagedAgentsRuntime(
         config(),
-        client_factory=lambda: httpx.Client(
-            base_url="https://api.anthropic.com",
-            transport=httpx.MockTransport(handler),
-        ),
+        client_factory=lambda: httpx.Client(base_url="https://api.anthropic.com", transport=httpx.MockTransport(handler)),
         sleep=lambda _seconds: None,
     )
     result = runtime.start(request(external_run_id="sesn_existing"))
     assert result.external_run_id == "sesn_existing"
     assert result.detail == "Recovered result."
-    assert calls == [
-        ("GET", "/v1/sessions/sesn_existing"),
-        ("GET", "/v1/sessions/sesn_existing/events"),
-    ]
+    assert calls == [("GET", "/v1/sessions/sesn_existing"), ("GET", "/v1/sessions/sesn_existing/events")]
 
 
 def test_managed_agents_never_auto_confirms_tool_actions():
     def handler(req):
         if req.method == "POST":
+            assert json.loads(req.content)["agent"] == "agent_test"
             return httpx.Response(200, json={"id": "sesn_review"})
         if req.url.path == "/v1/sessions/sesn_review":
             return httpx.Response(200, json={"id": "sesn_review", "status": "idle"})
         return httpx.Response(200, json={"data": [
-            {"type": "session.status_idle", "stop_reason": {
-                "type": "requires_action", "event_ids": ["evt_tool_1"]
-            }}
+            {"type": "session.status_idle", "stop_reason": {"type": "requires_action", "event_ids": ["evt_tool_1"]}}
         ]})
 
     runtime = ManagedAgentsRuntime(
         config(),
-        client_factory=lambda: httpx.Client(
-            base_url="https://api.anthropic.com",
-            transport=httpx.MockTransport(handler),
-        ),
+        client_factory=lambda: httpx.Client(base_url="https://api.anthropic.com", transport=httpx.MockTransport(handler)),
         sleep=lambda _seconds: None,
     )
     with pytest.raises(RuntimeManualReviewRequired):
@@ -154,14 +130,11 @@ def test_managed_agents_never_auto_confirms_tool_actions():
 
 
 def test_managed_agents_retries_transient_provider_errors():
-    def handler(_req):
-        return httpx.Response(503, json={"error": "unavailable"})
-
     runtime = ManagedAgentsRuntime(
         config(),
         client_factory=lambda: httpx.Client(
             base_url="https://api.anthropic.com",
-            transport=httpx.MockTransport(handler),
+            transport=httpx.MockTransport(lambda _req: httpx.Response(503, json={"error": "unavailable"})),
         ),
         sleep=lambda _seconds: None,
     )
@@ -171,7 +144,6 @@ def test_managed_agents_retries_transient_provider_errors():
 
 def test_managed_agents_rejects_confidential_data_before_network_call():
     called = []
-
     runtime = ManagedAgentsRuntime(
         config(),
         client_factory=lambda: httpx.Client(

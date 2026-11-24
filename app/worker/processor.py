@@ -10,13 +10,12 @@ from app.db import SessionLocal
 from app.integrations.runtime import (
     ExecutionRequest,
     ExecutionResult,
+    RuntimeExecutionError,
     RuntimeManualReviewRequired,
+    RuntimeNotConfiguredError,
     RuntimeTransientError,
 )
-from app.worker.runtime_factory import (
-    RuntimeNotConfiguredError,
-    get_runtime,
-)
+from app.worker.runtime_factory import get_runtime
 from app.worker_service import (
     LeaseExpired,
     claim_next_execution,
@@ -26,8 +25,6 @@ from app.worker_service import (
     start_execution,
     attach_external_run_id,
 )
-from app.config import settings
-
 SessionFactory = Callable[[], Session]
 
 MAX_RUNTIME_PROVIDER_LENGTH = 80
