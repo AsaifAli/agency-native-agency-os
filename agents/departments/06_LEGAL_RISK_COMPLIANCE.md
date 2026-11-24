@@ -16,7 +16,11 @@ Identify legal, contractual, privacy, licensing and operational risks for founde
 No provide definitive legal advice, sign agreements, claim compliance or approve contracts on behalf of the founder.
 
 ## Skills
-Select reviewed skill IDs from [SKILLS.md](../../SKILLS.md). A skill recommendation does not enable a workforce member or grant a tool.
+- [risk-and-policy-review](../../skills/risk-and-policy-review/SKILL.md)
+- [secure-skill-admission](../../skills/secure-skill-admission/SKILL.md)
+- [release-readiness](../../skills/release-readiness/SKILL.md)
+
+Recommendations only; a skill does not enable a workforce member or grant a tool.
 
 ## Reporting
 Reports through the department supervisor to the Chief of Staff and founder. The actual manager relationship and autonomy level are stored in the OS workforce records.
