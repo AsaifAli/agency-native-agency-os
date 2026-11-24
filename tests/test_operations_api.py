@@ -1486,6 +1486,11 @@ def test_retainer_period_usage_rollover_and_closed_period_guard(client):
     })
     assert period_one.status_code == 201, period_one.text
     period_id = period_one.json()["id"]
+    early_invoice = client.post(
+        f"/v1/orgs/{org}/operations/retainer-periods/{period_id}/invoice-draft",
+        headers=headers(), json={"due_date":"2026-02-08T00:00:00+00:00"},
+    )
+    assert early_invoice.status_code == 409
 
     db = client.session_factory()
     try:
