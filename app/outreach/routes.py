@@ -212,6 +212,8 @@ def record_consent(
     ).first()
     if contact is None:
         raise HTTPException(404, "Contact not found")
+    if len(body.source.strip()) < 2:
+        raise HTTPException(422, "Consent source must be non-empty")
     if body.channel == "email" and not contact.email:
         raise HTTPException(422, "Email consent cannot be recorded without a contact email address")
     if body.channel == "phone" and not contact.phone:
@@ -323,6 +325,8 @@ def create_message_draft(
         raise HTTPException(404, "Contact not found")
     if not contact.email:
         raise HTTPException(422, "Contact has no email address")
+    if len(body.subject.strip()) < 2 or len(body.body.strip()) < 10:
+        raise HTTPException(422, "Email subject and body must contain meaningful text")
     if body.lead_id:
         lead = db.query(Lead).filter_by(
             id=body.lead_id, org_id=org_id, workspace_id=body.workspace_id,
