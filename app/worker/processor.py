@@ -29,8 +29,8 @@ SessionFactory = Callable[[], Session]
 
 MAX_RUNTIME_PROVIDER_LENGTH = 80
 MAX_RUNTIME_RUN_ID_LENGTH = 200
-MAX_RUNTIME_DETAIL_LENGTH = 1000
-MAX_RUNTIME_RESULT_BYTES = 3072
+MAX_RUNTIME_DETAIL_LENGTH = 16000
+MAX_RUNTIME_RESULT_BYTES = 24576
 
 class HeartbeatRenewalError(Exception):
     """Raised when the worker cannot confirm lease renewal."""
@@ -196,6 +196,7 @@ def process_one_execution(
             task_description=task.description,
             external_run_id=prior_attempt.external_run_id if prior_attempt else None,
             persist_external_run_id=persist_provider_run,
+            request_metadata=execution.request_metadata or {},
         )
         runtime_name = execution.runtime
         db.commit()
