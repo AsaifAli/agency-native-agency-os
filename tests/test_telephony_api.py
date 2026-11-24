@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 from app.auth import Principal, get_principal
 from app.db import Base, get_db
 from app.models import Membership, Organization, Role, User, Workspace
-from app.domain_models import Lead
+from app.domain_models import Lead, Contact
 from app.telephony.models import CallSession, CallTranscript, OutboxEvent
 from app.telephony.routes import router
 import app.domain_models  # noqa: F401
@@ -30,7 +30,9 @@ def client():
     db.add(Membership(org_id=org.id, user_id=user.id, role=Role.owner)); db.flush()
     lead = Lead(org_id=org.id, workspace_id=ws.id, company_name="Acme", created_by=user.id)
     foreign_lead = Lead(org_id=other_org.id, workspace_id=other_ws.id, company_name="Foreign", created_by=user.id)
-    db.add_all([lead, foreign_lead]); db.commit()
+    contact = Contact(org_id=org.id, workspace_id=ws.id, first_name="Consented", email="consented@example.test", phone="+919999999999", consent_status="granted", created_by=user.id)
+    unconsented = Contact(org_id=org.id, workspace_id=ws.id, first_name="Unconsented", email="unconsented@example.test", phone="+918888888888", consent_status="unknown", created_by=user.id)
+    db.add_all([lead, foreign_lead, contact, unconsented]); db.commit()
     app = FastAPI(); app.include_router(router)
     def override_db():
         session = TestingSession()
@@ -40,6 +42,7 @@ def client():
     app.dependency_overrides[get_principal] = lambda: Principal(user=user)
     tc = TestClient(app); tc.org_id = org.id; tc.ws_id = ws.id
     tc.lead_id = lead.id; tc.foreign_lead_id = foreign_lead.id
+    tc.contact_id = contact.id; tc.unconsented_contact_id = unconsented.id
     yield tc
     db.close(); Base.metadata.drop_all(engine); engine.dispose()
 
@@ -50,7 +53,7 @@ def headers(): return {"Authorization": "Bearer test"}
 def test_outbound_call_transcript_and_transactional_events(client):
     r = client.post(f"/v1/orgs/{client.org_id}/telephony/calls", headers=headers(), json={
         "workspace_id": client.ws_id, "direction": "outbound", "phone_number": "+919999999999",
-        "lead_id": client.lead_id, "purpose": "Discovery call"
+        "lead_id": client.lead_id, "contact_id": client.contact_id, "purpose": "Requested discovery callback"
     })
     assert r.status_code == 201, r.text
     call = r.json(); assert call["status"] == "planned"
@@ -72,6 +75,25 @@ def test_outbound_call_transcript_and_transactional_events(client):
     assert r.json()["call_id"] == call_id
     r = client.get(f"/v1/orgs/{client.org_id}/telephony/calls/{call_id}/transcripts", headers=headers())
     assert r.status_code == 200 and len(r.json()) == 1
+
+
+def test_outbound_call_requires_explicit_contact_consent(client):
+    r = client.post(f"/v1/orgs/{client.org_id}/telephony/calls", headers=headers(), json={
+        "workspace_id": client.ws_id, "direction": "outbound",
+        "phone_number": "+918888888888", "contact_id": client.unconsented_contact_id,
+    })
+    assert r.status_code == 201
+    blocked = client.patch(f"/v1/orgs/{client.org_id}/telephony/calls/{r.json()['id']}", headers=headers(), json={"status": "queued"})
+    assert blocked.status_code == 403
+
+
+def test_outbound_call_without_contact_is_blocked(client):
+    r = client.post(f"/v1/orgs/{client.org_id}/telephony/calls", headers=headers(), json={
+        "workspace_id": client.ws_id, "direction": "outbound", "phone_number": "+919999999999",
+    })
+    assert r.status_code == 201
+    blocked = client.patch(f"/v1/orgs/{client.org_id}/telephony/calls/{r.json()['id']}", headers=headers(), json={"status": "queued"})
+    assert blocked.status_code == 403
 
 
 def test_cross_workspace_lead_reference_rejected(client):
