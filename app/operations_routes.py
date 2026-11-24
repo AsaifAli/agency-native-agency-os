@@ -4,6 +4,7 @@ These endpoints persist operational records. They do not send invoices, collect
 payments, authorize scope changes without a founder approval, or dispatch events.
 """
 from datetime import datetime, timedelta, timezone
+import uuid
 from decimal import Decimal, ROUND_HALF_UP
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -652,7 +653,7 @@ def submit_onboarding_for_activation(
         raise HTTPException(422, "Project due date must include a timezone")
     approval = Approval(
         org_id=org_id, workspace_id=item.workspace_id, action_type="delivery.activate",
-        resource_id=item.id, idempotency_key=f"delivery-activate:{item.id}",
+        resource_id=item.id, idempotency_key=f"delivery-activate:{item.id}:{uuid.uuid4()}",
         request_payload={
             "contract_id": contract.id, "client_id": item.client_id,
             "project_name": body.project_name, "budget_minor": body.budget_minor,
@@ -678,6 +679,39 @@ def submit_onboarding_for_activation(
            item.workspace_id, {"approval_id": approval.id, "action_type": "delivery.activate"})
     _outbox(db, org_id, item.workspace_id, "delivery.onboarding_submitted", "client_onboarding", item.id,
             {"approval_id": approval.id})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.post("/onboardings/{onboarding_id}/reject-activation", response_model=OnboardingOut)
+def reject_onboarding_activation(
+    org_id: str, onboarding_id: str, body: ContractReject,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    item = db.query(ClientOnboarding).filter_by(id=onboarding_id, org_id=org_id).with_for_update().first()
+    if item is None:
+        raise HTTPException(404, "Onboarding not found")
+    require_founder_authority(db, org_id, p.user.id)
+    if item.status != "pending_approval" or item.approval_id != body.approval_id:
+        raise HTTPException(409, "Onboarding is not awaiting this approval")
+    approval = db.query(Approval).filter_by(
+        id=body.approval_id, org_id=org_id, workspace_id=item.workspace_id,
+        action_type="delivery.activate", resource_id=item.id,
+    ).with_for_update().first()
+    if approval is None:
+        raise HTTPException(404, "Delivery activation approval not found")
+    if approval.status == ApprovalStatus.pending:
+        approval.status = ApprovalStatus.rejected
+        approval.decided_by = p.user.id
+        approval.decision_note = body.note
+        approval.decided_at = datetime.now(timezone.utc)
+    elif approval.status != ApprovalStatus.rejected or not approval.decided_by or not has_founder_authority(db, org_id, approval.decided_by):
+        raise HTTPException(409, "Delivery activation approval is no longer rejectable")
+    item.status = "preparing"
+    item.approval_id = None
+    _event(db, org_id, p.user.id, "delivery.onboarding_activation_rejected", "client_onboarding", item.id,
+           item.workspace_id, {"approval_id": approval.id, "note": body.note})
     db.commit()
     db.refresh(item)
     return item
