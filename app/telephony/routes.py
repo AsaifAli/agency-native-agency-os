@@ -102,6 +102,17 @@ def update_call(org_id: str, call_id: str, body: CallStatusUpdate,
     }
     if body.status not in allowed_transitions.get(item.status, set()):
         raise HTTPException(409, f"Invalid call status transition: {item.status} -> {body.status}")
+    # Outbound calls require an explicitly consented CRM contact; a lead alone is not permission.
+    if item.direction == "outbound" and body.status == "queued":
+        if not item.contact_id:
+            raise HTTPException(403, "Outbound call requires a linked contact with explicit call consent")
+        contact = db.query(Contact).filter_by(id=item.contact_id, org_id=org_id, workspace_id=item.workspace_id).first()
+        if contact is None or contact.consent_status != "granted":
+            raise HTTPException(403, "Outbound call blocked: contact call consent is not granted")
+        if item.lead_id:
+            lead = db.query(Lead).filter_by(id=item.lead_id, org_id=org_id, workspace_id=item.workspace_id).first()
+            if lead is None or lead.stage == "suppressed" or lead.suppression_reason:
+                raise HTTPException(403, "Outbound call blocked: lead is suppressed or unavailable")
     if body.provider_call_id and not body.provider:
         raise HTTPException(422, "Provider name is required with provider_call_id")
     if body.provider_call_id and body.provider and db.query(CallSession.id).filter(
