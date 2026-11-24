@@ -27,6 +27,39 @@ type PlanTask = {
   review_status: string; review_required: boolean; last_error_code: string | null;
 };
 type PlanDetail = PlanSummary & { root_task_id: string; tasks: PlanTask[] };
+type SuggestedTask = {
+  title: string;
+  description: string;
+  department_key: string;
+  depends_on_ordinal: number | null;
+  acceptance_criteria: string[];
+  review_required: true;
+};
+type PlanDraft = {
+  id: string;
+  workspace_id: string;
+  execution_id: string;
+  objective: string;
+  plan_title: string;
+  status: string;
+  suggested_plan: {
+    schema_version: 1;
+    summary: string;
+    tasks: SuggestedTask[];
+    risks: string[];
+    founder_decisions: string[];
+  };
+  error_code: string | null;
+  approved_plan_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+type AssignmentChoice = {
+  value: string;
+  managerId: string;
+  assigneeId: string;
+  label: string;
+};
 type DraftTask = {
   id: number; title: string; description: string; managerId: string;
   assigneeId: string; dependsOnOrdinal: number | null; reviewRequired: boolean;
@@ -51,6 +84,12 @@ export default function Workflows() {
   const [draftTasks, setDraftTasks] = useState<DraftTask[]>([]);
   const [nextDraftId, setNextDraftId] = useState(1);
   const [creatingPlan, setCreatingPlan] = useState(false);
+  const [planDrafts, setPlanDrafts] = useState<PlanDraft[]>([]);
+  const [selectedDraftId, setSelectedDraftId] = useState("");
+  const [draftObjective, setDraftObjective] = useState("");
+  const [draftTitle, setDraftTitle] = useState("Chief of Staff proposal");
+  const [draftAssignments, setDraftAssignments] = useState<Record<number, string>>({});
+  const [draftWorking, setDraftWorking] = useState(false);
 
   async function load(workspaceId = workspace) {
     setError("");
@@ -60,10 +99,15 @@ export default function Workflows() {
         api<Execution[]>(`/v1/orgs/${orgId()}/executions?workspace_id=${encodeURIComponent(workspaceId)}&limit=200`),
         api<Workforce>(`/v1/orgs/${orgId()}/workforce?workspace_id=${encodeURIComponent(workspaceId)}`),
         api<PlanSummary[]>(`/v1/orgs/${orgId()}/workforce/plans?workspace_id=${encodeURIComponent(workspaceId)}`),
+        api<PlanDraft[]>(`/v1/orgs/${orgId()}/workforce/plan-drafts?workspace_id=${encodeURIComponent(workspaceId)}`),
       ]);
       setExecutions(rows);
       setWorkforce(workforceRows);
       setPlans(planRows);
+      setPlanDrafts(planDraftRows);
+      const preferredDraft = planDraftRows.some((draft) => draft.id === selectedDraftId)
+        ? selectedDraftId : (planDraftRows[0]?.id || "");
+      setSelectedDraftId(preferredDraft);
       if (selected && !rows.some((row) => row.id === selected.id)) {
         setSelected(null);
         setTrace([]);
@@ -183,6 +227,130 @@ export default function Workflows() {
     }
   }
 
+  const selectedDraft = planDrafts.find((draft) => draft.id === selectedDraftId) || null;
+
+  function assignmentChoices(departmentKey: string): AssignmentChoice[] {
+    return activeMembers.flatMap((assignee) => {
+      const inDepartment = assignee.department_key === departmentKey
+        || assignee.department_key === departmentKey + "_head";
+      if (!inDepartment || !eligibleMemberIds.has(assignee.id)) return [];
+      const manager = workforce.members.find((member) => member.id === assignee.manager_member_id);
+      if (!manager || manager.status !== "active" || manager.is_founder_reserved || manager.autonomy_level < 2) {
+        return [];
+      }
+      return [{
+        value: manager.id + ":" + assignee.id,
+        managerId: manager.id,
+        assigneeId: assignee.id,
+        label: manager.title + " → " + assignee.title,
+      }];
+    });
+  }
+
+  async function requestPlanDraft() {
+    if (!workspace || !draftObjective.trim()) return;
+    setDraftWorking(true);
+    setError("");
+    try {
+      const result = await api<PlanDraft>(
+        "/v1/orgs/" + orgId() + "/workforce/plan-drafts",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            workspace_id: workspace,
+            objective: draftObjective.trim(),
+            plan_title: draftTitle.trim() || "Chief of Staff proposal",
+            idempotency_key: crypto.randomUUID(),
+          }),
+        },
+      );
+      setDraftObjective("");
+      setSelectedDraftId(result.id);
+      setDraftAssignments({});
+      await load(workspace);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setDraftWorking(false);
+    }
+  }
+
+  async function refreshPlanDrafts() {
+    if (!workspace) return;
+    setDraftWorking(true);
+    try {
+      const rows = await api<PlanDraft[]>(
+        "/v1/orgs/" + orgId() + "/workforce/plan-drafts?workspace_id=" + encodeURIComponent(workspace),
+      );
+      setPlanDrafts(rows);
+      if (!rows.some((row) => row.id === selectedDraftId)) {
+        setSelectedDraftId(rows[0]?.id || "");
+        setDraftAssignments({});
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setDraftWorking(false);
+    }
+  }
+
+  async function approvePlanDraft() {
+    if (!workspace || !selectedDraft || selectedDraft.status !== "ready_for_review") return;
+    const tasks = selectedDraft.suggested_plan.tasks;
+    const assignments = tasks.map((task, index) => {
+      const choice = assignmentChoices(task.department_key).find(
+        (item) => item.value === draftAssignments[index + 1],
+      );
+      return choice ? {
+        ordinal: index + 1,
+        delegated_by_member_id: choice.managerId,
+        assigned_to_member_id: choice.assigneeId,
+        review_required: true,
+      } : null;
+    });
+    if (assignments.some((item) => item === null)) {
+      setError("Choose a direct-manager assignment for every proposed task before approval.");
+      return;
+    }
+    setDraftWorking(true);
+    setError("");
+    try {
+      const result = await api<PlanSummary & { root_task_id: string; draft_status: string }>(
+        "/v1/orgs/" + orgId() + "/workforce/plan-drafts/" + selectedDraft.id + "/approve?workspace_id=" + encodeURIComponent(workspace),
+        {
+          method: "POST",
+          body: JSON.stringify({ assignments }),
+        },
+      );
+      await load(workspace);
+      setSelectedPlanId(result.id);
+      setPlanDetail(await api<PlanDetail>(
+        "/v1/orgs/" + orgId() + "/workforce/plans/" + result.id + "?workspace_id=" + encodeURIComponent(workspace),
+      ));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setDraftWorking(false);
+    }
+  }
+
+  async function rejectPlanDraft() {
+    if (!workspace || !selectedDraft || selectedDraft.status !== "ready_for_review") return;
+    setDraftWorking(true);
+    setError("");
+    try {
+      await api(
+        "/v1/orgs/" + orgId() + "/workforce/plan-drafts/" + selectedDraft.id + "/reject?workspace_id=" + encodeURIComponent(workspace),
+        { method: "POST", body: JSON.stringify({ reason: "Founder rejected the proposed plan." }) },
+      );
+      await load(workspace);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setDraftWorking(false);
+    }
+  }
+
   async function refreshPlan() {
     if (!workspace || !selectedPlanId) return;
     try {
@@ -243,7 +411,109 @@ export default function Workflows() {
 
   return (
     <Page eyebrow="AUTOMATION & COORDINATION" title="Workflows & Chief of Staff" description="Founder-authorized plans, dependency scheduling, execution traces and review gates. The Agency OS retains business state and authorization.">
-      <div className="notice">Plan creation, requeue and founder review are authenticated OS actions. Execution traces remain read-only; external side-effect handlers are not enabled by default.</div>
+      <div className="notice">Claude proposal generation is asynchronous, limited to eligible synthetic/public data and tool-free. Plan creation, assignment, requeue and review remain founder-authorized OS actions; external side-effect handlers remain disabled by default.</div>
+
+      <section className="panel" style={{ marginTop: 16 }}>
+        <div className="panel-head">
+          <div className="panel-title">Claude · Chief of Staff proposal</div>
+          <span className="panel-note">{planDrafts.length} proposals</span>
+        </div>
+        <div className="notice">
+          Claude proposes a task breakdown only. It cannot assign workforce members, execute tasks or approve its own output. You choose each direct-manager assignment and explicitly approve the resulting plan.
+        </div>
+        <div className="form-grid" style={{ marginTop: 12 }}>
+          <label>Workspace
+            <select className="field" value={workspace} onChange={(e) => { setWorkspace(e.target.value); void load(e.target.value); }}>
+              {workspaces.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
+            </select>
+          </label>
+          <label>Proposal title
+            <input className="field" value={draftTitle} onChange={(e) => setDraftTitle(e.target.value)} maxLength={200} />
+          </label>
+          <label className="wide">Founder objective
+            <textarea className="field" rows={3} value={draftObjective} onChange={(e) => setDraftObjective(e.target.value)} placeholder="Describe the outcome, constraints and acceptance criteria. Use synthetic or public information only." maxLength={2000} />
+          </label>
+        </div>
+        <div className="toolbar" style={{ marginTop: 12 }}>
+          <button className="button" onClick={() => void requestPlanDraft()} disabled={!workspace || !draftObjective.trim() || draftWorking || !chief || chief.status !== "active"}>
+            {draftWorking ? "Queueing…" : "Ask Claude to prepare a proposal"}
+          </button>
+          <button className="button secondary" onClick={() => void refreshPlanDrafts()} disabled={!workspace || draftWorking}>Refresh proposals</button>
+          <select className="field" value={selectedDraftId} onChange={(e) => { setSelectedDraftId(e.target.value); setDraftAssignments({}); }}>
+            <option value="">Select a proposal</option>
+            {planDrafts.map((draft) => <option key={draft.id} value={draft.id}>{draft.plan_title} · {draft.status}</option>)}
+          </select>
+        </div>
+        {selectedDraft && (
+          <>
+            <div className="panel-head" style={{ marginTop: 16 }}>
+              <div className="panel-title">{selectedDraft.plan_title}</div>
+              <span className={"status " + statusClass(selectedDraft.status)}>{selectedDraft.status}</span>
+            </div>
+            <div className="activity-meta">{selectedDraft.objective}</div>
+            <div className="activity-meta">Execution {selectedDraft.execution_id.slice(0, 12)} · Updated {new Date(selectedDraft.updated_at).toLocaleString()}</div>
+            {selectedDraft.error_code && <div className="error">{selectedDraft.error_code}</div>}
+            {selectedDraft.status === "queued" || selectedDraft.status === "running"
+              ? <div className="empty">Claude is preparing the proposal. Refresh to see the validated result when the worker completes.</div>
+              : null}
+            {selectedDraft.suggested_plan?.summary && (
+              <>
+                <div style={{ marginTop: 12 }}>{selectedDraft.suggested_plan.summary}</div>
+                {selectedDraft.suggested_plan.risks.length > 0 && (
+                  <div className="notice" style={{ marginTop: 10 }}>
+                    **Risks to review:** {selectedDraft.suggested_plan.risks.join(" · ")}
+                  </div>
+                )}
+                {selectedDraft.suggested_plan.founder_decisions.length > 0 && (
+                  <div className="notice" style={{ marginTop: 10 }}>
+                    **Founder decisions:** {selectedDraft.suggested_plan.founder_decisions.join(" · ")}
+                  </div>
+                )}
+                <div className="table-wrap" style={{ marginTop: 12 }}>
+                  <table className="data-table">
+                    <thead><tr><th>Step</th><th>Work package / acceptance</th><th>Department</th><th>Direct-manager assignment</th></tr></thead>
+                    <tbody>
+                      {selectedDraft.suggested_plan.tasks.map((task, index) => {
+                        const choices = assignmentChoices(task.department_key);
+                        return (
+                          <tr key={index}>
+                            <td>{index + 1}{task.depends_on_ordinal ? <div className="activity-meta">After step {task.depends_on_ordinal}</div> : null}</td>
+                            <td>
+                              {task.title}
+                              <div className="activity-meta">{task.description}</div>
+                              {task.acceptance_criteria.map((criterion, criterionIndex) => <div className="activity-meta" key={criterionIndex}>✓ {criterion}</div>)}
+                            </td>
+                            <td>{task.department_key}</td>
+                            <td>
+                              <select className="field" value={draftAssignments[index + 1] || ""} disabled={selectedDraft.status !== "ready_for_review"} onChange={(e) => setDraftAssignments((current) => ({ ...current, [index + 1]: e.target.value }))}>
+                                <option value="">Choose manager → direct report</option>
+                                {choices.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
+                              </select>
+                              {!choices.length && <div className="activity-meta">No active, capable reporting pair is available in this department.</div>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                {selectedDraft.status === "ready_for_review" && (
+                  <div className="toolbar" style={{ marginTop: 12 }}>
+                    <button className="button" onClick={() => void approvePlanDraft()} disabled={draftWorking || selectedDraft.suggested_plan.tasks.some((task, index) => !draftAssignments[index + 1] || !assignmentChoices(task.department_key).some((choice) => choice.value === draftAssignments[index + 1]))}>
+                      {draftWorking ? "Approving…" : "Approve assignments and create plan"}
+                    </button>
+                    <button className="button secondary" onClick={() => void rejectPlanDraft()} disabled={draftWorking}>Reject proposal</button>
+                  </div>
+                )}
+                {selectedDraft.status === "approved" && selectedDraft.approved_plan_id && (
+                  <div className="notice" style={{ marginTop: 12 }}>Approved plan: {selectedDraft.approved_plan_id}</div>
+                )}
+              </>
+            )}
+          </>
+        )}
+        {!selectedDraft && <div className="empty">No proposal selected. Ask Claude to prepare a bounded plan from a synthetic or public objective.</div>}
+      </section>
 
       <section className="panel" style={{ marginTop: 16 }}>
         <div className="panel-head">
@@ -251,7 +521,7 @@ export default function Workflows() {
           <span className="panel-note">{chief?.status || "Chief of Staff not provisioned"}</span>
         </div>
         <div className="notice">
-          Founder-authorized structured planning. The current version persists the plan, validates reporting lines and schedules eligible Agent work; Claude does not yet autonomously generate the task decomposition.
+          Manual plan authoring remains available as a fallback. Claude-generated proposals are handled separately above and cannot become executable until you approve all assignments.
         </div>
         <div className="form-grid" style={{ marginTop: 12 }}>
           <label>Workspace
