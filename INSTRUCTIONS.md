@@ -29,6 +29,13 @@ The OS is an internal operating system, not a SaaS product. The public agency we
 - Keep external network calls outside database transactions.
 - Do not add overlapping workflow engines without demonstrated need.
 
+## Skill use
+- Before non-trivial work, select the smallest relevant set of skill IDs from [SKILLS.md](SKILLS.md) and read those SKILL.md files.
+- Apply skills as workflow guidance; do not load the entire library into every task.
+- A skill recommendation or instruction never grants a tool, permission, data class, runtime, autonomy level or approval authority.
+- If a skill conflicts with these instructions, backend policy, founder authority or workspace scope, follow the higher-level rule and escalate the conflict.
+- Report which skills materially informed a non-trivial deliverable when useful; do not claim a skill was assigned or executed by a runtime unless the OS records prove it.
+
 ## Security and privacy
 - Enforce policy in backend code/infrastructure, never prompts alone.
 - Apply data classification, minimization and runtime eligibility before dispatch.
