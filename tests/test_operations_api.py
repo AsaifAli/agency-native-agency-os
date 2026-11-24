@@ -13,7 +13,7 @@ from app.models import (
     Role, User, Workspace, Task,
 )
 from app.domain_models import Project, Opportunity
-from app.operations_models import ServicePlaybook, Proposal, ScopeChangeRequest, TimeEntry, ProjectCost
+from app.operations_models import ServicePlaybook, ServiceOffering, Proposal, ScopeChangeRequest, TimeEntry, ProjectCost
 from app.operations_routes import router
 from app.telephony.models import OutboxEvent
 
@@ -237,6 +237,58 @@ def test_proposal_rejects_cross_workspace_opportunity_and_currency(client):
     payload["currency"] = "USD"
     mismatch = client.post(f"/v1/orgs/{org}/operations/proposals", headers=headers(), json=payload)
     assert mismatch.status_code == 422
+
+
+def test_service_catalogue_draft_requires_founder_activation(client):
+    org, ws = client.org_id, client.ws_id
+    missing_price = client.post(f"/v1/orgs/{org}/operations/service-catalog", headers=headers(), json={
+        "workspace_id": ws, "code": "workflow-build", "name": "Workflow Build",
+        "service_line": "AI Engineering", "description": "Design and build a governed workflow automation solution.",
+        "pricing_model": "fixed", "currency": "INR",
+    })
+    assert missing_price.status_code == 422
+
+    created = client.post(f"/v1/orgs/{org}/operations/service-catalog", headers=headers(), json={
+        "workspace_id": ws, "code": "workflow-build", "name": "Workflow Build",
+        "service_line": "AI Engineering", "description": "Design and build a governed workflow automation solution.",
+        "pricing_model": "custom", "currency": "INR", "typical_duration_days": 30,
+        "target_outcomes": ["Reduce manual operations"],
+        "deliverables": ["Workflow API", "Evaluation report"],
+        "required_inputs": ["Process documentation"], "exclusions": ["Provider subscription fees"],
+    })
+    assert created.status_code == 201, created.text
+    offering_id = created.json()["id"]
+    assert created.json()["status"] == "draft"
+
+    duplicate = client.post(f"/v1/orgs/{org}/operations/service-catalog", headers=headers(), json={
+        "workspace_id": ws, "code": "workflow-build", "name": "Duplicate Offering",
+        "service_line": "AI Engineering", "description": "Another duplicate catalogue entry.",
+        "pricing_model": "custom", "currency": "INR",
+    })
+    assert duplicate.status_code == 409
+
+    db = client.session_factory()
+    try:
+        operator = User(email="catalog-operator@example.test", display_name="Operator")
+        db.add(operator); db.flush()
+        db.add(Membership(org_id=org, user_id=operator.id, role=Role.operator))
+        db.commit()
+        client.app.dependency_overrides[get_principal] = lambda: Principal(user=operator)
+    finally:
+        db.close()
+    denied = client.patch(
+        f"/v1/orgs/{org}/operations/service-catalog/{offering_id}/status",
+        headers=headers(), json={"status": "active"},
+    )
+    assert denied.status_code == 403
+    client.app.dependency_overrides[get_principal] = lambda: Principal(user=client.session_factory().query(User).filter_by(id=client.user_id).one())
+    activated = client.patch(
+        f"/v1/orgs/{org}/operations/service-catalog/{offering_id}/status",
+        headers=headers(), json={"status": "active"},
+    )
+    assert activated.status_code == 200, activated.text
+    assert activated.json()["status"] == "active"
+    assert activated.json()["version"] == 2
 
 
 def test_time_and_cost_roll_up_to_project_financial_summary(client):
