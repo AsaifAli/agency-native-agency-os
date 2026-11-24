@@ -89,6 +89,10 @@ def create_delegation(org_id: str, body: DelegationCreate, db: Session = Depends
         raise HTTPException(404, "Parent task not found")
     delegator = _member(db, org_id, body.workspace_id, body.delegated_by_member_id)
     assignee = _member(db, org_id, body.workspace_id, body.assigned_to_member_id)
+    if delegator.is_founder_reserved or assignee.is_founder_reserved:
+        raise HTTPException(403, "Agent delegation cannot grant or assign work to Founder authority")
+    if assignee.manager_member_id != delegator.id:
+        raise HTTPException(403, "Delegator must be the assigned member's direct manager")
     if delegator.status != "active" or assignee.status != "active":
         raise HTTPException(409, "Only active workforce members can delegate work")
     if delegator.autonomy_level < 2:
@@ -106,12 +110,6 @@ def create_delegation(org_id: str, body: DelegationCreate, db: Session = Depends
     ).first()
     if capability is None:
         raise HTTPException(403, "Assignee has no enabled workforce capability")
-    if delegator.is_founder_reserved or assignee.is_founder_reserved:
-        raise HTTPException(403, "Agent delegation cannot grant or assign work to Founder authority")
-    if assignee.manager_member_id != delegator.id:
-        raise HTTPException(403, "Delegator must be the assigned member's direct manager")
-    if assignee.is_founder_reserved:
-        raise HTTPException(403, "Autonomous members cannot delegate tasks to Founder authority")
     dependency = None
     if body.dependency_task_id:
         dependency = db.query(Task).filter_by(id=body.dependency_task_id, org_id=org_id, workspace_id=body.workspace_id).first()
