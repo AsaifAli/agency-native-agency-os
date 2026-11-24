@@ -50,6 +50,8 @@ class Contact(Base):
     __tablename__ = "contacts"
     __table_args__ = (
         Index("ix_contacts_scope_client", "org_id", "workspace_id", "client_id"),
+        CheckConstraint("phone_call_consent_status IN ('unknown','pending','granted','withdrawn')", name="ck_contact_phone_call_consent_status"),
+        CheckConstraint("phone_call_consent_status != 'granted' OR (length(trim(phone_call_consent_source)) > 0 AND phone_call_consent_recorded_at IS NOT NULL)", name="ck_contact_phone_call_consent_evidence"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
@@ -63,6 +65,9 @@ class Contact(Base):
     job_title: Mapped[str] = mapped_column(String(160), default="", server_default="", nullable=False)
     source: Mapped[str] = mapped_column(String(120), default="", server_default="", nullable=False)
     consent_status: Mapped[str] = mapped_column(String(32), default="unknown", server_default="unknown", nullable=False)
+    phone_call_consent_status: Mapped[str] = mapped_column(String(24), default="unknown", server_default="unknown", nullable=False)
+    phone_call_consent_source: Mapped[str] = mapped_column(String(200), default="", server_default="", nullable=False)
+    phone_call_consent_recorded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 

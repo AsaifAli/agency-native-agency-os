@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.auth import get_principal, require_membership, require_role, Principal
+from app.auth import get_principal, require_membership, require_role, require_founder_authority, Principal
 from app.db import get_db
 from app.models import Role
 from app.audit import record_event
@@ -111,6 +111,10 @@ def create_contact(
         _scoped_parent(db, Client, object_id=body.client_id, org_id=org_id,
                        workspace_id=body.workspace_id, label="Client")
     normalized_email = body.email.lower().strip()
+    if body.phone_call_consent_status == "granted":
+        require_founder_authority(db, org_id, p.user.id)
+        if not body.phone_call_consent_source.strip() or body.phone_call_consent_recorded_at is None:
+            raise HTTPException(422, "Granted phone-call consent requires source and recorded timestamp")
     if normalized_email:
         duplicate = db.query(Contact).filter_by(
             org_id=org_id, workspace_id=body.workspace_id,
@@ -122,7 +126,11 @@ def create_contact(
                    client_id=body.client_id, first_name=body.first_name,
                    last_name=body.last_name, email=normalized_email,
                    phone=body.phone, job_title=body.job_title, source=body.source,
-                   consent_status=body.consent_status, created_by=p.user.id)
+                   consent_status=body.consent_status,
+                   phone_call_consent_status=body.phone_call_consent_status,
+                   phone_call_consent_source=body.phone_call_consent_source.strip(),
+                   phone_call_consent_recorded_at=body.phone_call_consent_recorded_at,
+                   created_by=p.user.id)
     db.add(item)
     db.flush()
     _event(db, org_id, p.user.id, "contact.created", "contact", item.id,
