@@ -60,6 +60,15 @@ def _outbox(db: Session, org_id: str, workspace_id: str, event_type: str,
     ))
 
 
+def _lock_contact(db: Session, org_id: str, workspace_id: str, contact_id: str) -> Contact:
+    contact = db.query(Contact).filter_by(
+        id=contact_id, org_id=org_id, workspace_id=workspace_id,
+    ).with_for_update().first()
+    if contact is None:
+        raise HTTPException(404, "Contact not found")
+    return contact
+
+
 def _latest_consent(db: Session, org_id: str, workspace_id: str, contact_id: str, channel: str):
     return (db.query(CommunicationConsent)
             .filter_by(org_id=org_id, workspace_id=workspace_id, contact_id=contact_id, channel=channel)
@@ -209,9 +218,7 @@ def record_consent(
 ):
     _write(org_id, body.workspace_id, p, db)
     require_founder_authority(db, org_id, p.user.id)
-    contact = db.query(Contact).filter_by(
-        id=body.contact_id, org_id=org_id, workspace_id=body.workspace_id,
-    ).first()
+    contact = _lock_contact(db, org_id, body.workspace_id, body.contact_id)
     if contact is None:
         raise HTTPException(404, "Contact not found")
     if len(body.source.strip()) < 2:
@@ -358,10 +365,14 @@ def submit_message_for_approval(
     org_id: str, message_id: str,
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
-    item = db.query(OutboundMessage).filter_by(id=message_id, org_id=org_id).with_for_update().first()
+    item = db.query(OutboundMessage).filter_by(id=message_id, org_id=org_id).first()
     if item is None:
         raise HTTPException(404, "Outbound message not found")
     _write(org_id, item.workspace_id, p, db)
+    _lock_contact(db, org_id, item.workspace_id, item.contact_id)
+    item = db.query(OutboundMessage).filter_by(id=message_id, org_id=org_id).with_for_update().first()
+    if item is None:
+        raise HTTPException(404, "Outbound message not found")
     if item.status not in {"draft", "rejected"}:
         raise HTTPException(409, "Only draft or rejected messages can be submitted")
     sender = db.query(OutboundSender).filter_by(
@@ -439,10 +450,14 @@ def queue_approved_message(
     org_id: str, message_id: str,
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
-    item = db.query(OutboundMessage).filter_by(id=message_id, org_id=org_id).with_for_update().first()
+    item = db.query(OutboundMessage).filter_by(id=message_id, org_id=org_id).first()
     if item is None:
         raise HTTPException(404, "Outbound message not found")
     _write(org_id, item.workspace_id, p, db)
+    _lock_contact(db, org_id, item.workspace_id, item.contact_id)
+    item = db.query(OutboundMessage).filter_by(id=message_id, org_id=org_id).with_for_update().first()
+    if item is None:
+        raise HTTPException(404, "Outbound message not found")
     if item.status != "pending_approval" or not item.approval_id:
         raise HTTPException(409, "Outbound message is not awaiting approval")
     sender = db.query(OutboundSender).filter_by(
@@ -527,10 +542,14 @@ def record_message_stop_event(
     org_id: str, message_id: str, body: StopEventCreate,
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
-    item = db.query(OutboundMessage).filter_by(id=message_id, org_id=org_id).with_for_update().first()
+    item = db.query(OutboundMessage).filter_by(id=message_id, org_id=org_id).first()
     if item is None:
         raise HTTPException(404, "Outbound message not found")
     _write(org_id, item.workspace_id, p, db)
+    _lock_contact(db, org_id, item.workspace_id, item.contact_id)
+    item = db.query(OutboundMessage).filter_by(id=message_id, org_id=org_id).with_for_update().first()
+    if item is None:
+        raise HTTPException(404, "Outbound message not found")
     if body.source != "manual":
         raise HTTPException(403, "Provider events require a signed provider webhook adapter; manual event recording only is enabled")
     if body.event_type not in {"reply", "opt_out", "bounce"}:
