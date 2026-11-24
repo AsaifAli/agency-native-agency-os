@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.auth import get_principal, require_membership, require_role, require_founder_authority, Principal
+from app.auth import get_principal, has_founder_authority, require_membership, require_role, require_founder_authority, Principal
 from app.db import get_db
 from app.models import Role
 from app.audit import record_event
@@ -37,7 +37,8 @@ def _scoped_parent(db: Session, model, *, object_id: str, org_id: str, workspace
 
 def _write_access(org_id: str, p: Principal, db: Session, workspace_id: str) -> None:
     role = require_membership(org_id, p, db)
-    require_role(role, WRITERS)
+    if role not in WRITERS and not has_founder_authority(db, org_id, p.user.id):
+        require_role(role, WRITERS)
     _workspace(db, org_id, workspace_id)
 
 
