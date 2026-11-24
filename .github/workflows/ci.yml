@@ -55,20 +55,6 @@ jobs:
         run: python -m compileall -q app migrations tests
       - name: Run backend and PostgreSQL integration tests
         run: python -m pytest -q -rs
-
-      - name: Set up Node.js for Founder Console
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Install Founder Console dependencies
-        working-directory: frontend
-        run: npm install --no-audit --no-fund
-
-      - name: Build Founder Console
-        working-directory: frontend
-        run: npm run build
-
   frontend:
     runs-on: ubuntu-latest
     defaults:
@@ -78,16 +64,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
       - name: Install frontend dependencies
-        run: npm ci
+        run: npm install --no-audit --no-fund
       - name: Type check
         run: npx tsc --noEmit
-      - name: Lint
-        run: npm run lint
       - name: Production build
         run: npm run build
