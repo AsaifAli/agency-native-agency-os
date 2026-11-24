@@ -49,39 +49,35 @@ def initialize_workforce(db: Session, *, org_id: str, workspace_id: str) -> dict
         db.add(office)
         db.flush()
 
-    existing_group_members = {
-        member.department_key: member
-        for member in db.query(WorkforceMember).filter_by(
-            org_id=org_id, workspace_id=workspace_id, member_type="supervisor"
-        ).all()
-        if member.department_key.startswith("office_")
-    }
-    if "office_founder" not in existing_group_members:
-        db.add(WorkforceMember(
+    founder = db.query(WorkforceMember).filter_by(
+        org_id=org_id, workspace_id=workspace_id, department_key="office_founder",
+    ).one_or_none()
+    if founder is None:
+        founder = WorkforceMember(
             org_id=org_id, workspace_id=workspace_id, unit_id=office.id,
             member_type="human", name="Founder / CEO", title="Founder / Chief Executive Officer",
             department_key="office_founder", responsibilities=[
                 "Strategy and priorities", "Final commercial authority",
                 "Protected approvals", "Financial commitments", "Production releases",
             ], autonomy_level=0, status="planned", is_founder_reserved=True,
-        ))
+        )
+        db.add(founder)
         db.flush()
-    founder = db.query(WorkforceMember).filter_by(
-        org_id=org_id, workspace_id=workspace_id, department_key="office_founder",
-    ).one()
-    if "office_chief_of_staff" not in existing_group_members:
-        db.add(WorkforceMember(
+
+    chief = db.query(WorkforceMember).filter_by(
+        org_id=org_id, workspace_id=workspace_id, department_key="office_chief_of_staff",
+    ).one_or_none()
+    if chief is None:
+        chief = WorkforceMember(
             org_id=org_id, workspace_id=workspace_id, unit_id=office.id,
             member_type="supervisor", name="Chief of Staff / Claude Agency Supervisor",
             title="Chief of Staff & Agency Supervisor", department_key="office_chief_of_staff",
             responsibilities=["Convert founder priorities into plans", "Coordinate department heads",
                                "Track dependencies, exceptions and execution", "Prepare founder decision briefs"],
             autonomy_level=2, status="planned", is_founder_reserved=False,
-        ))
+        )
+        db.add(chief)
         db.flush()
-    chief = db.query(WorkforceMember).filter_by(
-        org_id=org_id, workspace_id=workspace_id, department_key="office_chief_of_staff",
-    ).one()
     # Executive Assistant remains a distinct role and does not own protected authority.
     assistant = db.query(WorkforceMember).filter_by(
         org_id=org_id, workspace_id=workspace_id, department_key="office_executive_assistant",
