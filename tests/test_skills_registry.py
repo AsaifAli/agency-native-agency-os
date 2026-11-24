@@ -3,7 +3,7 @@ from app.skills_registry import SkillCatalogError, get_skill, list_skills
 
 def test_skill_catalog_is_curated_disabled_and_tool_free():
     skills = list_skills()
-    assert len(skills) == 10
+    assert len(skills) == 18
     assert len({skill["name"] for skill in skills}) == len(skills)
     for skill in skills:
         assert skill["review_status"] == "reviewed"
