@@ -37,7 +37,7 @@ def upgrade() -> None:
         sa.Column("created_by", sa.String(36), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.UniqueConstraint("org_id", "workspace_id", "code", name="uq_service_offering_workspace_code"),
+        sa.UniqueConstraint("org_id", "workspace_id", "code", "version", name="uq_service_offering_workspace_code_version"),
         sa.CheckConstraint("status IN ('draft','active','retired')", name="ck_service_offering_status"),
         sa.CheckConstraint("pricing_model IN ('fixed','hourly','retainer','custom')", name="ck_service_offering_pricing_model"),
         sa.CheckConstraint("indicative_price_minor IS NULL OR indicative_price_minor >= 0", name="ck_service_offering_price_nonnegative"),
