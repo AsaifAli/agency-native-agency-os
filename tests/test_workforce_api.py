@@ -33,8 +33,8 @@ def app_client():
     workspace = Workspace(id="wf-test", org_id=org.id, name="Agency Workspace")
     db.add(workspace); db.commit()
     identity={"user":founder, "org":org, "workspace":workspace, "operator":operator}
-    app=FastAPI()
-    app.include_router(router)
+    from app.main import app
+    app.dependency_overrides.clear()
     def override_db():
         session=factory()
         try: yield session
@@ -81,7 +81,7 @@ def test_organization_owner_without_founder_grant_cannot_initialize(app_client):
 
 def test_capabilities_start_disabled_and_require_founder(app_client):
     i=app_client.identity
-    app_client.post(f"/v1/orgs/{i['org'].id}/workforce/initialize",json={"workspace_id":i["workspace"].id})
+    app_client.post(f"/v1/orgs/{i['org'].id}/workforce/bootstrap",params={"workspace_id":i["workspace"].id})
     listing=app_client.get(f"/v1/orgs/{i['org'].id}/workforce",params={"workspace_id":i["workspace"].id}).json()
     specialist=next(x for x in listing["members"] if x["department_key"]=="ai_engineering_development")
     r=app_client.post(f"/v1/orgs/{i['org'].id}/workforce/{specialist['id']}/capabilities",
