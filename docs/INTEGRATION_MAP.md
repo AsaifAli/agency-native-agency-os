@@ -1,58 +1,60 @@
-# Integration map — one Agency OS
+# Native integration map — one Agency OS
 
-## Decision
+## Architecture decision
 
-The uploaded Command Center and Evaluation Harness source snapshots are migration inputs to one private Agency OS. They are not independent production products and must not retain competing identity, persistence, authorization or orchestration.
+The Agency OS is the only business control plane. The former AI Automation Command Center and AI Engineering Evaluation Harness are not deployed as independent applications, databases, APIs or orchestration systems.
 
-## Command Center -> OS execution capabilities
+Their useful capabilities are represented by native OS modules:
 
-| Existing capability | OS destination | Treatment |
+| Capability | Native OS owner | Boundary |
 |---|---|---|
-| FastAPI run/control endpoints | Task and execution APIs | Rebuild around OS identity, tenant scope and policy |
-| Agent/workflow definitions | Agent Registry, skills and native process definitions | Normalize distinct concepts and version them |
-| RQ/Redis worker patterns | Native durable workers | Reuse patterns only where useful; PostgreSQL owns execution state |
-| LangGraph | Bounded reasoning adapter only where justified | It does not own business process state |
-| PostgreSQL run/audit persistence | OS database | Migrate into canonical tenant-scoped records |
-| Human approvals | OS approval service | Backend-enforced before protected side effects |
-| LLM provider integrations | Runtime/provider adapters | Secrets stay outside prompts, logs and source |
-| Streamlit operations UI | Not retained | Next.js Founder Console is the operator UI |
+| Agent/workforce registry | `app/workforce_*.py`, `app/models.py` | OS-owned identity, status, reporting, capability and delegation records |
+| Task and execution control | `app/main.py`, `app/execution_service.py` | Authenticated, tenant-scoped OS APIs and policy |
+| Durable worker execution | `app/worker/`, `app/worker_service.py` | PostgreSQL-owned executions, attempts, leases, heartbeat and recovery |
+| Provider/runtime execution | `app/integrations/` | Adapter only; no provider-owned business state or policy bypass |
+| Approval and autonomy policy | `app/action_policy.py`, `app/autonomy_policy.py`, `app/founder_admin.py` | Founder authority and backend-enforced protected-action gates |
+| Evaluation packs and metrics | `app/evaluation/`, `app/evaluation_service.py` | Deterministic RAG and agent-workflow evaluation in the OS API |
+| Audit and event delivery | `app/audit.py`, `app/outbox_service.py` | OS-owned audit and transactional outbox |
+| Operator interface | `frontend/` | Next.js Founder Console; dashboards are read models |
 
-## Evaluation Harness -> OS evaluation service
+## Command Center migration
 
-| Existing capability | OS destination | Treatment |
-|---|---|---|
-| AgentRun/trajectory capture | Execution/session event contract | Tenant, task, agent, session and correlation scoped |
-| Evaluation packs and metrics | Versioned evaluation service | Preserve generic RAG, agent, safety and regression primitives |
-| LLM judge | Evaluation judge adapter | Runtime policy, data eligibility, cost budget and untrusted-output handling |
-| Golden datasets/baselines | Versioned evaluation datasets | Synthetic-first; client datasets separately classified and authorized |
-| Regression/quality gates | Task/release quality gates | Deterministic required gates cannot be overridden by model output |
-| Prompt/model/config lineage | Artifact and execution lineage | Immutable version references |
+The standalone Command Center API, scheduler, demo storage, separate auth, independent worker configuration and legacy deployment files were removed. The OS retains its own workforce registry, task/execution APIs, durable workers, runtime adapters, approval policy, audit and Founder Console.
 
-## Native automation boundaries
+Do not reintroduce a second identity system, database, approval system, scheduler or control plane. Add new agent capabilities through the Agent Registry, OS authorization and scoped runtime/tool adapters.
 
-No n8n, Activepieces, Temporal or other workflow engine is required initially. The OS owns business state, permissions, approvals, audit and durable execution. Native workers perform controlled jobs. PostgreSQL transactional outbox is the integration boundary.
+## Evaluation Harness migration
 
-Existing n8n-related source files and workflow JSON exports may remain as legacy migration references only. They are not enabled or required at runtime. External automation may be reconsidered only when measured requirements exceed the tested native design.
+The standalone Harness API, dashboard, persistence layer, plugin host, MLOps extras, n8n workflow exports and separate deployment configuration were removed from the OS repository. The reusable deterministic evaluation primitives were moved into `app/evaluation/`:
+
+- RAG retrieval, citation and groundedness metrics.
+- Agent-workflow task, step, tool, policy and approval metrics.
+- Versioned-in-code pack definitions, weighted scores and deterministic gates.
+- Tenant-scoped evaluation API persistence and audit remain owned by the OS.
+
+Evaluation judges, trajectory capture, golden-dataset lifecycle, regression baselines and release orchestration are not claimed as implemented merely because deterministic packs exist. Add these only behind OS tenant/data policy, budgets, audit and release gates.
+
+## Automation boundaries
+
+Native Python workers and the PostgreSQL transactional outbox are the initial automation architecture. No n8n, Activepieces, Temporal or second workflow engine is required. External calls run outside database transactions; consumers must be idempotent; delivery is at-least-once with bounded retries, dead letters and reconciliation.
 
 ## Other systems
 
-- Public agency website: separate application; future secure server-to-server intake API. Not included in this source bundle.
-- EvidenceFlow, QuoteSense, LegacyLens and WebQA Intelligence: separate portfolio/client-demo projects, not OS modules.
-- OpenClaw: not part of the private Agency OS.
-- Telephony: provider-neutral adapter and separate real-time voice/media boundary. Current source only records call intent/history and transcript artifacts; it does not place or receive calls.
+- Public agency website: separate application; signed, idempotent server-to-server lead intake is disabled by default until external configuration and end-to-end validation.
+- EvidenceFlow, QuoteSense, LegacyLens and WebQA Intelligence: separate portfolio/client-demo applications, not OS modules.
+- OpenClaw: not part of this private OS.
+- Telephony: provider-neutral record foundation; no live dialing, STT/TTS or voice runtime is claimed.
 
-## Current integration evidence
+## Security and founder authority
 
-- Generic RAG and agent-workflow evaluation packs are exposed through the OS API and persist evaluation runs in the OS scope.
-- Telephony record APIs create workspace-scoped call records, transcript records, audit entries and outbox events.
-- These are foundation slices, not completed integrations. Evaluation trajectories, judges, regression baselines, actual provider dispatch, voice runtime, webhook security and outbox dispatch remain unimplemented.
+1. OS owns users, organizations, clients, workspaces, workforce members, tasks, executions, approvals, budgets, artifacts and audit.
+2. Workforce bootstrap does not activate agents. Founder-only capability enablement and member activation are opt-in and policy-checked.
+3. Tool grants remain disabled until a governed OS MCP gateway exists.
+4. Unknown actions default to manual review; protected actions require founder approval.
+5. Runtime eligibility, data classification, tenant scope and authorization are enforced by backend code.
+6. Managed Agents remains opt-in, beta and synthetic-first; no ZDR/BAA eligibility or production readiness is implied.
+7. Client data and artifacts must remain workspace-scoped. Full isolation, retention/deletion and data-protection controls remain validation work.
 
-## Migration principles
+## Verification
 
-1. OS owns canonical identity, workspace, client, task, agent, session, approval, execution and audit records.
-2. Port useful worker/execution behavior behind OS domain contracts.
-3. Port generic evaluation primitives behind OS event and policy contracts.
-4. Complete outbox dispatch with leases, retries, dead letters and reconciliation.
-5. Implement provider adapters only behind authentication, data protection, authorization and audit.
-6. Preserve the website as a separate future intake client.
-7. Keep legacy snapshots for traceability until each useful primitive is ported and verified; do not run them as duplicate platforms.
+The native backend CI validates migrations, PostgreSQL integration and automated tests. It does not prove live provider setup, frontend build, production isolation, backup restore, penetration testing or compliance. See `IMPLEMENTATION_STATUS.md` for exact evidence and gaps.

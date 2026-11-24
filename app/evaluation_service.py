@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from integrations.evaluation_harness_source.evals.registry import get_pack, pack_catalog
+from app.evaluation.registry import get_pack, pack_catalog
 
 
 def evaluate(pack_name: str, expected: dict, actual: dict) -> dict:

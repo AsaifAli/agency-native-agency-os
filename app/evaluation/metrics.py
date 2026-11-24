@@ -137,7 +137,11 @@ def set_precision_recall_f1(predicted: Iterable[Any], expected: Iterable[Any]) -
 
 
 def citation_completeness(citations: Iterable[Any], required_sources: Iterable[Any]) -> float:
-    return recall_at_k(list(citations), list(required_sources), max(1, len(set(map(str, required_sources)))))
+    # Materialize once: callers may pass generators, which are single-use.
+    required = list(required_sources)
+    return recall_at_k(
+        list(citations), required, max(1, len(set(map(str, required))))
+    )
 
 
 def citation_correctness(citations: Iterable[Any], relevant_sources: Iterable[Any]) -> float:
