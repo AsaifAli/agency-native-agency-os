@@ -34,7 +34,7 @@ The OS owns organizations, clients, users, agent definitions, tasks, approvals, 
 
 ## Important boundaries
 - Managed Agents is beta and is not ZDR or HIPAA BAA eligible. Use only approved eligible data; the current execution policy is synthetic-first.
-- The Managed Agent referenced by the adapter owns its configured tools, MCP servers and skills. The session request does not strip those capabilities. The configured Agent must therefore be reviewed and restricted before enabling the adapter; the current adapter must not be treated as tool-free by assumption.
+- The Managed Agent referenced by the adapter owns its configured tools, MCP servers, skills and multiagent settings. Before creating a session, the adapter fetches the provider Agent and fails closed if those capabilities are configured. The OS MCP gateway is not implemented yet, so the initial provider Agent must remain tool-free.
 - Contracts, pricing, payments, sensitive external communications, production releases, destructive actions, client-data deletion and security/permission changes require backend-enforced approval.
 - Public agency website and EvidenceFlow, QuoteSense, LegacyLens and WebQA Intelligence remain separate projects. Website intake remains deferred.
 - OpenClaw is not part of this private OS.
@@ -64,7 +64,7 @@ docker compose up --build
 Copy `.env.example` to `.env` and supply local-only values. Never commit `.env`.
 
 ## Operating model and integrations
-- [Agency organization and workforce blueprint](docs/AGENCY_ORGANIZATION_WORKFORCE_BLUEPRINT.md) — all 16 departments, positions, reporting, responsibilities, KPIs, autonomy and OS mapping.
+- [Agency organization and workforce blueprint](docs/AGENCY_ORGANIZATION_WORKFORCE_BLUEPRINT.md) — all 16 departments, positions, reporting, responsibilities, KPIs, autonomy and OS mapping. The Founder Console now includes a Workforce page to provision and inspect the chart.
 - [Reference integration decisions](docs/REFERENCE_INTEGRATION_DECISIONS.md) — ECC, Strix, Claude Skills Hub and CodeRabbit fit and guardrails.
 - [Feature discovery and adoption decisions](docs/FEATURE_DISCOVERY_AND_ADOPTION.md) — additional orchestration, observability, MCP governance and engineering assurance references.
 - [Claude Managed Agents adapter](docs/CLAUDE_MANAGED_AGENTS_ADAPTER.md) — current adapter contract, configuration and caveats.
@@ -77,7 +77,7 @@ The current telephony module records inbound/outbound call intent, status, CRM a
 The OS includes workspace-scoped service playbooks, founder-approved scope changes, project time entries, project cost records, provisional financial summaries, a read-only founder exception inbox and agent execution reliability metrics. See `docs/DELIVERY_OPERATIONS_V5.md`.
 
 ## Verification
-The backend CI at commit `a2f3f4a75fa6b2d4cecf49a6bc6ce5d73d054e30` completed successfully: 142 passed, 0 failed, 1 warning. It validated the migration graph, PostgreSQL 16 migrations, Python compilation and backend/PostgreSQL integration tests. The frontend production build was not part of this run. It validated the Alembic graph, applied migrations to PostgreSQL 16, compiled Python source and ran backend plus PostgreSQL integration tests. This does not validate frontend production build, live providers, deployment, backup restore, penetration testing or compliance. See [the CI run](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45449657043).
+The backend CI at commit `98f506f3fee1bc1c620266e9836b77cfc253f36e` completed successfully: **152 passed, 0 failed, 1 warning**. It validated the migration graph, PostgreSQL 16 migrations, Python compilation and backend/PostgreSQL integration tests, including the full workforce chart and Managed Agents safety checks. The frontend production build was not part of this run. This does not validate live providers, deployment, backup restore, penetration testing or compliance. See [the CI run](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45465471539).
 
 ## Scope freeze
 The agreed product scope, architecture decisions, domain lifecycles, security gates and definition of done are documented in:
