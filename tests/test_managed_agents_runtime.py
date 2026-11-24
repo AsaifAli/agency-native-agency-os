@@ -72,7 +72,16 @@ def test_managed_agents_uses_precreated_agent_and_persists_session_id():
 
     runtime = ManagedAgentsRuntime(
         config(),
-        client_factory=lambda: httpx.Client(base_url="https://api.anthropic.com", transport=httpx.MockTransport(handler)),
+        client_factory=lambda: httpx.Client(
+            base_url="https://api.anthropic.com",
+            headers={
+                "Authorization": "Bearer test-key",
+                "anthropic-version": "2026-10-21",
+                "anthropic-beta": "managed-agents-2026-04-01",
+                "Content-Type": "application/json",
+            },
+            transport=httpx.MockTransport(handler),
+        ),
         sleep=lambda _seconds: None,
     )
     result = runtime.start(request(persist_external_run_id=persisted.append))
