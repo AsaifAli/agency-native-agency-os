@@ -328,6 +328,13 @@ class ProposalCreate(BaseModel):
     amount_minor: int = Field(ge=0, le=2_000_000_000)
     currency: str = Field(pattern="^[A-Z]{3}$")
     validity_days: int = Field(default=30, ge=1, le=180)
+    engagement_type: str = Field(default="one_time", pattern="^(one_time|retainer)$")
+    billing_frequency: str = Field(default="one_time", pattern="^(one_time|monthly|quarterly|annual)$")
+    term_months: int | None = Field(default=None, ge=1, le=60)
+    included_hours_per_period: int | None = Field(default=None, ge=0, le=10000)
+    rollover_hours: bool = False
+    support_response_hours: int | None = Field(default=None, ge=1, le=720)
+    auto_renew: bool = False
 
 
 class ProposalDecision(BaseModel):
@@ -349,6 +356,13 @@ class ProposalOut(BaseModel):
     amount_minor: int
     currency: str
     validity_days: int
+    engagement_type: str
+    billing_frequency: str
+    term_months: int | None
+    included_hours_per_period: int | None
+    rollover_hours: bool
+    support_response_hours: int | None
+    auto_renew: bool
     status: str
     approval_id: str | None
     approved_by: str | None
@@ -1143,6 +1157,13 @@ def create_contract_draft(
         "amount_minor": proposal.amount_minor,
         "currency": proposal.currency,
         "validity_days": proposal.validity_days,
+        "engagement_type": proposal.engagement_type,
+        "billing_frequency": proposal.billing_frequency,
+        "term_months": proposal.term_months,
+        "included_hours_per_period": proposal.included_hours_per_period,
+        "rollover_hours": proposal.rollover_hours,
+        "support_response_hours": proposal.support_response_hours,
+        "auto_renew": proposal.auto_renew,
         "proposal_approved_by": proposal.approved_by,
         "proposal_approved_at": proposal.approved_at.isoformat() if proposal.approved_at else None,
     }
@@ -1297,12 +1318,24 @@ def create_proposal(
         raise HTTPException(404, "Opportunity not found")
     if body.currency != opportunity.currency:
         raise HTTPException(422, "Proposal currency must match the linked opportunity currency")
+    if body.engagement_type == "one_time":
+        if (body.billing_frequency != "one_time" or body.term_months is not None
+                or body.included_hours_per_period is not None or body.rollover_hours
+                or body.support_response_hours is not None or body.auto_renew):
+            raise HTTPException(422, "One-time engagements cannot define recurring billing or retainer service terms")
+    else:
+        if body.billing_frequency == "one_time" or body.term_months is None or body.included_hours_per_period is None:
+            raise HTTPException(422, "Retainers require a recurring billing frequency, fixed term and included hours per period")
     item = Proposal(
         org_id=org_id, workspace_id=body.workspace_id, opportunity_id=body.opportunity_id,
         title=body.title, service_line=body.service_line, scope_summary=body.scope_summary,
         deliverables=body.deliverables, assumptions=body.assumptions,
         exclusions=body.exclusions, amount_minor=body.amount_minor,
-        currency=body.currency, validity_days=body.validity_days, created_by=p.user.id,
+        currency=body.currency, validity_days=body.validity_days,
+        engagement_type=body.engagement_type, billing_frequency=body.billing_frequency,
+        term_months=body.term_months, included_hours_per_period=body.included_hours_per_period,
+        rollover_hours=body.rollover_hours, support_response_hours=body.support_response_hours,
+        auto_renew=body.auto_renew, created_by=p.user.id,
     )
     db.add(item)
     db.flush()
