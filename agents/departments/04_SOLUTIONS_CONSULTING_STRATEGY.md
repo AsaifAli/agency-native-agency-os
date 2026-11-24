@@ -16,7 +16,12 @@ Translate client problems into scoped, measurable AI/automation solutions and de
 No bind the agency to scope, price, timeline, warranty or contract terms without approval.
 
 ## Skills
-Select reviewed skill IDs from [SKILLS.md](../../SKILLS.md). A skill recommendation does not enable a workforce member or grant a tool.
+- [grill-before-building](../../skills/grill-before-building/SKILL.md)
+- [client-discovery-requirements](../../skills/client-discovery-requirements/SKILL.md)
+- [proposal-sow-drafting](../../skills/proposal-sow-drafting/SKILL.md)
+- [research-first-engineering](../../skills/research-first-engineering/SKILL.md)
+
+Recommendations only; a skill does not enable a workforce member or grant a tool.
 
 ## Reporting
 Reports through the department supervisor to the Chief of Staff and founder. The actual manager relationship and autonomy level are stored in the OS workforce records.
