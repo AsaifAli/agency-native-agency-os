@@ -34,6 +34,23 @@ def _member(db: Session, org_id: str, workspace_id: str, member_id: str):
     return row
 
 
+@router.post("/initialize")
+def initialize(org_id: str, body: WorkforceInit, db: Session = Depends(get_db),
+               p: Principal = Depends(get_principal)):
+    require_membership(org_id, p, db)
+    require_founder_authority(db, org_id, p.user.id)
+    _workspace(db, org_id, body.workspace_id)
+    try:
+        result = initialize_workforce(db, org_id=org_id, workspace_id=body.workspace_id)
+        record_event(db, org_id, p.user.id, "workforce.initialized", "workforce", body.workspace_id,
+                     body.workspace_id, result)
+        db.commit()
+        return result
+    except Exception:
+        db.rollback()
+        raise
+
+
 @router.get("")
 def list_workforce(org_id: str, workspace_id: str = Query(min_length=1),
                    db: Session = Depends(get_db), p: Principal = Depends(get_principal)):
