@@ -824,6 +824,10 @@ app.include_router(revenue_delivery_router)
 from app.telephony.routes import router as telephony_router
 app.include_router(telephony_router)
 
+# Governed workforce hierarchy, capabilities and delegation.
+from app.workforce_routes import router as workforce_router
+app.include_router(workforce_router)
+
 # Lightweight service playbooks, scope control, time and project cost operations.
 from app.operations_routes import router as operations_router
 app.include_router(operations_router)

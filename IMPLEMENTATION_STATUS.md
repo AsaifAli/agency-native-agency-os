@@ -10,6 +10,9 @@
 - Frontend production build, live provider session, deployment, backup restore drill, independent penetration test and compliance assessment are not claimed.
 
 ## Implemented source capabilities
+- Governed workforce schema for hierarchy units, human/agent/supervisor/sub-agent members, revocable capability grants and task delegation lineage; pending CI validation.
+- Founder-only, idempotent initializer for the 16-department chart, five functional groups, Chief of Staff, Executive Assistant, department heads and disabled specialist agent definitions; pending CI validation.
+- Authenticated workspace-scoped workforce read API, founder-only capability configuration (always disabled until separately approved) and explicit manager-chain delegation API; pending CI validation.
 - Workspace-scoped, authenticated execution history API with bounded status filtering and result limits.
 - Execution trace API that joins execution and attempt lifecycle audit events after verifying the execution belongs to the requested organization/workspace.
 - Founder Console Processes page for execution history and event timelines; Monitoring page for persisted execution status/retry summaries.
