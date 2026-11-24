@@ -164,6 +164,16 @@ def test_approval_request_is_idempotent_and_explicit_founder_can_approve():
     assert founder_decision.json()["status"] == "approved"
 
 
+def test_explicit_founder_viewer_can_list_approval_queue():
+    org_id, approval = _create_request()
+    response = client.get(
+        f"/v1/orgs/{org_id}/approvals",
+        headers=_headers(FOUNDER_EMAIL),
+    )
+    assert response.status_code == 200, response.text
+    assert any(item["id"] == approval["id"] for item in response.json())
+
+
 def test_founder_can_request_and_approve_own_decision():
     org_id = _org_id()
     payload = {
