@@ -1,4 +1,6 @@
 """Workspace-scoped Revenue and Delivery API routes."""
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -170,7 +172,7 @@ def create_contact_activity(
         activity_type=body.activity_type, direction=body.direction,
         subject=body.subject.strip(), body=body.body,
         outcome=body.outcome.strip(), source_reference=body.source_reference.strip(),
-        occurred_at=body.occurred_at or __import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+        occurred_at=body.occurred_at or datetime.now(timezone.utc),
         created_by=p.user.id,
     )
     db.add(item)
