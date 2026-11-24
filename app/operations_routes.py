@@ -757,8 +757,17 @@ def create_contract_draft(
     ).first()
     if proposal is None:
         raise HTTPException(404, "Proposal not found")
-    if proposal.status != "approved":
+    if proposal.status != "approved" or not proposal.approval_id or not proposal.approved_by or not proposal.approved_at:
         raise HTTPException(409, "Only founder-approved proposals can enter the contract register")
+    pricing_approval = db.query(Approval).filter_by(
+        id=proposal.approval_id, org_id=org_id, workspace_id=body.workspace_id,
+        action_type="pricing.change", resource_id=proposal.id,
+        status=ApprovalStatus.approved,
+    ).first()
+    if (pricing_approval is None or pricing_approval.consumed_at is None
+            or pricing_approval.consumed_by != proposal.approved_by
+            or not has_founder_authority(db, org_id, proposal.approved_by)):
+        raise HTTPException(409, "Proposal pricing approval evidence is incomplete or invalid")
     opportunity = db.query(Opportunity).filter_by(
         id=proposal.opportunity_id, org_id=org_id, workspace_id=body.workspace_id,
     ).first()
