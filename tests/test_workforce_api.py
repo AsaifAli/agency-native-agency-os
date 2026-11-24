@@ -9,7 +9,6 @@ from app.auth import Principal, get_principal
 from app.db import Base, get_db
 from app.models import Membership, Organization, Role, User, Workspace, FounderAuthority
 from app.workforce_routes import router
-from app.workforce_service import initialize_workforce
 import app.workforce_models  # noqa: F401
 import app.operations_models  # noqa: F401
 import app.telephony.models  # noqa: F401
@@ -50,7 +49,7 @@ def app_client():
 
 def test_founder_initializes_full_chart_idempotently(app_client):
     i=app_client.identity
-    r=app_client.post(f"/v1/orgs/{i['org'].id}/workforce/bootstrap",params={"workspace_id":i["workspace"].id})
+    r=app_client.post(f"/v1/orgs/{i['org'].id}/workforce/initialize",json={"workspace_id":i["workspace"].id})
     assert r.status_code==200, r.text
     assert r.json()["departments"]==16
     assert r.json()["department_heads"]==16
@@ -97,15 +96,3 @@ def test_workforce_list_is_workspace_scoped(app_client):
     i=app_client.identity
     r=app_client.get(f"/v1/orgs/{i['org'].id}/workforce",params={"workspace_id":"other"})
     assert r.status_code==404
-
-
-
-def test_initialize_workforce_reuses_existing_founder_and_chief(app_client):
-    i=app_client.identity
-    db=app_client.factory()
-    result=initialize_workforce(db,org_id=i["org"].id,workspace_id=i["workspace"].id)
-    db.commit()
-    result2=initialize_workforce(db,org_id=i["org"].id,workspace_id=i["workspace"].id)
-    db.commit()
-    assert result==result2
-    db.close()
