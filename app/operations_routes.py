@@ -48,6 +48,22 @@ def _write(org_id: str, workspace_id: str, p: Principal, db: Session) -> None:
     _workspace(db, org_id, workspace_id)
 
 
+def _write_or_founder(org_id: str, workspace_id: str, p: Principal, db: Session) -> None:
+    role = require_membership(org_id, p, db)
+    if role not in WRITERS and not has_founder_authority(db, org_id, p.user.id):
+        require_role(role, WRITERS)
+    _workspace(db, org_id, workspace_id)
+
+
+def _read_or_founder(
+    org_id: str, workspace_id: str, p: Principal, db: Session, roles: set[Role],
+) -> None:
+    role = require_membership(org_id, p, db)
+    if role not in roles and not has_founder_authority(db, org_id, p.user.id):
+        require_role(role, roles)
+    _workspace(db, org_id, workspace_id)
+
+
 def _event(db, org_id, actor_id, event_type, resource_type, resource_id, workspace_id, payload=None):
     record_event(db, org_id, actor_id, event_type, resource_type, resource_id, workspace_id, payload or {})
 
@@ -365,9 +381,7 @@ def list_service_offerings(
     org_id: str, workspace_id: str = Query(min_length=1), status: str | None = None,
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
-    role = require_membership(org_id, p, db)
-    require_role(role, {Role.owner, Role.admin, Role.operator, Role.reviewer})
-    _workspace(db, org_id, workspace_id)
+    _read_or_founder(org_id, workspace_id, p, db, {Role.owner, Role.admin, Role.operator, Role.reviewer})
     query = db.query(ServiceOffering).filter_by(org_id=org_id, workspace_id=workspace_id)
     if status:
         if status not in {"draft", "active", "retired"}:
@@ -494,9 +508,7 @@ def list_onboardings(
     org_id: str, workspace_id: str = Query(min_length=1),
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
-    role = require_membership(org_id, p, db)
-    require_role(role, {Role.owner, Role.admin, Role.operator, Role.reviewer})
-    _workspace(db, org_id, workspace_id)
+    _read_or_founder(org_id, workspace_id, p, db, {Role.owner, Role.admin, Role.operator, Role.reviewer})
     return (db.query(ClientOnboarding)
             .filter_by(org_id=org_id, workspace_id=workspace_id)
             .order_by(ClientOnboarding.created_at.desc()).limit(250).all())
@@ -571,7 +583,10 @@ def update_onboarding_checklist_item(
     onboarding = db.query(ClientOnboarding).filter_by(id=onboarding_id, org_id=org_id).with_for_update().first()
     if onboarding is None:
         raise HTTPException(404, "Onboarding not found")
-    _write(org_id, onboarding.workspace_id, p, db)
+    if body.status == "waived":
+        _write_or_founder(org_id, onboarding.workspace_id, p, db)
+    else:
+        _write(org_id, onboarding.workspace_id, p, db)
     if onboarding.status != "preparing":
         raise HTTPException(409, "Checklist is locked after onboarding leaves preparation")
     item = db.query(OnboardingChecklistItem).filter_by(
@@ -678,7 +693,7 @@ def activate_onboarding(
     item = db.query(ClientOnboarding).filter_by(id=onboarding_id, org_id=org_id).with_for_update().first()
     if item is None:
         raise HTTPException(404, "Onboarding not found")
-    _write(org_id, item.workspace_id, p, db)
+    _write_or_founder(org_id, item.workspace_id, p, db)
     if item.status != "pending_approval" or not item.approval_id:
         raise HTTPException(409, "Onboarding is not awaiting delivery activation approval")
     contract = db.query(ContractRecord).filter_by(
@@ -724,9 +739,7 @@ def list_contracts(
     org_id: str, workspace_id: str = Query(min_length=1), status: str | None = None,
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
-    role = require_membership(org_id, p, db)
-    require_role(role, {Role.owner, Role.admin, Role.operator, Role.reviewer})
-    _workspace(db, org_id, workspace_id)
+    _read_or_founder(org_id, workspace_id, p, db, {Role.owner, Role.admin, Role.operator, Role.reviewer})
     query = db.query(ContractRecord).filter_by(org_id=org_id, workspace_id=workspace_id)
     if status:
         if status not in {"draft", "pending_approval", "executed", "rejected", "terminated"}:
@@ -903,9 +916,7 @@ def list_proposals(
     org_id: str, workspace_id: str = Query(min_length=1), opportunity_id: str | None = None,
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
-    role = require_membership(org_id, p, db)
-    require_role(role, {Role.owner, Role.admin, Role.operator, Role.reviewer})
-    _workspace(db, org_id, workspace_id)
+    _read_or_founder(org_id, workspace_id, p, db, {Role.owner, Role.admin, Role.operator, Role.reviewer})
     query = db.query(Proposal).filter_by(org_id=org_id, workspace_id=workspace_id)
     if opportunity_id:
         opportunity = db.query(Opportunity).filter_by(
