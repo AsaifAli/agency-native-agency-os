@@ -12,8 +12,8 @@ from app.models import (
     Approval, ApprovalStatus, FounderAuthority, Membership, Organization,
     Role, User, Workspace, Task,
 )
-from app.domain_models import Project, Opportunity
-from app.operations_models import ServicePlaybook, ServiceOffering, Proposal, ScopeChangeRequest, TimeEntry, ProjectCost
+from app.domain_models import Project, Opportunity, Client
+from app.operations_models import ServicePlaybook, ServiceOffering, Proposal, ContractRecord, ScopeChangeRequest, TimeEntry, ProjectCost
 from app.operations_routes import router
 from app.telephony.models import OutboxEvent
 
@@ -39,8 +39,15 @@ def client():
         Membership(org_id=org.id, user_id=user.id, role=Role.owner),
         FounderAuthority(org_id=org.id, user_id=user.id, grant_source="test"),
     ])
+    client = Client(
+        org_id=org.id, workspace_id=ws.id, name="Acme Test Client",
+        created_by=user.id,
+    )
+    db.add(client)
+    db.flush()
     project = Project(
         org_id=org.id, workspace_id=ws.id, name="Build AI workflow",
+        client_id=client.id,
         budget_minor=500000, contract_value_minor=1200000,
         estimated_hours=80, currency="INR", owner_user_id=user.id,
         due_date=datetime(2027, 1, 31, tzinfo=timezone.utc),
@@ -48,7 +55,7 @@ def client():
     db.add(project)
     db.flush()
     opportunity = Opportunity(
-        org_id=org.id, workspace_id=ws.id, title="AI workflow engagement",
+        org_id=org.id, workspace_id=ws.id, client_id=client.id, title="AI workflow engagement",
         amount_minor=1500000, currency="INR", probability=60, owner_user_id=user.id,
     )
     db.add(opportunity)
@@ -67,7 +74,7 @@ def client():
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_principal] = lambda: Principal(user=user)
     tc = TestClient(app)
-    tc.org_id, tc.ws_id, tc.other_ws_id, tc.user_id, tc.project_id, tc.opportunity_id = org.id, ws.id, other_ws.id, user.id, project.id, opportunity.id
+    tc.org_id, tc.ws_id, tc.other_ws_id, tc.user_id, tc.project_id, tc.opportunity_id, tc.client_id = org.id, ws.id, other_ws.id, user.id, project.id, opportunity.id, client.id
     tc.session_factory = TestingSession
     yield tc
     db.close()
@@ -304,6 +311,350 @@ def test_service_catalogue_draft_requires_founder_activation(client):
     assert revised.status_code == 201, revised.text
     assert revised.json()["version"] == 2
     assert revised.json()["status"] == "draft"
+
+
+
+def _create_approved_proposal_for_contract(client):
+    response = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/proposals",
+        headers=headers(), json={
+            "workspace_id": client.ws_id, "opportunity_id": client.opportunity_id,
+            "title": "Signed AI workflow engagement", "service_line": "AI Engineering",
+            "scope_summary": "Design, implement and evaluate a governed AI workflow for the client.",
+            "deliverables": ["Workflow API", "Evaluation report"],
+            "assumptions": ["Client provides access"], "exclusions": ["Cloud subscription fees"],
+            "amount_minor": 1800000, "currency": "INR", "validity_days": 30,
+        },
+    )
+    assert response.status_code == 201, response.text
+    db = client.session_factory()
+    try:
+        proposal = db.query(Proposal).filter_by(id=response.json()["id"]).one()
+        proposal.status = "approved"
+        proposal.approved_by = client.user_id
+        proposal.approved_at = datetime.now(timezone.utc)
+        db.commit()
+    finally:
+        db.close()
+    return response.json()["id"]
+
+
+def test_contract_requires_approved_proposal_and_records_signed_evidence(client):
+    org, ws = client.org_id, client.ws_id
+    draft_proposal = client.post(
+        "/v1/orgs/" + org + "/operations/proposals",
+        headers=headers(), json={
+            "workspace_id": ws, "opportunity_id": client.opportunity_id,
+            "title": "Unapproved proposal", "service_line": "AI Engineering",
+            "scope_summary": "This proposal is not yet approved for contract preparation.",
+            "amount_minor": 500000, "currency": "INR",
+        },
+    )
+    assert draft_proposal.status_code == 201
+    blocked = client.post(
+        "/v1/orgs/" + org + "/operations/contracts",
+        headers=headers(), json={
+            "workspace_id": ws, "proposal_id": draft_proposal.json()["id"],
+            "contract_number": "AG-2026-001", "title": "Client AI Services Agreement",
+        },
+    )
+    assert blocked.status_code == 409
+
+    proposal_id = _create_approved_proposal_for_contract(client)
+    created = client.post(
+        "/v1/orgs/" + org + "/operations/contracts",
+        headers=headers(), json={
+            "workspace_id": ws, "proposal_id": proposal_id,
+            "contract_number": "AG-2026-002", "title": "Client AI Services Agreement",
+        },
+    )
+    assert created.status_code == 201, created.text
+    contract_id = created.json()["id"]
+    assert created.json()["status"] == "draft"
+    assert created.json()["amount_minor"] == 1800000
+    assert created.json()["terms_snapshot"]["proposal_id"] == proposal_id
+
+    submitted = client.post(
+        "/v1/orgs/" + org + "/operations/contracts/" + contract_id + "/submit-for-approval",
+        headers=headers(),
+    )
+    assert submitted.status_code == 200, submitted.text
+    approval_id = submitted.json()["approval_id"]
+
+    db = client.session_factory()
+    try:
+        approval = db.query(Approval).filter_by(id=approval_id).one()
+        approval.status = ApprovalStatus.approved
+        approval.decided_by = client.user_id
+        approval.decided_at = datetime.now(timezone.utc)
+        db.commit()
+    finally:
+        db.close()
+
+    missing_evidence = client.post(
+        "/v1/orgs/" + org + "/operations/contracts/" + contract_id + "/record-execution",
+        headers=headers(), json={
+            "approval_id": approval_id, "signed_reference": " ",
+            "signed_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    assert missing_evidence.status_code == 422
+
+    executed = client.post(
+        "/v1/orgs/" + org + "/operations/contracts/" + contract_id + "/record-execution",
+        headers=headers(), json={
+            "approval_id": approval_id, "signed_reference": "signed-copy://AG-2026-002",
+            "signed_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    assert executed.status_code == 200, executed.text
+    assert executed.json()["status"] == "executed"
+    assert executed.json()["signed_reference"] == "signed-copy://AG-2026-002"
+
+    db = client.session_factory()
+    try:
+        approval = db.query(Approval).filter_by(id=approval_id).one()
+        assert approval.consumed_at is not None
+        assert approval.consumed_by == client.user_id
+    finally:
+        db.close()
+
+    replay = client.post(
+        "/v1/orgs/" + org + "/operations/contracts/" + contract_id + "/record-execution",
+        headers=headers(), json={
+            "approval_id": approval_id, "signed_reference": "signed-copy://AG-2026-002",
+            "signed_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    assert replay.status_code == 409
+
+
+
+def test_founder_can_reject_contract_execution_and_approval_together(client):
+    proposal_id = _create_approved_proposal_for_contract(client)
+    created = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/contracts",
+        headers=headers(), json={
+            "workspace_id": client.ws_id, "proposal_id": proposal_id,
+            "contract_number": "AG-2026-REJECT", "title": "Rejected Agreement",
+        },
+    )
+    assert created.status_code == 201, created.text
+    contract_id = created.json()["id"]
+    submitted = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/contracts/" + contract_id + "/submit-for-approval",
+        headers=headers(),
+    )
+    assert submitted.status_code == 200, submitted.text
+    approval_id = submitted.json()["approval_id"]
+    rejected = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/contracts/" + contract_id + "/reject",
+        headers=headers(), json={"approval_id": approval_id, "note": "Commercial terms need revision"},
+    )
+    assert rejected.status_code == 200, rejected.text
+    assert rejected.json()["status"] == "rejected"
+    db = client.session_factory()
+    try:
+        approval = db.query(Approval).filter_by(id=approval_id).one()
+        assert approval.status == ApprovalStatus.rejected
+        assert approval.decided_by == client.user_id
+    finally:
+        db.close()
+
+
+
+def _create_executed_contract(client, contract_number="AG-2026-ONBOARD"):
+    proposal_id = _create_approved_proposal_for_contract(client)
+    created = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/contracts",
+        headers=headers(), json={
+            "workspace_id": client.ws_id, "proposal_id": proposal_id,
+            "contract_number": contract_number, "title": "Client AI Services Agreement",
+        },
+    )
+    assert created.status_code == 201, created.text
+    contract_id = created.json()["id"]
+    submitted = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/contracts/" + contract_id + "/submit-for-approval",
+        headers=headers(),
+    )
+    assert submitted.status_code == 200, submitted.text
+    approval_id = submitted.json()["approval_id"]
+    db = client.session_factory()
+    try:
+        approval = db.query(Approval).filter_by(id=approval_id).one()
+        approval.status = ApprovalStatus.approved
+        approval.decided_by = client.user_id
+        approval.decided_at = datetime.now(timezone.utc)
+        db.commit()
+    finally:
+        db.close()
+    executed = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/contracts/" + contract_id + "/record-execution",
+        headers=headers(), json={
+            "approval_id": approval_id, "signed_reference": "signed-copy://" + contract_number,
+            "signed_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    assert executed.status_code == 200, executed.text
+    return contract_id
+
+
+def test_onboarding_requires_executed_contract_checklist_and_delivery_approval(client):
+    org, ws = client.org_id, client.ws_id
+    draft_proposal = client.post(
+        "/v1/orgs/" + org + "/operations/proposals",
+        headers=headers(), json={
+            "workspace_id": ws, "opportunity_id": client.opportunity_id,
+            "title": "Not ready for onboarding", "service_line": "AI Engineering",
+            "scope_summary": "This proposal has not reached the executed contract stage.",
+            "amount_minor": 250000, "currency": "INR",
+        },
+    )
+    assert draft_proposal.status_code == 201
+    unapproved_contract = client.post(
+        "/v1/orgs/" + org + "/operations/contracts",
+        headers=headers(), json={
+            "workspace_id": ws, "proposal_id": draft_proposal.json()["id"],
+            "contract_number": "AG-2026-NO-ONBOARD", "title": "Not signed",
+        },
+    )
+    assert unapproved_contract.status_code == 409
+
+    contract_id = _create_executed_contract(client)
+    created = client.post(
+        "/v1/orgs/" + org + "/operations/onboardings",
+        headers=headers(), json={"workspace_id": ws, "contract_id": contract_id},
+    )
+    assert created.status_code == 201, created.text
+    onboarding_id = created.json()["id"]
+    assert created.json()["status"] == "preparing"
+
+    duplicate = client.post(
+        "/v1/orgs/" + org + "/operations/onboardings",
+        headers=headers(), json={"workspace_id": ws, "contract_id": contract_id},
+    )
+    assert duplicate.status_code == 409
+
+    checklist = client.get(
+        "/v1/orgs/" + org + "/operations/onboardings/" + onboarding_id + "/checklist",
+        headers=headers(),
+    )
+    assert checklist.status_code == 200, checklist.text
+    assert len(checklist.json()) == 6
+
+    plan = {
+        "project_name": "Acme AI Workflow Delivery",
+        "budget_minor": 900000,
+        "estimated_hours": 120,
+        "due_date": "2027-02-15T12:00:00+00:00",
+    }
+    blocked = client.post(
+        "/v1/orgs/" + org + "/operations/onboardings/" + onboarding_id + "/submit-for-activation",
+        headers=headers(), json=plan,
+    )
+    assert blocked.status_code == 409
+
+    for item in checklist.json():
+        updated = client.patch(
+            "/v1/orgs/" + org + "/operations/onboardings/" + onboarding_id + "/checklist/" + item["id"],
+            headers=headers(), json={"status": "completed", "note": "Reviewed and confirmed with the client."},
+        )
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["status"] == "completed"
+
+    submitted = client.post(
+        "/v1/orgs/" + org + "/operations/onboardings/" + onboarding_id + "/submit-for-activation",
+        headers=headers(), json=plan,
+    )
+    assert submitted.status_code == 200, submitted.text
+    assert submitted.json()["status"] == "pending_approval"
+    approval_id = submitted.json()["approval_id"]
+
+    db = client.session_factory()
+    try:
+        approval = db.query(Approval).filter_by(id=approval_id).one()
+        approval.status = ApprovalStatus.approved
+        approval.decided_by = client.user_id
+        approval.decided_at = datetime.now(timezone.utc)
+        db.commit()
+    finally:
+        db.close()
+
+    activated = client.post(
+        "/v1/orgs/" + org + "/operations/onboardings/" + onboarding_id + "/activate",
+        headers=headers(),
+    )
+    assert activated.status_code == 200, activated.text
+    assert activated.json()["status"] == "active"
+    project_id = activated.json()["project_id"]
+    assert project_id
+
+    db = client.session_factory()
+    try:
+        project = db.query(Project).filter_by(id=project_id, org_id=org, workspace_id=ws).one()
+        assert project.client_id == client.client_id
+        assert project.contract_value_minor == 1800000
+        assert project.budget_minor == 900000
+        assert project.status == "planned"
+        approval = db.query(Approval).filter_by(id=approval_id).one()
+        assert approval.consumed_at is not None
+        assert approval.consumed_by == client.user_id
+    finally:
+        db.close()
+
+    replay = client.post(
+        "/v1/orgs/" + org + "/operations/onboardings/" + onboarding_id + "/activate",
+        headers=headers(),
+    )
+    assert replay.status_code == 409
+
+
+def test_only_founder_can_waive_required_onboarding_checklist_item(client):
+    contract_id = _create_executed_contract(client, "AG-2026-WAIVE")
+    created = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/onboardings",
+        headers=headers(), json={"workspace_id": client.ws_id, "contract_id": contract_id},
+    )
+    assert created.status_code == 201, created.text
+    item = client.get(
+        "/v1/orgs/" + client.org_id + "/operations/onboardings/" + created.json()["id"] + "/checklist",
+        headers=headers(),
+    ).json()[0]
+    db = client.session_factory()
+    try:
+        founder = db.query(User).filter_by(id=client.user_id).one()
+        operator = User(email="onboarding-operator@example.test", display_name="Operator")
+        db.add(operator)
+        db.flush()
+        db.add(Membership(org_id=client.org_id, user_id=operator.id, role=Role.operator))
+        db.commit()
+        client.app.dependency_overrides[get_principal] = lambda: Principal(user=operator)
+    finally:
+        db.close()
+    denied = client.patch(
+        "/v1/orgs/" + client.org_id + "/operations/onboardings/" + created.json()["id"] + "/checklist/" + item["id"],
+        headers=headers(), json={"status": "waived", "note": "Not applicable for this engagement"},
+    )
+    assert denied.status_code == 403
+    client.app.dependency_overrides[get_principal] = lambda: Principal(user=founder)
+    waived = client.patch(
+        "/v1/orgs/" + client.org_id + "/operations/onboardings/" + created.json()["id"] + "/checklist/" + item["id"],
+        headers=headers(), json={"status": "waived", "note": "Founder accepted this documented exception"},
+    )
+    assert waived.status_code == 200, waived.text
+    assert waived.json()["status"] == "waived"
+
+
+def test_contract_rejects_cross_workspace_proposal(client):
+    response = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/contracts",
+        headers=headers(), json={
+            "workspace_id": client.other_ws_id, "proposal_id": "proposal-from-another-workspace",
+            "contract_number": "AG-2026-003", "title": "Wrong workspace contract",
+        },
+    )
+    assert response.status_code == 404
 
 
 def test_time_and_cost_roll_up_to_project_financial_summary(client):
