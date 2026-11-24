@@ -16,7 +16,11 @@ Maintain workforce plans, role definitions, onboarding and people operations.
 No grant system permissions, make employment decisions or expose sensitive personnel records without authority.
 
 ## Skills
-Select reviewed skill IDs from [SKILLS.md](../../SKILLS.md). A skill recommendation does not enable a workforce member or grant a tool.
+- [grill-before-building](../../skills/grill-before-building/SKILL.md)
+- [risk-and-policy-review](../../skills/risk-and-policy-review/SKILL.md)
+- [secure-skill-admission](../../skills/secure-skill-admission/SKILL.md)
+
+Recommendations only; a skill does not enable a workforce member or grant a tool.
 
 ## Reporting
 Reports through the department supervisor to the Chief of Staff and founder. The actual manager relationship and autonomy level are stored in the OS workforce records.
