@@ -1,4 +1,5 @@
 
+import re
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
@@ -10,6 +11,30 @@ from app.models import (
     ExecutionAttemptStatus,
     ExecutionStatus,
 )
+
+
+MAX_ERROR_MESSAGE_LENGTH = 1000
+
+
+def _sanitize_error_message(value: str) -> str:
+    """Bound persisted worker errors and redact common credential patterns."""
+
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("error_message must be a non-empty string")
+
+    sanitized = re.sub(
+        r"(?i)\bBearer\s+[^\s,;]+",
+        "Bearer [REDACTED]",
+        value,
+    )
+    sanitized = re.sub(
+        r"(?i)\b(authorization|api[_-]?key|access[_-]?token|"
+        r"refresh[_-]?token|password|secret)\b\s*[:=]\s*[^\s,;]+",
+        r"\1=[REDACTED]",
+        sanitized,
+    )
+    sanitized = re.sub(r"[\x00-\x1f\x7f]", " ", sanitized)
+    return sanitized[:MAX_ERROR_MESSAGE_LENGTH]
 
 
 class WorkerServiceError(Exception):
@@ -341,7 +366,8 @@ def fail_execution(
     Record a failed attempt and either schedule a retry or fail permanently.
 
     The caller owns the transaction and must commit or roll back.
-    Error messages must be sanitized by the caller before persistence.
+    Error messages are sanitized and bounded again at this persistence
+    boundary; callers should still avoid passing raw provider exceptions.
     """
     if (
         not isinstance(base_delay_seconds, int)
@@ -353,11 +379,14 @@ def fail_execution(
 
     if not isinstance(retryable, bool):
         raise ValueError("retryable must be a boolean")
-    if not error_code or len(error_code) > 100:
+    if (
+        not isinstance(error_code, str)
+        or not error_code.strip()
+        or len(error_code) > 100
+    ):
         raise ValueError("error_code must contain 1-100 characters")
 
-    if not isinstance(error_message, str):
-        raise ValueError("error_message must be a string")
+    error_message = _sanitize_error_message(error_message)
 
     if base_delay_seconds < 1:
         raise ValueError("base_delay_seconds must be at least 1")

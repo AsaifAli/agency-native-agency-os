@@ -11,6 +11,7 @@ from app.execution_service import (
     ResourceNotFound,
     create_execution,
 )
+from app.config import settings
 from app.models import (
     Agent,
     AuditEvent,
@@ -23,7 +24,9 @@ from app.models import (
 
 
 @pytest.fixture
-def execution_context():
+def execution_context(monkeypatch):
+    monkeypatch.setattr(settings, "app_env", "test")
+    monkeypatch.setattr(settings, "mock_runtime_enabled", True)
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
 
@@ -56,7 +59,7 @@ def execution_context():
         org_id=org.id,
         workspace_id=workspace.id,
         name="Test Agent",
-        runtime="claude_managed_agents",
+        runtime="mock",
         data_class=DataClass.synthetic,
         enabled=True,
     )
@@ -64,7 +67,7 @@ def execution_context():
         org_id=other_org.id,
         workspace_id=other_workspace.id,
         name="Other Agent",
-        runtime="claude_managed_agents",
+        runtime="mock",
         data_class=DataClass.synthetic,
         enabled=True,
     )
@@ -128,7 +131,7 @@ def test_create_execution_queues_and_audits(execution_context):
     assert execution.status.value == "queued"
     assert execution.attempt_count == 0
     assert execution.max_attempts == 3
-    assert execution.runtime == "claude_managed_agents"
+    assert execution.runtime == "mock"
     assert execution.data_class == DataClass.synthetic
     assert execution.client_authorized is False
     assert execution.request_metadata == {}
@@ -195,6 +198,34 @@ def test_disabled_agent_is_rejected(execution_context):
     ctx["db"].commit()
 
     with pytest.raises(AgentNotEnabled):
+        create_test_execution(ctx)
+
+
+def test_unconfigured_claude_runtime_is_rejected_before_queueing(execution_context):
+    ctx = execution_context
+    agent = ctx["db"].get(Agent, ctx["agent_id"])
+    agent.runtime = "claude_managed_agents"
+    ctx["db"].commit()
+
+    with pytest.raises(PolicyViolation, match="not configured"):
+        create_test_execution(ctx)
+
+
+def test_mock_runtime_is_rejected_when_disabled(execution_context, monkeypatch):
+    ctx = execution_context
+    monkeypatch.setattr(settings, "mock_runtime_enabled", False)
+
+    with pytest.raises(PolicyViolation, match="not configured"):
+        create_test_execution(ctx)
+
+
+def test_mock_runtime_is_restricted_to_synthetic_data(execution_context):
+    ctx = execution_context
+    agent = ctx["db"].get(Agent, ctx["agent_id"])
+    agent.data_class = DataClass.commercial
+    ctx["db"].commit()
+
+    with pytest.raises(PolicyViolation, match="synthetic data"):
         create_test_execution(ctx)
 
 

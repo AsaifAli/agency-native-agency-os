@@ -6,6 +6,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
+from app.config import settings
 from app.execution_service import create_execution
 from app.models import (
     Agent,
@@ -42,7 +43,9 @@ from app.worker.processor import LeaseHeartbeat, process_one_execution, Heartbea
 
 
 @pytest.fixture
-def worker_context(tmp_path):
+def worker_context(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "app_env", "test")
+    monkeypatch.setattr(settings, "mock_runtime_enabled", True)
     # Each test gets its own isolated SQLite database.
     test_database = tmp_path / "worker-tests.db"
 
@@ -83,7 +86,7 @@ def worker_context(tmp_path):
         org_id=org.id,
         workspace_id=workspace.id,
         name="Worker Test Agent",
-        runtime="claude_managed_agents",
+        runtime="mock",
         data_class=DataClass.synthetic,
         enabled=True,
     )
@@ -1020,10 +1023,6 @@ def mock_worker_context(ctx):
     """Create a valid execution, then route it to the local mock runtime."""
     execution = create_worker_execution(ctx)
 
-    # Keep execution creation subject to the real runtime policy.
-    execution.runtime = "mock"
-    ctx["db"].commit()
-
     session_factory = sessionmaker(
         bind=ctx["db"].get_bind(),
         autoflush=False,
@@ -1063,6 +1062,7 @@ def test_processor_completes_mock_execution(worker_context):
 def test_processor_rejects_unsupported_runtime(worker_context):
     ctx = worker_context
     execution = create_worker_execution(ctx)
+    execution.runtime = "unsupported_runtime"
     ctx["db"].commit()
 
     session_factory = sessionmaker(
@@ -1509,3 +1509,32 @@ def test_runtime_result_rejects_oversized_utf8_payload():
 
     with pytest.raises(ValueError, match="permitted size"):
         processor_module._serialize_result(result)
+
+
+def test_fail_execution_redacts_and_bounds_error_message(worker_context):
+    ctx = worker_context
+    execution, attempt, worker_id = start_running_attempt(ctx)
+
+    raw_message = (
+        "Authorization: Bearer super-secret "
+        "api_key=private-key\n"
+        + ("x" * 1200)
+    )
+    failed_execution, failed_attempt = fail_execution(
+        ctx["db"],
+        execution_id=execution.id,
+        attempt_id=attempt.id,
+        worker_id=worker_id,
+        error_code="PROVIDER_ERROR",
+        error_message=raw_message,
+        retryable=False,
+    )
+    ctx["db"].commit()
+
+    assert len(failed_execution.error_message) <= 1000
+    assert len(failed_attempt.error_message) <= 1000
+    assert "super-secret" not in failed_execution.error_message
+    assert "private-key" not in failed_execution.error_message
+    assert "[REDACTED]" in failed_execution.error_message
+    assert "\n" not in failed_execution.error_message
+    assert failed_execution.error_message == failed_attempt.error_message

@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     jwt_secret: str = "unsafe-development-secret-change-me"
     jwt_issuer: str = "agency-os"
     dev_auth_enabled: bool = True
+    mock_runtime_enabled: bool = False
     cors_origins: str = "http://localhost:3000"
     db_connect_timeout_seconds: int = Field(default=5, ge=1, le=60)
     db_pool_timeout_seconds: int = Field(default=5, ge=1, le=300)

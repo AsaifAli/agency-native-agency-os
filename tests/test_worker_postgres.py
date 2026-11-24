@@ -2,6 +2,8 @@ import os
 import uuid
 
 import pytest
+
+from app.config import settings
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
@@ -21,7 +23,9 @@ from app.models import (
 from app.worker_service import claim_next_execution
 
 
-def test_postgres_workers_claim_different_executions():
+def test_postgres_workers_claim_different_executions(monkeypatch):
+    monkeypatch.setattr(settings, "app_env", "test")
+    monkeypatch.setattr(settings, "mock_runtime_enabled", True)
     database_url = os.getenv("AGENCY_OS_TEST_DATABASE_URL")
     if not database_url:
         pytest.skip("Set AGENCY_OS_TEST_DATABASE_URL to run PostgreSQL concurrency test")
@@ -78,7 +82,7 @@ def test_postgres_workers_claim_different_executions():
                 org_id=org.id,
                 workspace_id=workspace.id,
                 name=f"PostgreSQL Worker Agent {suffix}",
-                runtime="claude_managed_agents",
+                runtime="mock",
                 data_class=DataClass.synthetic,
                 enabled=True,
             )
