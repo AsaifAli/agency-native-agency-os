@@ -138,7 +138,7 @@ class SuggestedPlanTask(BaseModel):
     title: str = Field(min_length=2, max_length=200)
     description: str = Field(min_length=5, max_length=900)
     department_key: DepartmentKey
-    depends_on_ordinals: list[int] = Field(default_factory=list, max_length=10)
+    depends_on_ordinal: int | None = Field(default=None, ge=1, le=10)
     acceptance_criteria: list[str] = Field(default_factory=list, max_length=4)
     review_required: Literal[True] = True
 
@@ -154,10 +154,8 @@ class SuggestedPlan(BaseModel):
     @model_validator(mode="after")
     def validate_dependency_ordinals(self):
         for ordinal, task in enumerate(self.tasks, start=1):
-            dependencies = task.depends_on_ordinals
-            if len(dependencies) != len(set(dependencies)):
-                raise ValueError("Task dependencies must be unique")
-            if any(value < 1 or value >= ordinal for value in dependencies):
+            dependency = task.depends_on_ordinal
+            if dependency is not None and dependency >= ordinal:
                 raise ValueError("Dependencies must reference earlier task ordinals")
         return self
 
