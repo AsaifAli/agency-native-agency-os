@@ -1,13 +1,13 @@
 # Agency OS implementation status — stabilization checkpoint
 
-## Source of truth
-- Working branch: feature/agency-os-v5-stabilization.
-- Starting branch head inspected: f3ae03d7c6e674a0c7d85157a7bb779559ce1b83.
-- The source includes an opt-in Claude Managed Agents adapter and adapter tests. Earlier text claiming that the adapter did not exist was stale and incorrect.
-- CI at the inspected head completed with **4 failed, 136 passed**. Failures were: one Managed Agents test mock-client header setup issue, and three processor classification tests caused by a duplicate RuntimeExecutionError definition shadowing the shared runtime exception.
-- A previous CI run on commit 4e914384bd1eef94c1ffe61b94ea5e284e6da8b0 reported 133 passed, 0 skipped. That is historical evidence only and does not validate the current head.
-- PostgreSQL migrations and source compilation completed in the failed run. The test suite did execute against PostgreSQL 16.
-- No frontend production build, production deployment, live Anthropic session, live integration, backup restore drill, independent penetration test or compliance assessment is claimed.
+## Verified checkpoint
+- Working branch: `feature/agency-os-v5-stabilization`.
+- Current verified commit: `2da5d2e4a94de6b7f3ecf0abdd8684bafb86686b`.
+- GitHub Actions run: [45449657043](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45449657043).
+- Backend CI: **140 passed, 0 failed, 1 warning** (Starlette/httpx TestClient deprecation).
+- CI validated the Alembic graph, applied migrations to PostgreSQL 16, compiled Python source and ran backend plus PostgreSQL integration tests.
+- The preceding inspected commit had four failures: a Managed Agents test mock omitted headers expected by its assertions, and a duplicate RuntimeExecutionError class shadowed the shared runtime exception. Both were corrected.
+- This is backend CI evidence only. No frontend production build, live provider session, deployment, backup restore drill, independent penetration test or compliance assessment is claimed.
 
 ## Implemented source capabilities
 - FastAPI modular backend and Next.js Founder Console foundation.
@@ -18,17 +18,19 @@
 - Central autonomy classification: allowlisted internal actions, founder-approval actions and manual-review default for unknown actions.
 - Durable execution lifecycle with persisted attempts, worker claims, leases, heartbeats, bounded retries and expired-execution recovery.
 - Mock runtime boundary and opt-in Claude Managed Agents adapter.
-- Managed Agents adapter persists session ID after create response, resumes persisted session, enforces synthetic-only eligibility, sets a session budget and routes tool/action pauses to manual review.
+- Managed Agents adapter persists session ID after create response, resumes persisted sessions, applies synthetic-only eligibility, sets a session budget and routes action-required/budget pauses to manual review.
 - Transactional outbox writes for selected domain events; dispatcher supports registered-handler filtering, SKIP LOCKED claims, leases, bounded attempts, acknowledgement, sanitized errors, retries, dead letters and lease reconciliation.
 - Founder-only outbox health endpoint.
 - Workspace-scoped call/transcript records; no live voice provider or dialing.
 - Delivery playbooks, founder-approved scope changes, time/cost records, provisional project financial summaries, exception inbox and execution reliability views.
+- Target organization model and governance skills are documented in `docs/AGENCY_ORGANIZATION_WORKFORCE_BLUEPRINT.md`, `docs/REFERENCE_INTEGRATION_DECISIONS.md` and `skills/`; this does not mean all positions/skills are provisioned as live agents.
 
 ## Known gaps / not validated
 - No production outbox handlers are registered; external side effects remain disabled.
-- Outbox handler heartbeat and real worker crash/restart recovery need further validation.
+- Outbox handler heartbeat and actual worker crash/restart recovery need further validation.
 - Supervisor-driven task decomposition, specialist delegation, review and escalation are not implemented.
-- Managed Agents live provisioning, provider API contract against the actual account, webhook/reconciliation for ambiguous session creation and production runtime eligibility are not verified.
+- Managed Agents live provisioning, provider API compatibility against the actual account, actual Agent/Environment tool configuration, webhook/reconciliation for ambiguous session creation and production runtime eligibility are not verified.
+- The pre-created Managed Agent owns its tools/MCP/skills; the current adapter does not prove those are empty. Verify the provider-side Agent configuration before enabling. Keep disabled if not verified.
 - Claude Agent SDK adapter is not implemented.
 - Agency OS MCP server and narrowly scoped OS tools are not implemented.
 - Full OIDC/JWKS/MFA, secure frontend session lifecycle and scoped machine identities are not implemented.
@@ -41,7 +43,13 @@
 - Frontend production build, monitoring/alerting, SBOM, restore drill and security review are not validated.
 - Website-to-OS lead intake remains deferred.
 
+## Reference integration decisions
+- ECC: selected research-first engineering, skill governance and independent review patterns; no wholesale harness import.
+- Strix: optional isolated, authorization-gated QA/Security runner; not installed or executed.
+- Claude Skills Hub: discovery index only; imported skills require provenance, license, static review, sandbox test and pinning.
+- CodeRabbit: optional PR review signal after privacy, retention, subprocessor, pricing and GitHub permission review; not connected and never a replacement for CI/QA/founder approval.
+
 ## Safety boundary
-Use synthetic/mock data until authentication, tenant isolation, runtime eligibility, retention, provider authorization and recovery controls are validated. Do not enable real outreach, dialing, client transcript ingestion or production side effects based only on API routes or outbox rows. Managed Agents is beta and is not ZDR/HIPAA eligible; do not send confidential/regulated data without an eligible, reviewed alternative and appropriate contractual controls.
+Use synthetic/mock data until authentication, tenant isolation, runtime eligibility, retention, provider authorization and recovery controls are validated. Do not enable real outreach, dialing, client transcript ingestion or production side effects based only on API routes or outbox rows. Managed Agents is beta and not ZDR/HIPAA eligible; do not send confidential/regulated data without an eligible, reviewed alternative and appropriate contractual controls.
 
 The repository is a substantial development foundation, not a production-ready or fully autonomous agency OS.
