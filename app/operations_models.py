@@ -201,6 +201,7 @@ class InvoiceRecord(Base):
     __tablename__ = "invoice_records"
     __table_args__ = (
         UniqueConstraint("org_id", "workspace_id", "invoice_number", name="uq_invoice_number_workspace"),
+        UniqueConstraint("org_id", "workspace_id", "external_reference", name="uq_invoice_external_reference"),
         Index("ix_invoice_records_scope_status", "org_id", "workspace_id", "status"),
         CheckConstraint("status IN ('draft','pending_approval','issued','partially_paid','paid','rejected','cancelled')", name="ck_invoice_record_status"),
         CheckConstraint("amount_minor > 0 AND paid_minor >= 0 AND paid_minor <= amount_minor", name="ck_invoice_amount_paid_range"),
@@ -222,7 +223,7 @@ class InvoiceRecord(Base):
     due_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     status: Mapped[str] = mapped_column(String(24), default="draft", server_default="draft", nullable=False)
     approval_id: Mapped[str | None] = mapped_column(ForeignKey("approvals.id"), nullable=True)
-    external_reference: Mapped[str] = mapped_column(String(240), default="", server_default="", nullable=False)
+    external_reference: Mapped[str | None] = mapped_column(String(240), nullable=True)
     issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     issued_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
