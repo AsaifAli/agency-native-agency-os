@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 from app.auth import Principal, get_principal
 from app.db import Base, get_db
 from app.domain_routes import router
-from app.models import Membership, Organization, Role, User, Workspace
+from app.models import FounderAuthority, Membership, Organization, Role, User, Workspace
 from app.domain_models import Client
 import app.domain_models  # noqa: F401
 
@@ -211,6 +211,44 @@ def test_opportunity_can_be_linked_to_workspace_client_only(client):
         headers=auth(), json={"stage": "proposal", "client_id": client.foreign_client_id},
     )
     assert foreign.status_code == 404
+
+
+
+def test_founder_authority_viewer_can_link_opportunity_to_client(client):
+    org, ws = client.org_id, client.ws_id
+    client_record = client.post(
+        f"/v1/orgs/{org}/clients", headers=auth(),
+        json={"workspace_id": ws, "name": "Founder controlled client"},
+    )
+    assert client_record.status_code == 201
+    opportunity = client.post(
+        f"/v1/orgs/{org}/opportunities", headers=auth(), json={
+            "workspace_id": ws, "title": "Founder controlled opportunity",
+            "amount_minor": 100000, "currency": "INR", "probability": 40,
+        },
+    )
+    assert opportunity.status_code == 201
+    db = client.app.dependency_overrides[get_db]()
+    session = next(db)
+    try:
+        founder_viewer = User(email="founder-domain-viewer@example.test", display_name="Founder Viewer")
+        session.add(founder_viewer)
+        session.flush()
+        session.add(Membership(org_id=org, user_id=founder_viewer.id, role=Role.viewer))
+        session.add(FounderAuthority(org_id=org, user_id=founder_viewer.id, grant_source="test"))
+        session.commit()
+        client.app.dependency_overrides[get_principal] = lambda: Principal(user=founder_viewer)
+    finally:
+        try:
+            next(db)
+        except StopIteration:
+            pass
+    linked = client.patch(
+        f"/v1/orgs/{org}/opportunities/{opportunity.json()['id']}",
+        headers=auth(), json={"stage": "proposal", "client_id": client_record.json()["id"]},
+    )
+    assert linked.status_code == 200, linked.text
+    assert linked.json()["client_id"] == client_record.json()["id"]
 
 
 def test_cross_workspace_parent_reference_is_rejected(client):
