@@ -14,6 +14,7 @@ from app.models import (
 )
 from app.policy import assert_managed_agents_eligible
 from app.integrations.runtime_registry import is_runtime_available
+from app.workforce_models import WorkforceMember, WorkforceCapability
 
 
 class ExecutionServiceError(Exception):
@@ -171,6 +172,27 @@ def create_execution(
 
     if not agent.enabled:
         raise AgentNotEnabled("Agent is not enabled for execution")
+
+    workforce_member = db.query(WorkforceMember).filter_by(
+        org_id=org_id, workspace_id=workspace_id, agent_id=agent.id
+    ).one_or_none()
+    if workforce_member is not None:
+        if workforce_member.status != "active" or workforce_member.is_founder_reserved:
+            raise AgentNotEnabled("Workforce member is not active for execution")
+        grants = db.query(WorkforceCapability).filter_by(
+            org_id=org_id, workspace_id=workspace_id,
+            member_id=workforce_member.id, enabled=True,
+        ).all()
+        eligible_grant = next((
+            grant for grant in grants
+            if agent.data_class.value in (grant.allowed_data_classes or [])
+            and bool(set(grant.allowed_actions or []) & {"task.execute", "research.execute", "report.generate"})
+            and not (grant.tool_allowlist or [])
+        ), None)
+        if eligible_grant is None:
+            raise AgentNotEnabled(
+                "Workforce member requires an enabled data-eligible execution capability with no ungoverned tools"
+            )
 
     _validate_runtime_policy(agent)
 

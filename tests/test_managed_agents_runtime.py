@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 from app.integrations.managed_agents import ManagedAgentsRuntime
-from app.integrations.runtime import ExecutionRequest, RuntimeManualReviewRequired, RuntimeTransientError
+from app.integrations.runtime import ExecutionRequest, RuntimeManualReviewRequired, RuntimeTransientError, RuntimeNotConfiguredError
 from app.models import DataClass
 
 
@@ -48,6 +48,9 @@ def test_managed_agents_uses_precreated_agent_and_persists_session_id():
 
     def handler(req):
         seen.append(req)
+        if req.method == "GET" and req.url.path == "/v1/agents/agent_test":
+            return httpx.Response(200, json={"id": "agent_test", "archived_at": None,
+                "tools": [], "mcp_servers": [], "skills": [], "multiagent": None})
         if req.method == "POST" and req.url.path == "/v1/sessions":
             body = json.loads(req.content)
             assert body["agent"] == "agent_test"
@@ -72,7 +75,16 @@ def test_managed_agents_uses_precreated_agent_and_persists_session_id():
 
     runtime = ManagedAgentsRuntime(
         config(),
-        client_factory=lambda: httpx.Client(base_url="https://api.anthropic.com", transport=httpx.MockTransport(handler)),
+        client_factory=lambda: httpx.Client(
+            base_url="https://api.anthropic.com",
+            headers={
+                "Authorization": "Bearer test-key",
+                "anthropic-version": "2026-10-21",
+                "anthropic-beta": "managed-agents-2026-04-01",
+                "Content-Type": "application/json",
+            },
+            transport=httpx.MockTransport(handler),
+        ),
         sleep=lambda _seconds: None,
     )
     result = runtime.start(request(persist_external_run_id=persisted.append))
@@ -81,7 +93,7 @@ def test_managed_agents_uses_precreated_agent_and_persists_session_id():
     assert result.status == "succeeded"
     assert result.detail == "Research completed."
     assert persisted == ["sesn_test"]
-    assert len(seen) == 3
+    assert len(seen) == 4
 
 
 def test_managed_agents_resumes_persisted_session_without_creating_another():
@@ -111,6 +123,9 @@ def test_managed_agents_resumes_persisted_session_without_creating_another():
 
 def test_managed_agents_never_auto_confirms_tool_actions():
     def handler(req):
+        if req.method == "GET" and req.url.path == "/v1/agents/agent_test":
+            return httpx.Response(200, json={"id": "agent_test", "archived_at": None,
+                "tools": [], "mcp_servers": [], "skills": [], "multiagent": None})
         if req.method == "POST":
             assert json.loads(req.content)["agent"] == "agent_test"
             return httpx.Response(200, json={"id": "sesn_review"})
@@ -154,3 +169,63 @@ def test_managed_agents_rejects_confidential_data_before_network_call():
     with pytest.raises(Exception):
         runtime.start(request(data_class=DataClass.confidential))
     assert called == []
+
+
+def test_managed_agents_rejects_provider_agent_with_unreviewed_tools():
+    calls = []
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        if req.method == "GET" and req.url.path == "/v1/agents/agent_test":
+            return httpx.Response(200, json={
+                "id": "agent_test", "archived_at": None,
+                "tools": [{"type": "agent_toolset_20260401", "configs": []}],
+                "mcp_servers": [], "skills": [], "multiagent": None,
+            })
+        return httpx.Response(200, json={"id": "unexpected"})
+    runtime = ManagedAgentsRuntime(
+        config(),
+        client_factory=lambda: httpx.Client(
+            base_url="https://api.anthropic.com",
+            transport=httpx.MockTransport(handler),
+        ),
+    )
+    with pytest.raises(RuntimeNotConfiguredError):
+        runtime.start(request())
+    assert calls == [("GET", "/v1/agents/agent_test")]
+
+
+def test_managed_agents_waits_for_workflow_run_end_before_accepting_idle():
+    event_calls = []
+    first = [
+        {"type": "workflow_run.created", "workflow_run_id": "wrun_1", "name": "Research"},
+        {"type": "session.status_idle", "stop_reason": {"type": "end_turn"}},
+    ]
+    second = [
+        {"type": "workflow_run.created", "workflow_run_id": "wrun_1", "name": "Research"},
+        {"type": "workflow_run.status_ended", "workflow_run_id": "wrun_1", "result": {"type": "completed"}},
+        {"type": "agent.message", "content": [{"type": "text", "text": "Workflow report."}]},
+        {"type": "session.status_idle", "stop_reason": {"type": "end_turn"}},
+    ]
+    def handler(req):
+        if req.method == "GET" and req.url.path == "/v1/agents/agent_test":
+            return httpx.Response(200, json={"id": "agent_test", "archived_at": None,
+                "tools": [], "mcp_servers": [], "skills": [], "multiagent": None})
+        if req.method == "POST":
+            return httpx.Response(200, json={"id": "sesn_workflow"})
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_workflow":
+            return httpx.Response(200, json={"id": "sesn_workflow", "status": "idle"})
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_workflow/events":
+            event_calls.append(1)
+            return httpx.Response(200, json={"data": first if len(event_calls) == 1 else second})
+        return httpx.Response(404)
+    runtime = ManagedAgentsRuntime(
+        config(),
+        client_factory=lambda: httpx.Client(
+            base_url="https://api.anthropic.com",
+            transport=httpx.MockTransport(handler),
+        ),
+        sleep=lambda _seconds: None,
+    )
+    result = runtime.start(request())
+    assert result.detail == "Workflow report."
+    assert len(event_calls) == 2

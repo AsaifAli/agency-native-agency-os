@@ -5,7 +5,7 @@
 - `ai-automation-command-center-render-ready.zip`
 - `ai-engineering-automation-hub-full.zip`
 
-Both archives were extracted for inspection. The unified repository contains cleaned source snapshots; `.git`, `.env`, virtual environments, local databases, caches and secret artifacts were deliberately excluded.
+Both archives were extracted for inspection. The initial unified repository contained cleaned source snapshots; `.git`, `.env`, virtual environments, local databases, caches and secret artifacts were deliberately excluded. This document records the historical source review; the snapshots have since been removed after the active OS capabilities were migrated.
 
 ## Command Center findings
 
@@ -53,4 +53,4 @@ The uploaded archives contained local `.env` files and secret-like artifacts. Th
 
 ## Overall conclusion
 
-Both repositories contain useful implementation assets, but neither is the finished Agency OS. The correct path is a controlled migration into the OS domain model and security boundary—not a blind file merge. See `FINAL_SCOPE_AND_ACCEPTANCE.md` and `ARCHITECTURE_DECISIONS.md` for the frozen target. The integration snapshots are retained to make the migration traceable and testable.
+Both repositories contain useful implementation assets, but neither is the finished Agency OS. The correct path is a controlled migration into the OS domain model and security boundary—not a blind file merge. See `FINAL_SCOPE_AND_ACCEPTANCE.md` and `ARCHITECTURE_DECISIONS.md` for the frozen target. The integration snapshots were used as migration inputs and have now been removed from the runtime repository. The native implementation and current limitations are documented in `docs/INTEGRATION_MAP.md` and `IMPLEMENTATION_STATUS.md`.

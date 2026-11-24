@@ -1,12 +1,9 @@
-"""Claude Managed Agents adapter.
+"""Conservative Claude Managed Agents adapter with durable session recovery.
 
-This adapter is intentionally conservative:
-- only configured Managed Agents sessions are started;
-- the OS task and agent instructions are the only task context sent;
-- session-level tools, MCP servers and skills are cleared for this first slice;
-- tool-confirmation pauses are surfaced as manual review, never auto-approved;
-- provider session IDs are persisted against the active execution attempt so a
-  retry can resume the same session rather than blindly creating another one.
+The first integration slice refuses provider-side tools, MCP servers, skills,
+and multiagent workflows until the Agency OS MCP gateway and authorization
+enforcement are implemented. A provider session is complete only when every
+workflow run has ended and the primary turn reaches end_turn.
 """
 from __future__ import annotations
 
@@ -98,19 +95,79 @@ class ManagedAgentsRuntime(AgentRuntime):
             "or database updates occurred unless the session actually performed them."
         )
 
+    def _validate_provider_agent(self, client: httpx.Client) -> None:
+        agent = self._request(
+            client, "GET", f"/v1/agents/{self.config.claude_managed_agent_id}"
+        )
+        if agent.get("id") != self.config.claude_managed_agent_id or agent.get("archived_at"):
+            raise RuntimeNotConfiguredError("Configured Claude Managed Agent is missing or archived.")
+        tools = agent.get("tools") or []
+        mcp_servers = agent.get("mcp_servers") or []
+        skills = agent.get("skills") or []
+        multiagent = agent.get("multiagent")
+        if tools or mcp_servers or skills or multiagent not in (None, {"type": "disabled"}):
+            raise RuntimeNotConfiguredError(
+                "Provider Agent has tools, MCP servers, skills or multiagent features enabled. "
+                "Disable them until the Agency OS authorization gateway is configured and verified."
+            )
+
+    def _list_events(self, client: httpx.Client, session_id: str) -> list[dict]:
+        events: list[dict] = []
+        page: str | None = None
+        for _ in range(100):
+            params = {"limit": 100}
+            if page:
+                params["page"] = page
+            response = self._request(
+                client, "GET", f"/v1/sessions/{session_id}/events", params=params
+            )
+            data = response.get("data", [])
+            if not isinstance(data, list) or any(not isinstance(event, dict) for event in data):
+                raise RuntimeExecutionError("Claude Managed Agents returned invalid event history.")
+            events.extend(data)
+            page = response.get("next_page")
+            if not page:
+                return events
+        raise RuntimeExecutionError("Claude Managed Agents event history exceeded the pagination limit.")
+
+    @staticmethod
+    def _open_workflow_runs(events: list[dict]) -> set[str]:
+        open_runs: set[str] = set()
+        for event in events:
+            event_type = event.get("type")
+            run_id = event.get("workflow_run_id")
+            if not isinstance(run_id, str) or not run_id:
+                continue
+            if event_type == "workflow_run.created":
+                open_runs.add(run_id)
+            elif event_type == "workflow_run.status_ended":
+                open_runs.discard(run_id)
+        return open_runs
+
     def _extract_result(self, events: list[dict], session_id: str) -> ExecutionResult:
         idle_events = [event for event in events if event.get("type") == "session.status_idle"]
         stop_reason = idle_events[-1].get("stop_reason", {}) if idle_events else {}
         stop_type = stop_reason.get("type") if isinstance(stop_reason, dict) else None
 
-        if stop_type == "requires_action":
+        if self._open_workflow_runs(events):
             raise RuntimeManualReviewRequired(
-                "Managed Agent requires a human decision before it can continue."
+                "Managed Agent session became idle while a workflow run was still open."
             )
-        if stop_type == "budget_reached":
+        if stop_type in {"requires_action", "budget_reached", "refusal", "retries_exhausted"}:
             raise RuntimeManualReviewRequired(
-                "Managed Agent session reached its configured spend limit."
+                f"Managed Agent stopped for a review-required reason: {stop_type}."
             )
+        if stop_type != "end_turn":
+            raise RuntimeManualReviewRequired(
+                "Managed Agent did not reach a confirmed end-of-turn state."
+            )
+        for event in events:
+            if event.get("type") == "workflow_run.status_ended":
+                result = event.get("result") or {}
+                if result.get("type") != "completed":
+                    raise RuntimeManualReviewRequired(
+                        "A Managed Agent workflow ended without a completed result."
+                    )
 
         text_parts: list[str] = []
         for event in events:
@@ -125,7 +182,7 @@ class ManagedAgentsRuntime(AgentRuntime):
         detail = "\n".join(text_parts).strip()
         if not detail:
             raise RuntimeExecutionError(
-                "Managed Agent reached idle without a readable final message."
+                "Managed Agent reached end_turn without a readable final message."
             )
 
         return ExecutionResult(
@@ -154,9 +211,10 @@ class ManagedAgentsRuntime(AgentRuntime):
         with self.client_factory() as client:
             session_id = request.external_run_id
             if not session_id:
+                self._validate_provider_agent(client)
                 body = {
-                    # A pre-created, versioned Managed Agent owns model, tools,
-                    # MCP servers and skills. The OS supplies task-specific context.
+                    # The provider-side Agent has been inspected and is required
+                    # to have no tools, MCP servers, skills or multiagent features.
                     "agent": self.config.claude_managed_agent_id,
                     "environment_id": self.config.claude_managed_environment_id,
                     "budget": {
@@ -201,21 +259,26 @@ class ManagedAgentsRuntime(AgentRuntime):
                 )
                 status = session.get("status")
                 if status == "idle":
-                    event_response = self._request(
-                        client, "GET", f"/v1/sessions/{session_id}/events"
-                    )
-                    events = event_response.get("data", [])
-                    if not isinstance(events, list):
-                        raise RuntimeExecutionError(
-                            "Claude Managed Agents returned an invalid event history."
-                        )
-                    if any(event.get("type") == "session.error" for event in events if isinstance(event, dict)):
+                    events = self._list_events(client, session_id)
+                    if any(event.get("type") == "session.error" for event in events):
                         raise RuntimeExecutionError(
                             "Claude Managed Agents reported a session error."
                         )
-                    return self._extract_result(events, session_id)
+                    if self._open_workflow_runs(events):
+                        self.sleep(self.config.claude_managed_poll_interval_seconds)
+                        continue
+                    idle_events = [event for event in events if event.get("type") == "session.status_idle"]
+                    stop_reason = idle_events[-1].get("stop_reason", {}) if idle_events else {}
+                    stop_type = stop_reason.get("type") if isinstance(stop_reason, dict) else None
+                    if stop_type == "end_turn":
+                        return self._extract_result(events, session_id)
+                    if stop_type in {"requires_action", "budget_reached", "refusal", "retries_exhausted"}:
+                        return self._extract_result(events, session_id)
+                    raise RuntimeManualReviewRequired(
+                        "Managed Agent session is idle without a confirmed completion reason."
+                    )
 
-                if status in {"failed", "error", "archived"}:
+                if status in {"failed", "error", "archived", "terminated"}:
                     raise RuntimeExecutionError(
                         "Claude Managed Agents session ended unsuccessfully."
                     )

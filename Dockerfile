@@ -11,9 +11,6 @@ COPY alembic.ini .
 COPY migrations ./migrations
 
 COPY app ./app
-COPY integrations/__init__.py ./integrations/__init__.py
-COPY integrations/evaluation_harness_source/__init__.py ./integrations/evaluation_harness_source/__init__.py
-COPY integrations/evaluation_harness_source/evals ./integrations/evaluation_harness_source/evals
 
 EXPOSE 8000
 

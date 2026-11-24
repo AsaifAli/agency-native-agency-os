@@ -1,23 +1,25 @@
-# Agency OS consolidated founder-governance bundle v5
+# Agency OS repository manifest
 
-Baseline: complete v4 source snapshot (founder authority, autonomy classification, telephony record/outbox foundation) plus v5 delivery-operations vertical slice.
+This manifest describes the current native Agency OS repository, not a standalone Command Center or Evaluation Harness bundle.
 
-## v5 additions
-- `app/operations_models.py` — service playbooks, scope-change requests, time entries and project costs.
-- `app/operations_routes.py` — workspace-scoped APIs, founder-gated scope acceptance, project financial summary, exception inbox and agent execution reliability read model.
-- `migrations/versions/d8c5a1f20973_delivery_operations.py` — additive migration after v4 head `b4a9e2d1c673`.
-- `tests/test_operations_api.py` — tests for playbooks, founder-approved scope changes, time/cost rollups, currency checks, workspace isolation and exception inbox.
-- `frontend/app/operations/page.tsx` — founder exception and agent execution reliability page.
-- `docs/DELIVERY_OPERATIONS_V5.md` — API, workflow and limitation notes.
-- `docs/FINAL_CONSOLIDATED_BASELINE_V5.md` — consolidated target scope and priorities.
-- Updated implementation status, README and apply instructions.
+## Core runtime
+- `app/`: FastAPI modular monolith, domain services, Founder Authority, autonomy/action policy, workforce, execution lifecycle, provider adapters, transactional outbox and deterministic evaluation.
+- `app/evaluation/`: native RAG and agent-workflow evaluation packs and metrics.
+- `app/worker/`: durable execution worker and runtime factory.
+- `frontend/`: Next.js private Founder Console.
+- `migrations/`: additive Alembic schema history. Do not rewrite or delete applied migrations.
+- `tests/`: backend, API, policy, workforce, runtime, worker, evaluation and PostgreSQL integration tests.
+- `docs/`: product scope, architecture, security, workforce, delivery, integrations and operational evidence.
+- `skills/`: reviewed internal task playbooks.
 
-## Build-environment verification
-- Full pytest suite: **102 passed, 1 skipped**.
-- Python compileall: passed.
-- Alembic head: `d8c5a1f20973` (single head).
-- Frontend build: not run; dependencies not installed.
-- PostgreSQL migration upgrade and worker concurrency test: not run in this build environment.
-- No live provider calls, production deployment, backup restore, penetration test or compliance assessment.
+## External boundaries
+- PostgreSQL is the business source of truth; Redis is non-authoritative queue/cache infrastructure.
+- Claude Managed Agents is an opt-in runtime adapter, not the system of record.
+- The public website remains separate and uses the signed, idempotent lead-intake API when explicitly configured.
+- EvidenceFlow, QuoteSense, LegacyLens and WebQA Intelligence remain separate applications.
 
-This is a development foundation and not a claim that the autonomous business OS is complete or production-ready.
+## Removed from the runtime repository
+The old `integrations/command_center_source/` and `integrations/evaluation_harness_source/` snapshots, standalone Harness server/dashboard/plugin/MLOps/n8n workflow content and unused legacy HTTP adapters are not part of the native OS runtime. Required evaluation primitives now live in `app/evaluation/`; Command Center execution/workforce capabilities are implemented through native OS services.
+
+## Verification
+See `IMPLEMENTATION_STATUS.md` for tested checkpoints, current gaps and what remains unverified. A passing backend CI run does not prove production readiness, provider configuration, frontend build, backup restore, penetration testing or compliance.

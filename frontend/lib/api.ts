@@ -18,3 +18,5 @@ export type Workspace={id:string;org_id:string;name:string;created_at:string};
 export type Agent={id:string;workspace_id:string;name:string;department:string;runtime:string;data_class:string;enabled:boolean};
 export type Task={id:string;workspace_id:string;title:string;description:string;status:string;created_at:string};
 export type AuditEvent={id:string;event_type:string;resource_type:string;resource_id:string;payload:Record<string,unknown>;created_at:string};
+
+export type Execution={id:string;workspace_id:string;task_id:string;agent_id:string;runtime:string;data_class:string;status:string;attempt_count:number;max_attempts:number;error_code:string|null;error_message:string|null;queued_at:string;started_at:string|null;finished_at:string|null;created_at:string;updated_at:string};

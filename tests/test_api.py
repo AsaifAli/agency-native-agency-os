@@ -137,3 +137,73 @@ def test_execution_api_accepts_explicit_development_mock(monkeypatch):
         assert "execution.succeeded" in event_types
     finally:
         db.close()
+
+
+
+def test_execution_history_and_trace_are_workspace_scoped(monkeypatch):
+    monkeypatch.setattr(settings, "app_env", "development")
+    monkeypatch.setattr(settings, "mock_runtime_enabled", True)
+    org_id, workspace_id, task_id, agent_id = _seed_execution_records("mock")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer dev:owner@test.local"}
+    created = client.post(
+        f"/v1/orgs/{org_id}/executions",
+        headers=headers,
+        json={
+            "workspace_id": workspace_id,
+            "task_id": task_id,
+            "agent_id": agent_id,
+            "idempotency_key": f"history-trace-{uuid.uuid4().hex}",
+        },
+    )
+    assert created.status_code == 201
+    execution_id = created.json()["id"]
+
+    listed = client.get(
+        f"/v1/orgs/{org_id}/executions",
+        params={"workspace_id": workspace_id},
+        headers=headers,
+    )
+    assert listed.status_code == 200
+    assert any(row["id"] == execution_id for row in listed.json())
+
+    processed_id = process_one_execution(
+        worker_id="history-trace-worker",
+        session_factory=SessionLocal,
+    )
+    assert processed_id == execution_id
+
+    trace = client.get(
+        f"/v1/orgs/{org_id}/executions/{execution_id}/trace",
+        params={"workspace_id": workspace_id},
+        headers=headers,
+    )
+    assert trace.status_code == 200
+    event_types = {row["event_type"] for row in trace.json()}
+    assert {"execution.queued", "execution.claimed", "execution.started",
+            "execution.succeeded"}.issubset(event_types)
+
+    wrong_workspace = client.get(
+        f"/v1/orgs/{org_id}/executions/{execution_id}/trace",
+        params={"workspace_id": "not-this-workspace"},
+        headers=headers,
+    )
+    assert wrong_workspace.status_code == 404
+
+
+def test_execution_history_rejects_invalid_status_and_limit():
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer dev:owner@test.local"}
+    org_id = _org_id()
+    invalid_status = client.get(
+        f"/v1/orgs/{org_id}/executions",
+        params={"workspace_id": "ws-test", "status": "unknown"},
+        headers=headers,
+    )
+    assert invalid_status.status_code == 422
+    invalid_limit = client.get(
+        f"/v1/orgs/{org_id}/executions",
+        params={"workspace_id": "ws-test", "limit": 501},
+        headers=headers,
+    )
+    assert invalid_limit.status_code == 422
