@@ -913,6 +913,189 @@ def test_invoice_rejects_cross_workspace_contract_and_duplicate_invoice_number(c
     assert second.status_code == 409
 
 
+
+def test_invoice_issuance_and_partial_payment_reconciliation(client):
+    contract_id = _create_executed_contract(client, "AG-2026-INVOICE")
+    due_date = "2027-01-15T12:00:00+00:00"
+    created = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/invoices",
+        headers=headers(), json={
+            "workspace_id": client.ws_id, "contract_id": contract_id,
+            "invoice_number": "INV-2026-001", "title": "AI workflow milestone 1",
+            "description": "Initial discovery and architecture milestone.",
+            "line_items": [
+                {"description": "Discovery and architecture", "amount_minor": 600000},
+                {"description": "Initial implementation", "amount_minor": 400000},
+            ],
+            "due_date": due_date,
+        },
+    )
+    assert created.status_code == 201, created.text
+    invoice_id = created.json()["id"]
+    assert created.json()["amount_minor"] == 1000000
+    assert created.json()["paid_minor"] == 0
+    assert created.json()["outstanding_minor"] == 1000000
+    assert created.json()["status"] == "draft"
+
+    over_contract = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/invoices",
+        headers=headers(), json={
+            "workspace_id": client.ws_id, "contract_id": contract_id,
+            "invoice_number": "INV-2026-OVER", "title": "Overbilled milestone",
+            "line_items": [{"description": "Overbilled", "amount_minor": 900000}],
+            "due_date": due_date,
+        },
+    )
+    assert over_contract.status_code == 422
+
+    early_payment = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/invoices/" + invoice_id + "/payments",
+        headers=headers(), json={
+            "external_reference": "BANK-REF-001", "amount_minor": 100000,
+            "payment_method": "bank_transfer", "source": "manual bank statement",
+            "paid_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    assert early_payment.status_code == 409
+
+    submitted = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/invoices/" + invoice_id + "/submit-for-approval",
+        headers=headers(),
+    )
+    assert submitted.status_code == 200, submitted.text
+    approval_id = submitted.json()["approval_id"]
+    premature = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/invoices/" + invoice_id + "/record-issued",
+        headers=headers(), json={
+            "approval_id": approval_id, "external_reference": "ACCOUNTING-INV-001",
+            "issued_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    assert premature.status_code == 409
+
+    db = client.session_factory()
+    try:
+        approval = db.query(Approval).filter_by(id=approval_id).one()
+        approval.status = ApprovalStatus.approved
+        approval.decided_by = client.user_id
+        approval.decided_at = datetime.now(timezone.utc)
+        db.commit()
+    finally:
+        db.close()
+
+    issued = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/invoices/" + invoice_id + "/record-issued",
+        headers=headers(), json={
+            "approval_id": approval_id, "external_reference": "ACCOUNTING-INV-001",
+            "issued_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    assert issued.status_code == 200, issued.text
+    assert issued.json()["status"] == "issued"
+
+    partial = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/invoices/" + invoice_id + "/payments",
+        headers=headers(), json={
+            "external_reference": "BANK-REF-001", "amount_minor": 300000,
+            "payment_method": "bank_transfer", "source": "manual bank statement",
+            "paid_at": datetime.now(timezone.utc).isoformat(), "notes": "First instalment",
+        },
+    )
+    assert partial.status_code == 201, partial.text
+    invoice = client.get(
+        "/v1/orgs/" + client.org_id + "/operations/invoices",
+        headers=headers(), params={"workspace_id": client.ws_id},
+    )
+    row = next(item for item in invoice.json() if item["id"] == invoice_id)
+    assert row["status"] == "partially_paid"
+    assert row["paid_minor"] == 300000
+    assert row["outstanding_minor"] == 700000
+
+    duplicate = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/invoices/" + invoice_id + "/payments",
+        headers=headers(), json={
+            "external_reference": "BANK-REF-001", "amount_minor": 100000,
+            "payment_method": "bank_transfer", "source": "manual bank statement",
+            "paid_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    assert duplicate.status_code == 409
+
+    overpayment = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/invoices/" + invoice_id + "/payments",
+        headers=headers(), json={
+            "external_reference": "BANK-REF-002", "amount_minor": 800000,
+            "payment_method": "bank_transfer", "source": "manual bank statement",
+            "paid_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    assert overpayment.status_code == 422
+
+    final_payment = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/invoices/" + invoice_id + "/payments",
+        headers=headers(), json={
+            "external_reference": "BANK-REF-003", "amount_minor": 700000,
+            "payment_method": "upi", "source": "manual bank statement",
+            "paid_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    assert final_payment.status_code == 201, final_payment.text
+
+    payments = client.get(
+        "/v1/orgs/" + client.org_id + "/operations/invoices/" + invoice_id + "/payments",
+        headers=headers(),
+    )
+    assert payments.status_code == 200
+    assert len(payments.json()) == 2
+    immutable = client.patch(
+        "/v1/orgs/" + client.org_id + "/operations/invoices/" + invoice_id + "/payments/" + final_payment.json()["id"],
+        headers=headers(), json={"amount_minor": 1},
+    )
+    assert immutable.status_code == 404
+
+    db = client.session_factory()
+    try:
+        invoice_record = db.query(InvoiceRecord).filter_by(id=invoice_id).one()
+        assert invoice_record.status == "paid"
+        assert invoice_record.paid_minor == invoice_record.amount_minor
+        assert db.query(PaymentReceipt).filter_by(invoice_id=invoice_id).count() == 2
+        approval = db.query(Approval).filter_by(id=approval_id).one()
+        assert approval.consumed_at is not None
+    finally:
+        db.close()
+
+
+def test_invoice_rejects_cross_workspace_contract_and_duplicate_invoice_number(client):
+    missing = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/invoices",
+        headers=headers(), json={
+            "workspace_id": client.other_ws_id, "contract_id": "foreign-contract",
+            "invoice_number": "INV-2026-X", "title": "Foreign invoice",
+            "line_items": [{"description": "No access", "amount_minor": 1000}],
+            "due_date": "2027-01-15T12:00:00+00:00",
+        },
+    )
+    assert missing.status_code == 404
+
+    contract_id = _create_executed_contract(client, "AG-2026-INVOICE-DUP")
+    payload = {
+        "workspace_id": client.ws_id, "contract_id": contract_id,
+        "invoice_number": "INV-2026-DUP", "title": "Duplicate invoice test",
+        "line_items": [{"description": "Milestone", "amount_minor": 100000}],
+        "due_date": "2027-01-15T12:00:00+00:00",
+    }
+    first = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/invoices",
+        headers=headers(), json=payload,
+    )
+    assert first.status_code == 201, first.text
+    second = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/invoices",
+        headers=headers(), json=payload,
+    )
+    assert second.status_code == 409
+
+
 def test_time_and_cost_roll_up_to_project_financial_summary(client):
     org, ws, project = client.org_id, client.ws_id, client.project_id
     t = client.post(f"/v1/orgs/{org}/operations/time-entries", headers=headers(), json={
