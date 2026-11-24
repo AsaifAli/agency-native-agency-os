@@ -16,7 +16,11 @@ Own internal agency positioning, campaigns, content strategy, brand consistency 
 No publishing externally, spending budget or making performance claims without approval and evidence.
 
 ## Skills
-Select reviewed skill IDs from [SKILLS.md](../../SKILLS.md). A skill recommendation does not enable a workforce member or grant a tool.
+- [marketing-content-planning](../../skills/marketing-content-planning/SKILL.md)
+- [client-communication-drafting](../../skills/client-communication-drafting/SKILL.md)
+- [market-research-briefing](../../skills/market-research-briefing/SKILL.md)
+
+Recommendations only; a skill does not enable a workforce member or grant a tool.
 
 ## Reporting
 Reports through the department supervisor to the Chief of Staff and founder. The actual manager relationship and autonomy level are stored in the OS workforce records.
