@@ -8,7 +8,7 @@
 
 The Agency OS has a substantial foundation: organization/workspace scoping, clients, contacts, leads, opportunities, projects and milestones; workforce governance; founder approvals; execution persistence; selected outbox infrastructure; signed website lead intake; call/transcript record foundations; delivery playbooks; time/cost records; provisional project financial summaries; and evaluation packs.
 
-It is not yet a complete agency operating system. The most important missing operational capabilities are outbound prospect acquisition, governed communication, live AI telephony, full CRM relationship history, proposals/commercial lifecycle, invoicing/payment reconciliation, campaign analytics, client success, and verified cross-workspace/security/recovery controls.
+It is not yet a complete agency operating system. The most important missing operational capabilities are automated prospect acquisition/enrichment, governed communication dispatch, live AI telephony, full CRM deduplication and next-action management, proposal revisioning and external commercial execution, recurring retainer billing/SLA/renewal, campaign analytics, client success, and verified cross-workspace/security/recovery controls.
 
 Department profiles, skills and plan drafts are not proof that those business functions are live.
 
@@ -23,10 +23,10 @@ Status meanings:
 | Domain | Required capability | Current evidence/status | Priority |
 |---|---|---|---|
 | Market intelligence | ICPs, verticals, geography, buying signals, competitor/service research | Missing as an operational pipeline | P0 |
-| Prospect acquisition | Company/contact discovery, enrichment, evidence URLs, source and confidence | Missing | P0 |
+| Prospect acquisition | Company/contact discovery, enrichment, evidence URLs, source and confidence | Research record schema and source-backed evidence capture exist in PR #28; automated discovery/enrichment connector and deduplication are missing | P0 |
 | CRM | Companies, contacts, leads, opportunities, stages | Foundation implemented | P0 |
 | CRM integrity | Deduplication, merge review, relationship timeline, activities, next actions | Append-only contact activity timeline implemented; deduplication/merge review and structured next-action queue remain incomplete | P0 |
-| Outreach | Personalized email/LinkedIn drafts, approved sender identities, delivery tracking | Missing | P0 |
+| Outreach | Personalized email/LinkedIn drafts, approved sender identities, delivery tracking | Agent-prepared email/LinkedIn/call-script drafts and founder review exist in PR #28; no send, schedule, sender identity or delivery tracking | P0 |
 | Outreach governance | Consent/provenance, suppression, opt-out, bounce/complaint stop, contact windows, rate limits, idempotency | Required but incomplete | P0 |
 | AI phone agent | Inbound answering, outbound authorized callbacks, qualification, transfer/escalation | Call/transcript records only; live telephony missing | P0/P1 |
 | Conversation intelligence | Transcription, summaries, requirements, objections, tasks, CRM linkage | Partial foundation; STT/TTS and lifecycle missing | P1 |
@@ -38,13 +38,13 @@ Status meanings:
 | Website conversion | Signed website lead intake exists, disabled pending external config and E2E validation | Foundation implemented; activation pending | P0 |
 | Sales | Qualification, discovery, objections, follow-up, pipeline forecasting | Partial CRM foundation | P0 |
 | Service catalogue | Versioned agency offers, deliverables, assumptions, exclusions, estimation inputs | Founder-governed, draft-first versioned catalogue implemented; proposal snapshot linkage pending PR #26 validation | P0 |
-| Proposals | Proposal/quotation/SOW drafts, revisions, approvals, send status | Internal proposal drafts and single-use founder pricing approval implemented; revisioning and governed sending remain missing | P0 |
-| Contracts | NDA/MSA/SOW metadata, signature status, obligations, renewals | Missing; external signature/legal review | P1 |
+| Proposals | Proposal/quotation/SOW drafts, revisions, approvals, send status | Internal proposal drafts, one-time/retainer terms and single-use founder pricing approval implemented in PR #28; revisioning and governed sending remain missing | P0 |
+| Contracts | NDA/MSA/SOW metadata, signature status, obligations, renewals | Internal contract register, founder approval and signed-evidence recording implemented; legal templates, external signature, obligations and renewal workflow remain incomplete | P1 |
 | Client onboarding | Won deal to workspace, kickoff, access, requirements, baseline, acceptance | Contract-backed onboarding checklist and founder-approved activation into delivery project implemented; complete workspace provisioning and acceptance/handover remain partial | P0 |
-| Project delivery | Projects, milestones, tasks, budgets, time/cost | Foundation implemented | P0 |
+| Project delivery | Projects, milestones, tasks, budgets, time/cost | Foundation implemented; retainer service-period ledger, billable usage snapshots and overage visibility added in PR #28; QA, SLA, recurring billing and handover remain incomplete | P0 |
 | Requirements and change control | Requirements traceability, scope change, approval, impact | Partial; scope-change foundation exists | P1 |
 | QA and release | Acceptance criteria, evidence, security review, release approval, rollback | Partial; full gates incomplete | P0 |
-| Client success | Status updates, satisfaction, issue escalation, renewals, referrals | Missing/partial | P1 |
+| Client success | Status updates, satisfaction, issue escalation, renewals, referrals | Partial foundations only; account-health action classification exists, but grounded health scoring, feedback, support and renewal lifecycle are missing | P1 |
 | Support | Requests, incidents, priority, SLA/response targets, resolution and knowledge articles | Missing as complete workflow | P1 |
 | Finance | Project estimates, budget, time/cost and provisional summaries | Foundation implemented | P0 |
 | Invoicing | Invoice numbers, line items, tax fields, due dates, revisions, status | Internal invoice draft, overbilling guard, founder issue approval and issue-evidence recording implemented; tax fields, document generation and sending remain missing | P0 |
@@ -203,3 +203,7 @@ AI calling belongs in that loop, with inbound qualification and requested callba
 
 ## Implementation reconciliation (2026-11-25)
 Merged code includes contact relationship activities, Leads/Opportunities Founder Console workflows, proposal drafts with founder pricing approval, a founder-governed service catalogue, a contract register requiring approved proposal and signed evidence, contract-backed onboarding with checklist/activation approval, and an invoice/receivables register with founder issue approval and append-only payment receipt reconciliation. These are internal control-plane workflows, not external delivery: there is no proposal/contract/invoice sending, payment collection, or autonomous outreach. PR #26 proposes immutable service-offering snapshots on linked proposals and remains unvalidated until CI passes.
+
+
+## 2026-11-25 implementation checkpoint
+The current integration branch adds one-time/retainer proposal and contract terms, source-backed lead research records, founder-reviewed outreach drafts, and a retainer service-period usage ledger with founder closeout. These changes are in PR #28 and are **not merged or validated**. See [Production Readiness Checklist](PRODUCTION_READINESS_CHECKLIST.md) for weighted progress, verification state, release gates and remaining work.
