@@ -10,3 +10,7 @@ Create one Markdown file per role using [AGENT_TEMPLATE.md](AGENT_TEMPLATE.md). 
 - [Specialist Agent](SPECIALIST_AGENT.md)
 
 Add department-specific profiles as workflows, acceptance criteria and authorization policies are implemented.
+
+## Department charters
+
+See [departments/README.md](departments/README.md) for the 16 department charters aligned with the agency organization blueprint.
