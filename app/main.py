@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.db import get_db
 from app.config import settings
+from app.workforce_service import initialize_workforce
 from app.auth import (
     get_principal,
     require_membership,
@@ -134,6 +135,25 @@ def workspace_in_org(db: Session, org_id: str, workspace_id: str):
 
 
 # ---------------------------------------------------------------------------
+
+@app.post("/v1/orgs/{org_id}/workforce/bootstrap")
+def bootstrap_workforce(org_id: str, workspace_id: str,
+                        db: Session = Depends(get_db),
+                        p: Principal = Depends(get_principal)):
+    require_membership(org_id, p, db)
+    require_founder_authority(db, org_id, p.user.id)
+    workspace_in_org(db, org_id, workspace_id)
+    try:
+        result = initialize_workforce(db, org_id=org_id, workspace_id=workspace_id)
+        record_event(db, org_id, p.user.id, "workforce.initialized", "workforce",
+                     workspace_id, workspace_id, result)
+        db.commit()
+        return result
+    except Exception:
+        db.rollback()
+        raise
+
+
 # Workspaces
 # ---------------------------------------------------------------------------
 
