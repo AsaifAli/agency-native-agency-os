@@ -860,3 +860,8 @@ app.include_router(skills_router)
 # Lightweight service playbooks, scope control, time and project cost operations.
 from app.operations_routes import router as operations_router
 app.include_router(operations_router)
+
+
+# Governed outbound email preparation, approval and suppression (no provider sends).
+from app.outreach.routes import router as outreach_router
+app.include_router(outreach_router)
