@@ -373,9 +373,10 @@ def update_service_offering_status(
     if item.status == body.status:
         return item
     item.status = body.status
-    _event(db, org_id, p.user.id, "commercial.service_offering_status_changed", "service_offering", item.id,
+    event_type = f"commercial.service_offering_{body.status}"
+    _event(db, org_id, p.user.id, event_type, "service_offering", item.id,
            item.workspace_id, {"status": item.status, "version": item.version})
-    _outbox(db, org_id, item.workspace_id, "commercial.service_offering_status_changed", "service_offering", item.id,
+    _outbox(db, org_id, item.workspace_id, event_type, "service_offering", item.id,
             {"status": item.status, "version": item.version})
     db.commit()
     db.refresh(item)
