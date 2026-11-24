@@ -144,6 +144,8 @@ def create_sender(
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
     _write(org_id, body.workspace_id, p, db)
+    if len(body.display_name.strip()) < 2:
+        raise HTTPException(422, "Sender display name must be non-empty")
     address = body.email_address.lower().strip()
     duplicate = db.query(OutboundSender.id).filter_by(
         org_id=org_id, workspace_id=body.workspace_id, email_address=address,
