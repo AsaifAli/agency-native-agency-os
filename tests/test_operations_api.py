@@ -269,6 +269,7 @@ def test_service_catalogue_draft_requires_founder_activation(client):
 
     db = client.session_factory()
     try:
+        founder = db.query(User).filter_by(id=client.user_id).one()
         operator = User(email="catalog-operator@example.test", display_name="Operator")
         db.add(operator); db.flush()
         db.add(Membership(org_id=org, user_id=operator.id, role=Role.operator))
@@ -281,7 +282,7 @@ def test_service_catalogue_draft_requires_founder_activation(client):
         headers=headers(), json={"status": "active"},
     )
     assert denied.status_code == 403
-    client.app.dependency_overrides[get_principal] = lambda: Principal(user=client.session_factory().query(User).filter_by(id=client.user_id).one())
+    client.app.dependency_overrides[get_principal] = lambda: Principal(user=founder)
     activated = client.patch(
         f"/v1/orgs/{org}/operations/service-catalog/{offering_id}/status",
         headers=headers(), json={"status": "active"},
