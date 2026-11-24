@@ -110,6 +110,37 @@ class Proposal(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
 
 
+class ContractRecord(Base):
+    """Internal contract register. Executed status requires recorded signed evidence."""
+    __tablename__ = "contract_records"
+    __table_args__ = (
+        UniqueConstraint("org_id", "workspace_id", "contract_number", name="uq_contract_number_workspace"),
+        Index("ix_contract_records_scope_status", "org_id", "workspace_id", "status"),
+        CheckConstraint("status IN ('draft','pending_approval','executed','rejected','terminated')", name="ck_contract_record_status"),
+        CheckConstraint("amount_minor >= 0", name="ck_contract_record_amount_nonnegative"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    client_id: Mapped[str] = mapped_column(ForeignKey("clients.id", ondelete="RESTRICT"), nullable=False, index=True)
+    proposal_id: Mapped[str] = mapped_column(ForeignKey("proposals.id", ondelete="RESTRICT"), nullable=False, index=True)
+    contract_number: Mapped[str] = mapped_column(String(80), nullable=False)
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    amount_minor: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    terms_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="draft", server_default="draft", nullable=False)
+    approval_id: Mapped[str | None] = mapped_column(ForeignKey("approvals.id"), nullable=True)
+    signed_reference: Mapped[str] = mapped_column(String(240), default="", server_default="", nullable=False)
+    signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    executed_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
+
+
 class ScopeChangeRequest(Base):
     __tablename__ = "scope_change_requests"
     __table_args__ = (
