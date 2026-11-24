@@ -89,8 +89,10 @@ def create_delegation(org_id: str, body: DelegationCreate, db: Session = Depends
         raise HTTPException(409, "Only active workforce members can delegate work")
     if delegator.is_founder_reserved or assignee.is_founder_reserved:
         raise HTTPException(403, "Agent delegation cannot grant or assign work to Founder authority")
-    if delegator.manager_member_id != assignee.id and delegator.id != assignee.manager_member_id:
-        raise HTTPException(403, "Delegation must follow the configured reporting relationship")
+    if delegator.manager_member_id != assignee.id:
+        raise HTTPException(403, "Only a workforce member's direct manager may delegate work to that member")
+    if assignee.is_founder_reserved:
+        raise HTTPException(403, "Autonomous members cannot delegate tasks to Founder authority")
     dependency = None
     if body.dependency_task_id:
         dependency = db.query(Task).filter_by(id=body.dependency_task_id, org_id=org_id, workspace_id=body.workspace_id).first()
