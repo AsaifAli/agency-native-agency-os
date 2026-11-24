@@ -253,6 +253,56 @@ def start_execution(
     return execution, attempt
 
 
+def attach_external_run_id(
+    db: Session,
+    *,
+    execution_id: str,
+    attempt_id: str,
+    worker_id: str,
+    external_run_id: str,
+) -> tuple[Execution, ExecutionAttempt]:
+    """Persist a provider session ID while the current worker owns its lease.
+
+    This lets a recovered attempt resume the same provider session instead of
+    creating a second one after a worker restart or retry.
+    """
+    if not isinstance(external_run_id, str) or not external_run_id.strip():
+        raise ValueError("external_run_id must be a non-empty string")
+    if len(external_run_id) > 200:
+        raise ValueError("external_run_id must be 200 characters or fewer")
+
+    execution, attempt = _get_owned_execution_attempt(
+        db,
+        execution_id=execution_id,
+        attempt_id=attempt_id,
+        worker_id=worker_id,
+    )
+    if execution.status != ExecutionStatus.running:
+        raise InvalidExecutionState("Execution is not running")
+    if attempt.status != ExecutionAttemptStatus.running:
+        raise InvalidExecutionState("Attempt is not running")
+    if attempt.external_run_id and attempt.external_run_id != external_run_id:
+        raise InvalidExecutionState("Attempt is already linked to another provider run")
+
+    attempt.external_run_id = external_run_id
+    record_event(
+        db,
+        execution.org_id,
+        None,
+        "execution.external_run_linked",
+        "execution",
+        execution.id,
+        execution.workspace_id,
+        {
+            "attempt_id": attempt.id,
+            "provider": attempt.runtime,
+            "external_run_id": external_run_id,
+        },
+    )
+    db.flush()
+    return execution, attempt
+
+
 def heartbeat_execution(
     db: Session,
     *,

@@ -1,3 +1,4 @@
+from app.integrations.managed_agents import ManagedAgentsRuntime
 from app.integrations.mock_runtime import MockRuntime
 from app.integrations.runtime import AgentRuntime
 from app.integrations.runtime_registry import is_runtime_available
@@ -9,7 +10,6 @@ class RuntimeNotConfiguredError(Exception):
 
 def get_runtime(runtime_name: str) -> AgentRuntime:
     """Return a runtime explicitly enabled for this environment."""
-
     if not is_runtime_available(runtime_name):
         raise RuntimeNotConfiguredError(
             f"Runtime '{runtime_name}' is not enabled in this environment."
@@ -17,8 +17,9 @@ def get_runtime(runtime_name: str) -> AgentRuntime:
 
     if runtime_name == "mock":
         return MockRuntime()
+    if runtime_name == "claude_managed_agents":
+        return ManagedAgentsRuntime()
 
-    # The registry and factory intentionally fail closed if they drift.
     raise RuntimeNotConfiguredError(
         f"Runtime '{runtime_name}' has no worker adapter."
     )
