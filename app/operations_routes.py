@@ -319,6 +319,7 @@ class ContractOut(BaseModel):
 class ProposalCreate(BaseModel):
     workspace_id: str
     opportunity_id: str
+    service_offering_id: str | None = None
     title: str = Field(min_length=3, max_length=240)
     service_line: str = Field(min_length=2, max_length=120)
     scope_summary: str = Field(min_length=10, max_length=12000)
@@ -340,6 +341,8 @@ class ProposalOut(BaseModel):
     id: str
     workspace_id: str
     opportunity_id: str
+    service_offering_id: str | None
+    service_offering_snapshot: dict | None
     title: str
     service_line: str
     scope_summary: str
@@ -1297,11 +1300,38 @@ def create_proposal(
         raise HTTPException(404, "Opportunity not found")
     if body.currency != opportunity.currency:
         raise HTTPException(422, "Proposal currency must match the linked opportunity currency")
+    offering = None
+    offering_snapshot = None
+    if body.service_offering_id:
+        offering = db.query(ServiceOffering).filter_by(
+            id=body.service_offering_id, org_id=org_id, workspace_id=body.workspace_id,
+            status="active",
+        ).first()
+        if offering is None:
+            raise HTTPException(404, "Active service offering not found in this workspace")
+        if offering.currency != body.currency:
+            raise HTTPException(422, "Service offering currency must match the linked opportunity currency")
+        offering_snapshot = {
+            "id": offering.id, "code": offering.code, "version": offering.version,
+            "name": offering.name, "service_line": offering.service_line,
+            "description": offering.description, "pricing_model": offering.pricing_model,
+            "indicative_price_minor": offering.indicative_price_minor,
+            "currency": offering.currency, "typical_duration_days": offering.typical_duration_days,
+            "target_outcomes": list(offering.target_outcomes or []),
+            "deliverables": list(offering.deliverables or []),
+            "required_inputs": list(offering.required_inputs or []),
+            "exclusions": list(offering.exclusions or []),
+        }
     item = Proposal(
         org_id=org_id, workspace_id=body.workspace_id, opportunity_id=body.opportunity_id,
-        title=body.title, service_line=body.service_line, scope_summary=body.scope_summary,
-        deliverables=body.deliverables, assumptions=body.assumptions,
-        exclusions=body.exclusions, amount_minor=body.amount_minor,
+        service_offering_id=offering.id if offering else None,
+        service_offering_snapshot=offering_snapshot,
+        title=body.title, service_line=offering.service_line if offering else body.service_line,
+        scope_summary=body.scope_summary,
+        deliverables=body.deliverables or (list(offering.deliverables or []) if offering else []),
+        assumptions=body.assumptions,
+        exclusions=body.exclusions or (list(offering.exclusions or []) if offering else []),
+        amount_minor=body.amount_minor,
         currency=body.currency, validity_days=body.validity_days, created_by=p.user.id,
     )
     db.add(item)

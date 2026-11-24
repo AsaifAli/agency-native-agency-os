@@ -106,6 +106,39 @@ def test_playbook_create_and_founder_activation(client):
     assert activated.json()["version"] == 2
 
 
+def test_proposal_snapshots_active_service_offering(client):
+    org, ws = client.org_id, client.ws_id
+    created = client.post(f"/v1/orgs/{org}/operations/service-catalog", headers=headers(), json={
+        "workspace_id": ws, "code": "ai-workflow-build", "name": "AI Workflow Build",
+        "service_line": "AI Engineering",
+        "description": "Design and implement a governed AI workflow for the client.",
+        "pricing_model": "fixed", "indicative_price_minor": 1250000, "currency": "INR",
+        "deliverables": ["Architecture", "Implementation"], "exclusions": ["Third-party fees"],
+    })
+    assert created.status_code == 201, created.text
+    offering = created.json()
+    activated = client.patch(
+        f"/v1/orgs/{org}/operations/service-catalog/{offering['id']}/status",
+        headers=headers(), json={"status": "active"},
+    )
+    assert activated.status_code == 200, activated.text
+    proposal = client.post(f"/v1/orgs/{org}/operations/proposals", headers=headers(), json={
+        "workspace_id": ws, "opportunity_id": client.opportunity_id,
+        "service_offering_id": offering["id"], "title": "AI workflow proposal",
+        "service_line": "Ignored when catalogue offering is selected",
+        "scope_summary": "Implement the agreed workflow and hand over the verified solution.",
+        "amount_minor": 1400000, "currency": "INR",
+    })
+    assert proposal.status_code == 201, proposal.text
+    payload = proposal.json()
+    assert payload["service_offering_id"] == offering["id"]
+    assert payload["service_line"] == "AI Engineering"
+    assert payload["deliverables"] == ["Architecture", "Implementation"]
+    assert payload["exclusions"] == ["Third-party fees"]
+    assert payload["service_offering_snapshot"]["version"] == 1
+    assert payload["service_offering_snapshot"]["indicative_price_minor"] == 1250000
+
+
 def test_proposal_requires_single_use_founder_pricing_approval(client):
     org, ws, opportunity = client.org_id, client.ws_id, client.opportunity_id
     created = client.post(f"/v1/orgs/{org}/operations/proposals", headers=headers(), json={

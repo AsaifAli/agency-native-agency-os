@@ -92,6 +92,8 @@ class Proposal(Base):
     org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
     opportunity_id: Mapped[str] = mapped_column(ForeignKey("opportunities.id", ondelete="RESTRICT"), nullable=False, index=True)
+    service_offering_id: Mapped[str | None] = mapped_column(ForeignKey("service_offerings.id", ondelete="RESTRICT"), nullable=True, index=True)
+    service_offering_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     title: Mapped[str] = mapped_column(String(240), nullable=False)
     service_line: Mapped[str] = mapped_column(String(120), nullable=False)
     scope_summary: Mapped[str] = mapped_column(Text, nullable=False)

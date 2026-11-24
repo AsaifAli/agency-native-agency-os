@@ -7,8 +7,11 @@ import Notice from "@/components/notice";
 import { api, orgId, type Workspace } from "@/lib/api";
 
 type Opportunity = { id: string; title: string; currency: string; stage: string; amount_minor: number };
+type ServiceOffering = { id: string; code: string; version: number; name: string; service_line: string; description: string; indicative_price_minor: number | null; currency: string; deliverables: string[]; exclusions: string[]; status: string };
 type Proposal = {
   id: string;
+  service_offering_id: string | null;
+  service_offering_snapshot: Record<string, unknown> | null;
   workspace_id: string;
   opportunity_id: string;
   title: string;
@@ -36,6 +39,8 @@ export default function ProposalsPage() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspace, setWorkspace] = useState("");
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [offerings, setOfferings] = useState<ServiceOffering[]>([]);
+  const [serviceOfferingId, setServiceOfferingId] = useState("");
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [opportunityId, setOpportunityId] = useState("");
   const [title, setTitle] = useState("");
@@ -72,11 +77,14 @@ export default function ProposalsPage() {
     setLoading(true);
     setError("");
     try {
-      const [opps, drafts] = await Promise.all([
+      const [opps, drafts, catalogue] = await Promise.all([
         api<Opportunity[]>(`/v1/orgs/${orgId()}/opportunities?workspace_id=${encodeURIComponent(workspace)}`),
         api<Proposal[]>(`/v1/orgs/${orgId()}/operations/proposals?workspace_id=${encodeURIComponent(workspace)}`),
+        api<ServiceOffering[]>(`/v1/orgs/${orgId()}/operations/service-catalog?workspace_id=${encodeURIComponent(workspace)}&status=active`),
       ]);
       setOpportunities(opps);
+      setOfferings(catalogue);
+      setServiceOfferingId(current => catalogue.some(item => item.id === current) ? current : "");
       setProposals(drafts);
       setOpportunityId(current => opps.some(item => item.id === current) ? current : opps[0]?.id || "");
     } catch (e) {
@@ -101,6 +109,7 @@ export default function ProposalsPage() {
         body: JSON.stringify({
           workspace_id: workspace,
           opportunity_id: opportunityId,
+          service_offering_id: serviceOfferingId || null,
           title: title.trim(),
           service_line: serviceLine.trim(),
           scope_summary: scope.trim(),
@@ -156,6 +165,20 @@ export default function ProposalsPage() {
         {error && <div className="error">{error}</div>}
         <h2 className="panel-title">Create proposal draft</h2>
         <form onSubmit={createProposal} style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:10,marginBottom:22}}>
+          <select className="field" value={serviceOfferingId} onChange={e => {
+            const selected = offerings.find(item => item.id === e.target.value);
+            setServiceOfferingId(e.target.value);
+            if (selected) {
+              setServiceLine(selected.service_line);
+              if (!scope.trim()) setScope(selected.description);
+              if (!deliverables.trim()) setDeliverables(selected.deliverables.join("\\n"));
+              if (!exclusions.trim()) setExclusions(selected.exclusions.join("\\n"));
+              if (selected.indicative_price_minor !== null) setAmount(String(selected.indicative_price_minor / 100));
+            }
+          }}>
+            <option value="">No catalogue offering (custom scope)</option>
+            {offerings.map(item => <option key={item.id} value={item.id}>{item.name} · v{item.version} · {item.code}</option>)}
+          </select>
           <select className="field" value={opportunityId} onChange={e => setOpportunityId(e.target.value)} required>
             <option value="">Select opportunity</option>
             {opportunities.map(item => <option key={item.id} value={item.id}>{item.title} · {item.stage}</option>)}
@@ -182,6 +205,7 @@ export default function ProposalsPage() {
                 <div style={{minWidth:0,width:"100%"}}>
                   <div className="activity-title">{item.title}</div>
                   <div className="activity-meta">{item.service_line} · {money(item.amount_minor,item.currency)} · {item.validity_days}-day validity · {item.status.replace("_"," ")}</div>
+                  {item.service_offering_snapshot && <div className="activity-meta">Catalogue snapshot: {String(item.service_offering_snapshot.name || "Offering")} · v{String(item.service_offering_snapshot.version || "?")} (retained with this proposal)</div>}
                   <p className="activity-meta" style={{whiteSpace:"pre-wrap"}}>{item.scope_summary}</p>
                   {item.deliverables.length>0 && <div className="activity-meta">Deliverables: {item.deliverables.join(" · ")}</div>}
                   {item.approval_id && <div className="activity-meta">Approval reference: {item.approval_id}</div>}
