@@ -117,6 +117,22 @@ export default function ContractsPage() {
     }
   }
 
+  async function rejectContract(item: Contract) {
+    if (!item.approval_id) return;
+    setBusyId(item.id); setError("");
+    try {
+      await api<Contract>(`/v1/orgs/${orgId()}/operations/contracts/${item.id}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ approval_id: item.approval_id, note: "Founder rejected contract execution" }),
+      });
+      await loadData();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusyId("");
+    }
+  }
+
   async function recordExecution(item: Contract) {
     const reference = (signedRefs[item.id] || "").trim();
     const date = signedDates[item.id];
@@ -178,6 +194,7 @@ export default function ContractsPage() {
                     <input className="field" type="datetime-local" value={signedDates[item.id] || ""} onChange={e => setSignedDates(v => ({...v,[item.id]:e.target.value}))} />
                     <button className="button primary" type="button" onClick={() => void recordExecution(item)} disabled={busyId===item.id || !item.approval_id}>{busyId===item.id ? "Recording…" : "Record signed execution"}</button>
                     <Link href="/approvals" className="activity-meta">Approve contract execution in Founder Approvals</Link>
+                    <button className="button secondary" type="button" onClick={() => void rejectContract(item)} disabled={busyId===item.id}>{busyId===item.id ? "Rejecting…" : "Reject contract"}</button>
                   </div>}
                   {item.status === "executed" && <div className="activity-meta">Signed reference: {item.signed_reference} · Signed {item.signed_at ? new Date(item.signed_at).toLocaleString() : "date not recorded"}</div>}
                   {item.approval_id && <div className="activity-meta">Approval ID: {item.approval_id}</div>}
