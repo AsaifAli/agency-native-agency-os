@@ -295,9 +295,10 @@ def update_opportunity_stage(
     if item is None:
         raise HTTPException(404, "Opportunity not found")
     _write_access(org_id, p, db, item.workspace_id)
-    if body.client_id is not None:
-        _scoped_parent(db, Client, object_id=body.client_id, org_id=org_id,
-                       workspace_id=item.workspace_id, label="Client")
+    if "client_id" in body.model_fields_set:
+        if body.client_id is not None:
+            _scoped_parent(db, Client, object_id=body.client_id, org_id=org_id,
+                           workspace_id=item.workspace_id, label="Client")
         item.client_id = body.client_id
     item.stage = body.stage
     if body.stage == "won":
