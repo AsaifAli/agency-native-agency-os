@@ -89,10 +89,25 @@ def create_delegation(org_id: str, body: DelegationCreate, db: Session = Depends
     assignee = _member(db, org_id, body.workspace_id, body.assigned_to_member_id)
     if delegator.status != "active" or assignee.status != "active":
         raise HTTPException(409, "Only active workforce members can delegate work")
+    if delegator.autonomy_level < 2:
+        raise HTTPException(403, "Delegator autonomy level does not permit task assignment")
+    if assignee.agent_id is not None:
+        from app.models import Agent
+        agent = db.query(Agent).filter_by(
+            id=assignee.agent_id, org_id=org_id, workspace_id=body.workspace_id
+        ).first()
+        if agent is None or not agent.enabled:
+            raise HTTPException(409, "Assigned agent definition is not enabled")
+    capability = db.query(WorkforceCapability).filter_by(
+        org_id=org_id, workspace_id=body.workspace_id, member_id=assignee.id,
+        enabled=True,
+    ).first()
+    if capability is None:
+        raise HTTPException(403, "Assignee has no enabled workforce capability")
     if delegator.is_founder_reserved or assignee.is_founder_reserved:
         raise HTTPException(403, "Agent delegation cannot grant or assign work to Founder authority")
-    if delegator.manager_member_id != assignee.id:
-        raise HTTPException(403, "Only a workforce member's direct manager may delegate work to that member")
+    if assignee.manager_member_id != delegator.id:
+        raise HTTPException(403, "Delegator must be the assigned member's direct manager")
     if assignee.is_founder_reserved:
         raise HTTPException(403, "Autonomous members cannot delegate tasks to Founder authority")
     dependency = None

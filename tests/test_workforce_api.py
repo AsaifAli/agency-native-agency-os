@@ -126,3 +126,113 @@ def test_founder_bootstrap_route_and_workspace_scoped_workforce_read(app_client)
     )
     assert listing.status_code==200
     assert len([m for m in listing.json()["members"] if m["department_key"].endswith("_head")])==16
+
+
+def test_workforce_delegation_requires_downward_manager_relation_and_enabled_capability(app_client):
+    from app.models import Task, Agent
+    from app.workforce_models import WorkforceMember, WorkforceCapability
+    i = app_client.identity
+    app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/bootstrap",
+        params={"workspace_id": i["workspace"].id},
+    )
+    db = app_client.factory()
+    try:
+        chief = db.query(WorkforceMember).filter_by(
+            org_id=i["org"].id, workspace_id=i["workspace"].id,
+            department_key="office_chief_of_staff",
+        ).one()
+        head = db.query(WorkforceMember).filter_by(
+            org_id=i["org"].id, workspace_id=i["workspace"].id,
+            department_key="ai_engineering_development_head",
+        ).one()
+        specialist = db.query(WorkforceMember).filter_by(
+            org_id=i["org"].id, workspace_id=i["workspace"].id,
+            department_key="ai_engineering_development",
+        ).one()
+        chief.status = "active"
+        head.status = "active"
+        head.autonomy_level = 2
+        specialist.status = "active"
+        agent = db.get(Agent, specialist.agent_id)
+        agent.enabled = True
+        db.add(WorkforceCapability(
+            org_id=i["org"].id, workspace_id=i["workspace"].id,
+            member_id=specialist.id, capability_key="internal.research",
+            scope="self", allowed_data_classes=["synthetic"],
+            allowed_actions=["research.execute"], tool_allowlist=[],
+            budget_minor=0, currency="INR", enabled=True,
+        ))
+        task = Task(
+            org_id=i["org"].id, workspace_id=i["workspace"].id,
+            title="Parent task", description="Synthetic test",
+            created_by=i["user"].id,
+        )
+        db.add(task)
+        db.commit()
+        task_id, chief_id, head_id, specialist_id = task.id, chief.id, head.id, specialist.id
+    finally:
+        db.close()
+
+    wrong_direction = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/delegations",
+        json={
+            "workspace_id": i["workspace"].id, "parent_task_id": task_id,
+            "child_title": "Wrong direction", "delegated_by_member_id": head_id,
+            "assigned_to_member_id": chief_id,
+        },
+    )
+    assert wrong_direction.status_code == 403
+
+    accepted = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/delegations",
+        json={
+            "workspace_id": i["workspace"].id, "parent_task_id": task_id,
+            "child_title": "Research task", "delegated_by_member_id": head_id,
+            "assigned_to_member_id": specialist_id,
+        },
+    )
+    assert accepted.status_code == 201, accepted.text
+    assert accepted.json()["review_status"] == "pending"
+
+
+def test_workforce_delegation_rejects_assignee_without_enabled_capability(app_client):
+    from app.models import Task
+    from app.workforce_models import WorkforceMember
+    i = app_client.identity
+    app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/bootstrap",
+        params={"workspace_id": i["workspace"].id},
+    )
+    db = app_client.factory()
+    try:
+        head = db.query(WorkforceMember).filter_by(
+            org_id=i["org"].id, workspace_id=i["workspace"].id,
+            department_key="ai_engineering_development_head",
+        ).one()
+        specialist = db.query(WorkforceMember).filter_by(
+            org_id=i["org"].id, workspace_id=i["workspace"].id,
+            department_key="ai_engineering_development",
+        ).one()
+        head.status = "active"
+        head.autonomy_level = 2
+        specialist.status = "active"
+        task = Task(
+            org_id=i["org"].id, workspace_id=i["workspace"].id,
+            title="Parent task", created_by=i["user"].id,
+        )
+        db.add(task)
+        db.commit()
+        task_id, head_id, specialist_id = task.id, head.id, specialist.id
+    finally:
+        db.close()
+
+    denied = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/delegations",
+        json={
+            "workspace_id": i["workspace"].id, "parent_task_id": task_id,
+            "child_title": "Should fail", "delegated_by_member_id": head_id,
+            "assigned_to_member_id": specialist_id,
+        },
+    )
+    assert denied.status_code == 403
