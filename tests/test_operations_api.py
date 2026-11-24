@@ -15,6 +15,7 @@ from app.models import (
 from app.domain_models import Project
 from app.operations_models import ServicePlaybook, ScopeChangeRequest, TimeEntry, ProjectCost
 from app.operations_routes import router
+from app.telephony.models import OutboxEvent
 
 
 @pytest.fixture()
@@ -227,3 +228,106 @@ def test_agent_performance_is_workspace_scoped(client):
     )
     assert r.status_code == 200, r.text
     assert r.json() == {"items": []}
+
+def test_outbox_health_is_founder_only_and_org_scoped(client):
+    db = client.session_factory()
+    try:
+        db.add_all([
+            OutboxEvent(
+                org_id=client.org_id,
+                workspace_id=client.ws_id,
+                event_type="test.pending",
+                schema_version=1,
+                aggregate_type="test",
+                aggregate_id="pending-1",
+                idempotency_key="health-pending-1",
+                payload={"must_not_be_exposed": True},
+                status="pending",
+                attempts=0,
+            ),
+            OutboxEvent(
+                org_id=client.org_id,
+                workspace_id=client.ws_id,
+                event_type="test.retry",
+                schema_version=1,
+                aggregate_type="test",
+                aggregate_id="retry-1",
+                idempotency_key="health-retry-1",
+                payload={},
+                status="pending",
+                attempts=2,
+            ),
+            OutboxEvent(
+                org_id=client.org_id,
+                workspace_id=client.ws_id,
+                event_type="test.dead",
+                schema_version=1,
+                aggregate_type="test",
+                aggregate_id="dead-1",
+                idempotency_key="health-dead-1",
+                payload={},
+                status="dead_letter",
+                attempts=8,
+            ),
+            OutboxEvent(
+                org_id=client.other_ws_id,
+                workspace_id=client.other_ws_id,
+                event_type="test.other",
+                schema_version=1,
+                aggregate_type="test",
+                aggregate_id="other-1",
+                idempotency_key="health-other-1",
+                payload={},
+                status="dead_letter",
+                attempts=8,
+            ),
+        ])
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.get(
+        f"/v1/orgs/{client.org_id}/operations/outbox-health",
+        headers=headers(),
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+
+    assert data["pending_count"] == 2
+    assert data["retrying_count"] == 1
+    assert data["dead_letter_count"] == 1
+    assert "payload" not in data
+    assert "idempotency_key" not in data
+    assert "worker_id" not in data
+
+def test_outbox_health_denies_member_without_founder_authority(client):
+    db = client.session_factory()
+    try:
+        member = User(
+            email="ordinary-member@example.test",
+            display_name="Ordinary Member",
+        )
+        db.add(member)
+        db.flush()
+
+        db.add(Membership(
+            org_id=client.org_id,
+            user_id=member.id,
+            role=Role.operator,
+        ))
+        db.commit()
+
+        client.app.dependency_overrides[get_principal] = (
+            lambda: Principal(user=member)
+        )
+
+        response = client.get(
+            f"/v1/orgs/{client.org_id}/operations/outbox-health",
+            headers=headers(),
+        )
+
+        assert response.status_code == 403
+    finally:
+        client.app.dependency_overrides.pop(get_principal, None)
+        db.close()

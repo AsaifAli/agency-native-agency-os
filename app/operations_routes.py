@@ -546,3 +546,73 @@ def agent_performance(
         elif state in {"queued", "claimed", "running", "retry_wait"}:
             item["active"] += n
     return {"items": sorted(agents.values(), key=lambda x: x["name"].lower())}
+
+@router.get("/outbox-health")
+def outbox_health(
+    org_id: str,
+    db: Session = Depends(get_db),
+    p: Principal = Depends(get_principal),
+):
+    """Founder-only, organization-scoped outbox operational summary."""
+    require_founder_authority(db, org_id, p.user.id)
+
+    now = datetime.now(timezone.utc)
+
+    status_rows = (
+        db.query(OutboxEvent.status, func.count(OutboxEvent.id))
+        .filter(OutboxEvent.org_id == org_id)
+        .group_by(OutboxEvent.status)
+        .all()
+    )
+    counts = {status: count for status, count in status_rows}
+
+    oldest_pending = (
+        db.query(func.min(OutboxEvent.created_at))
+        .filter(
+            OutboxEvent.org_id == org_id,
+            OutboxEvent.status == "pending",
+        )
+        .scalar()
+    )
+
+    retrying_count = (
+        db.query(func.count(OutboxEvent.id))
+        .filter(
+            OutboxEvent.org_id == org_id,
+            OutboxEvent.status == "pending",
+            OutboxEvent.attempts > 0,
+        )
+        .scalar()
+    )
+
+    expired_lease_count = (
+        db.query(func.count(OutboxEvent.id))
+        .filter(
+            OutboxEvent.org_id == org_id,
+            OutboxEvent.status == "processing",
+            OutboxEvent.lease_expires_at.is_not(None),
+            OutboxEvent.lease_expires_at <= now,
+        )
+        .scalar()
+    )
+
+    oldest_age = None
+    if oldest_pending is not None:
+        if oldest_pending.tzinfo is None:
+            oldest_pending = oldest_pending.replace(tzinfo=timezone.utc)
+        oldest_age = max(
+            0,
+            int((now - oldest_pending).total_seconds()),
+        )
+
+    return {
+        "organization_id": org_id,
+        "observed_at": now.isoformat(),
+        "pending_count": counts.get("pending", 0),
+        "oldest_pending_age_seconds": oldest_age,
+        "processing_count": counts.get("processing", 0),
+        "retrying_count": retrying_count or 0,
+        "expired_lease_count": expired_lease_count or 0,
+        "dead_letter_count": counts.get("dead_letter", 0),
+        "published_count": counts.get("published", 0),
+    }
