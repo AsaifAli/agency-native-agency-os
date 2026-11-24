@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 const groups = [
- {label:"WORKSPACE",items:[["Overview","/","◫"],["Organization","/organization","⌘"],["Workforce","/workforce","♙"],["Agent Studio","/agents","✳"],["Tasks","/tasks","☷"],["Operations","/operations","◉"],["Approvals","/approvals","✓"],["Leads","/leads","◎"],["Opportunities","/opportunities","◇"],["Proposals","/proposals","▤"],["Service Catalogue","/service-catalog","▧"],["Contracts","/contracts","▤"],["Onboarding","/onboardings","▧"],["Invoices & Receivables","/invoices","＄"],["Clients","/clients","▣"],["Contacts","/contacts","♧"],["Calls & Transcripts","/calls","☎"]]},
+ {label:"WORKSPACE",items:[["Overview","/","◫"],["Organization","/organization","⌘"],["Workforce","/workforce","♙"],["Agent Studio","/agents","✳"],["Tasks","/tasks","☷"],["Operations","/operations","◉"],["Approvals","/approvals","✓"],["Leads","/leads","◎"],["Research & Outreach","/outreach","✉"],["Opportunities","/opportunities","◇"],["Proposals","/proposals","▤"],["Service Catalogue","/service-catalog","▧"],["Contracts","/contracts","▤"],["Onboarding","/onboardings","▧"],["Invoices & Receivables","/invoices","＄"],["Clients","/clients","▣"],["Contacts","/contacts","♧"],["Calls & Transcripts","/calls","☎"]]},
  {label:"INTELLIGENCE",items:[["Workflows","/workflows","⌁"],["Evaluations","/evaluations","◈"],["Skills Library","/capabilities","◇"]]},
  {label:"CONTROL",items:[["Budgets","/budgets","＄"],["Monitoring","/monitoring","◉"],["Security & Audit","/audit","▤"],["Settings","/settings","⚙"]]}
 ];
