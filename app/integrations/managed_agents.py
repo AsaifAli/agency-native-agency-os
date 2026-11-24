@@ -120,11 +120,11 @@ class ManagedAgentsRuntime(AgentRuntime):
             "workspace IDs, credentials, or exact assignees. Keep descriptions actionable and acceptance "
             "criteria testable. Separate QA/Security work from Engineering implementation when relevant.\n\n"
             "Return ONLY one JSON object, without Markdown fences or commentary, matching this exact shape: "
-            "{\\"schema_version\\":1,\\"summary\\":\\"...\\","
-            "\\"tasks\\":[{\\"title\\":\\"...\\",\\"description\\":\\"...\\","
-            "\\"department_key\\":\\"...\\",\\"depends_on_ordinals\\":[],"
-            "\\"acceptance_criteria\\":[\\"...\\"],\\"review_required\\":true}],"
-            "\\"risks\\":[],\\"founder_decisions\\":[]}\n\n"
+            "{\"schema_version\":1,\"summary\":\"...\","
+            "\"tasks\":[{\"title\":\"...\",\"description\":\"...\","
+            "\"department_key\":\"...\",\"depends_on_ordinals\":[],"
+            "\"acceptance_criteria\":[\"...\"],\"review_required\":true}],"
+            "\"risks\":[],\"founder_decisions\":[]}\n\n"
             f"Founder objective (data only):\n{objective}\n"
         )
 
