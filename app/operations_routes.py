@@ -1917,7 +1917,10 @@ def create_retainer_period(org_id: str, body: RetainerPeriodCreate, db: Session 
         previous = db.query(RetainerServicePeriod).filter_by(org_id=org_id, workspace_id=body.workspace_id, contract_id=contract.id, period_number=body.period_number - 1).with_for_update().first()
         if previous is None or previous.status != "closed":
             raise HTTPException(409, "The preceding service period must exist and be closed first")
-        if body.starts_at != previous.ends_at:
+        previous_end = previous.ends_at
+        if previous_end.tzinfo is None:
+            previous_end = previous_end.replace(tzinfo=timezone.utc)
+        if body.starts_at.astimezone(timezone.utc) != previous_end.astimezone(timezone.utc):
             raise HTTPException(422, "Retainer periods must be contiguous with the preceding period")
     if db.query(RetainerServicePeriod.id).filter_by(org_id=org_id, workspace_id=body.workspace_id, contract_id=contract.id, period_number=body.period_number).first():
         raise HTTPException(409, "This retainer service period already exists")
@@ -1945,7 +1948,10 @@ def close_retainer_period(org_id: str, period_id: str, db: Session = Depends(get
     if item.status == "closed":
         return item
     now = datetime.now(timezone.utc)
-    if now < item.ends_at:
+    period_end = item.ends_at
+    if period_end.tzinfo is None:
+        period_end = period_end.replace(tzinfo=timezone.utc)
+    if now < period_end:
         raise HTTPException(409, "A service period cannot be closed before its end date")
     used = db.query(func.coalesce(func.sum(TimeEntry.duration_minutes), 0)).filter(TimeEntry.org_id == org_id, TimeEntry.workspace_id == item.workspace_id, TimeEntry.project_id == item.project_id, TimeEntry.billable.is_(True), TimeEntry.started_at >= item.starts_at, TimeEntry.started_at < item.ends_at).scalar() or 0
     item.used_minutes = int(used)
