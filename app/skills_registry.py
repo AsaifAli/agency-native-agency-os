@@ -28,18 +28,30 @@ def _load_manifest() -> dict[str, Any]:
         manifest = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise SkillCatalogError("Skill catalog is unavailable or invalid") from exc
-    if manifest.get("schema_version") != 1:
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != 1:
         raise SkillCatalogError("Unsupported skill catalog schema version")
     if not isinstance(manifest.get("sources"), dict) or not isinstance(manifest.get("skills"), list):
         raise SkillCatalogError("Skill catalog must define sources and skills")
+    for source_id, source in manifest["sources"].items():
+        if not isinstance(source_id, str) or not isinstance(source, dict):
+            raise SkillCatalogError("Skill source entries must be named objects")
+        if not all(isinstance(source.get(field), str) and source[field].strip()
+                   for field in ("repository", "revision", "license", "use")):
+            raise SkillCatalogError(f"Skill source metadata is incomplete: {source_id}")
     return manifest
 
 
 def _read_entry(entry: dict[str, Any], sources: dict[str, Any]) -> dict[str, Any]:
     name = entry.get("name")
     relative_path = entry.get("path")
+    if not isinstance(entry, dict):
+        raise SkillCatalogError("Skill entries must be objects")
     if not isinstance(name, str) or not _NAME_RE.fullmatch(name):
         raise SkillCatalogError("Skill name is invalid")
+    if not isinstance(entry.get("description"), str) or not entry["description"].strip():
+        raise SkillCatalogError(f"Skill description is invalid: {name}")
+    if not isinstance(entry.get("category"), str) or not entry["category"].strip():
+        raise SkillCatalogError(f"Skill category is invalid: {name}")
     if relative_path != f"{name}/SKILL.md":
         raise SkillCatalogError(f"Skill path must be the standard directory path: {name}")
     path = Path(relative_path)
@@ -68,7 +80,8 @@ def _read_entry(entry: dict[str, Any], sources: dict[str, Any]) -> dict[str, Any
         raise SkillCatalogError(f"Skill frontmatter description does not match catalog: {name}")
 
     source_ids = entry.get("sources")
-    if not isinstance(source_ids, list) or not source_ids or any(source_id not in sources for source_id in source_ids):
+    if (not isinstance(source_ids, list) or not source_ids
+            or any(not isinstance(source_id, str) or source_id not in sources for source_id in source_ids)):
         raise SkillCatalogError(f"Skill source references are invalid: {name}")
     if entry.get("review_status") != "reviewed":
         raise SkillCatalogError(f"Unreviewed skill cannot be served: {name}")
@@ -103,8 +116,11 @@ def _validated_catalog() -> list[dict[str, Any]]:
     manifest = _load_manifest()
     entries = manifest["skills"]
     names = [entry.get("name") for entry in entries if isinstance(entry, dict)]
-    if len(names) != len(entries) or len(names) != len(set(names)):
-        raise SkillCatalogError("Skill names must be unique objects")
+    if any(not isinstance(entry, dict) for entry in entries):
+        raise SkillCatalogError("Skill entries must be objects")
+    names = [entry.get("name") for entry in entries]
+    if len(names) != len(set(names)):
+        raise SkillCatalogError("Skill names must be unique")
     return [_read_entry(entry, manifest["sources"]) for entry in entries]
 
 
