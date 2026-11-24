@@ -58,3 +58,31 @@ def test_unconfigured_provider_runtimes_are_unavailable(
     assert not is_runtime_available(runtime_name)
     with pytest.raises(RuntimeNotConfiguredError):
         get_runtime(runtime_name)
+
+
+def test_managed_agents_requires_explicit_flag_and_complete_configuration():
+    from types import SimpleNamespace
+
+    config = SimpleNamespace(
+        app_env="development",
+        mock_runtime_enabled=False,
+        claude_managed_agents_enabled=True,
+        anthropic_api_key="test-key",
+        claude_managed_agent_id="agent_test",
+        claude_managed_environment_id="env_test",
+    )
+    assert is_runtime_available("claude_managed_agents", config)
+
+
+def test_managed_agents_stays_disabled_when_any_required_setting_is_missing():
+    from types import SimpleNamespace
+
+    config = SimpleNamespace(
+        app_env="development",
+        mock_runtime_enabled=False,
+        claude_managed_agents_enabled=True,
+        anthropic_api_key="test-key",
+        claude_managed_agent_id="",
+        claude_managed_environment_id="env_test",
+    )
+    assert not is_runtime_available("claude_managed_agents", config)

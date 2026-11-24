@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Callable
+
 from app.models import DataClass
-from app.policy import assert_managed_agents_eligible
+
 
 @dataclass
 class ExecutionRequest:
@@ -11,6 +13,14 @@ class ExecutionRequest:
     agent_id: str
     data_class: DataClass
     client_authorized: bool = False
+    agent_name: str = ""
+    agent_department: str = ""
+    agent_instructions: str = ""
+    task_title: str = ""
+    task_description: str = ""
+    external_run_id: str | None = None
+    persist_external_run_id: Callable[[str], None] | None = None
+
 
 @dataclass
 class ExecutionResult:
@@ -19,20 +29,31 @@ class ExecutionResult:
     status: str
     detail: str = ""
 
+
+class RuntimeExecutionError(Exception):
+    """The provider completed with an unsuccessful or unusable result."""
+
+
+class RuntimeNotConfiguredError(RuntimeExecutionError):
+    """The requested runtime or provider configuration is unavailable."""
+
+
+class RuntimeTransientError(RuntimeExecutionError):
+    """A retryable provider/network failure."""
+
+
+class RuntimeManualReviewRequired(RuntimeExecutionError):
+    """The provider paused for a tool approval or other human decision."""
+
+
 class AgentRuntime(ABC):
     @abstractmethod
     def start(self, request: ExecutionRequest) -> ExecutionResult: ...
 
-class ManagedAgentsRuntime(AgentRuntime):
-    def start(self, request: ExecutionRequest) -> ExecutionResult:
-        assert_managed_agents_eligible(request.data_class, request.client_authorized)
-        # TODO: Implement against the current official API behind this adapter.
-        # Never store provider state as the OS source of truth.
-        return ExecutionResult("claude_managed_agents", None, "not_configured",
-                               "Runtime adapter boundary is ready; provider integration is not configured.")
 
 class AgentSdkRuntime(AgentRuntime):
     def start(self, request: ExecutionRequest) -> ExecutionResult:
-        # Alternative route for workloads that cannot use Managed Agents.
-        return ExecutionResult("claude_agent_sdk", None, "not_configured",
-                               "Self-managed runtime adapter is not configured.")
+        return ExecutionResult(
+            "claude_agent_sdk", None, "not_configured",
+            "Self-managed runtime adapter is not configured.",
+        )

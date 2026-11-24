@@ -7,11 +7,15 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db import SessionLocal
-from app.integrations.runtime import ExecutionRequest, ExecutionResult
-from app.worker.runtime_factory import (
+from app.integrations.runtime import (
+    ExecutionRequest,
+    ExecutionResult,
+    RuntimeExecutionError,
+    RuntimeManualReviewRequired,
     RuntimeNotConfiguredError,
-    get_runtime,
+    RuntimeTransientError,
 )
+from app.worker.runtime_factory import get_runtime
 from app.worker_service import (
     LeaseExpired,
     claim_next_execution,
@@ -19,9 +23,8 @@ from app.worker_service import (
     fail_execution,
     heartbeat_execution,
     start_execution,
+    attach_external_run_id,
 )
-from app.config import settings
-
 SessionFactory = Callable[[], Session]
 
 MAX_RUNTIME_PROVIDER_LENGTH = 80
@@ -244,6 +247,39 @@ def process_one_execution(
             lease_seconds=lease_seconds,
         )
 
+        from app.models import Agent, ExecutionAttempt, Task
+
+        agent = db.query(Agent).filter_by(
+            id=execution.agent_id,
+            org_id=execution.org_id,
+            workspace_id=execution.workspace_id,
+        ).one()
+        task = db.query(Task).filter_by(
+            id=execution.task_id,
+            org_id=execution.org_id,
+            workspace_id=execution.workspace_id,
+        ).one()
+        prior_attempt = (
+            db.query(ExecutionAttempt)
+            .filter(
+                ExecutionAttempt.execution_id == execution.id,
+                ExecutionAttempt.external_run_id.is_not(None),
+            )
+            .order_by(ExecutionAttempt.attempt_number.desc())
+            .first()
+        )
+
+        def persist_provider_run(external_run_id: str) -> None:
+            with session_factory() as callback_db:
+                attach_external_run_id(
+                    callback_db,
+                    execution_id=execution_id,
+                    attempt_id=attempt_id,
+                    worker_id=worker_id,
+                    external_run_id=external_run_id,
+                )
+                callback_db.commit()
+
         request = ExecutionRequest(
             org_id=execution.org_id,
             workspace_id=execution.workspace_id,
@@ -251,6 +287,15 @@ def process_one_execution(
             agent_id=execution.agent_id,
             data_class=execution.data_class,
             client_authorized=execution.client_authorized,
+            agent_name=agent.name,
+            agent_department=agent.department,
+            agent_instructions=agent.instructions,
+            task_title=task.title,
+            task_description=task.description,
+            external_run_id=(
+                prior_attempt.external_run_id if prior_attempt else None
+            ),
+            persist_external_run_id=persist_provider_run,
         )
 
         runtime_name = execution.runtime
@@ -283,11 +328,25 @@ def process_one_execution(
             False,
         )
 
+    except RuntimeManualReviewRequired:
+        runtime_error = (
+            "RUNTIME_REQUIRES_REVIEW",
+            "The managed agent paused for a human decision; no tool action was authorized.",
+            False,
+        )
+
+    except RuntimeTransientError:
+        runtime_error = (
+            "RUNTIME_TRANSIENT_ERROR",
+            "The runtime provider or network is temporarily unavailable.",
+            True,
+        )
+
     except RuntimeExecutionError:
         runtime_error = (
             "RUNTIME_UNSUCCESSFUL",
             "The runtime did not complete successfully.",
-            True,
+            False,
         )
 
     except Exception:

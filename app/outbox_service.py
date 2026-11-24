@@ -257,11 +257,3 @@ def dispatch_outbox_batch(
                     retried += 1
     return published, retried, dead
 
-def test_invalid_outbox_retry_configuration_is_rejected():
-    from app.config import Settings
-
-    with pytest.raises(ValueError):
-        Settings(
-            outbox_base_retry_seconds=120,
-            outbox_max_retry_seconds=30,
-        )
