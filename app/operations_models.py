@@ -196,6 +196,64 @@ class OnboardingChecklistItem(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 
 
+class InvoiceRecord(Base):
+    """Founder-governed invoice register; this model never issues a payment or sends an invoice."""
+    __tablename__ = "invoice_records"
+    __table_args__ = (
+        UniqueConstraint("org_id", "workspace_id", "invoice_number", name="uq_invoice_number_workspace"),
+        Index("ix_invoice_records_scope_status", "org_id", "workspace_id", "status"),
+        CheckConstraint("status IN ('draft','pending_approval','issued','partially_paid','paid','rejected','cancelled')", name="ck_invoice_record_status"),
+        CheckConstraint("amount_minor > 0 AND paid_minor >= 0 AND paid_minor <= amount_minor", name="ck_invoice_amount_paid_range"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    client_id: Mapped[str] = mapped_column(ForeignKey("clients.id", ondelete="RESTRICT"), nullable=False, index=True)
+    contract_id: Mapped[str] = mapped_column(ForeignKey("contract_records.id", ondelete="RESTRICT"), nullable=False, index=True)
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id", ondelete="RESTRICT"), nullable=True, index=True)
+    invoice_number: Mapped[str] = mapped_column(String(80), nullable=False)
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
+    line_items: Mapped[list] = mapped_column(JSON, nullable=False)
+    amount_minor: Mapped[int] = mapped_column(Integer, nullable=False)
+    paid_minor: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    due_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="draft", server_default="draft", nullable=False)
+    approval_id: Mapped[str | None] = mapped_column(ForeignKey("approvals.id"), nullable=True)
+    external_reference: Mapped[str] = mapped_column(String(240), default="", server_default="", nullable=False)
+    issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    issued_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
+
+
+class PaymentReceipt(Base):
+    """Append-only evidence of funds received; it does not initiate or move money."""
+    __tablename__ = "payment_receipts"
+    __table_args__ = (
+        UniqueConstraint("org_id", "workspace_id", "external_reference", name="uq_payment_receipt_reference"),
+        Index("ix_payment_receipts_invoice_paid", "org_id", "workspace_id", "invoice_id", "paid_at"),
+        CheckConstraint("amount_minor > 0", name="ck_payment_receipt_amount_positive"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    invoice_id: Mapped[str] = mapped_column(ForeignKey("invoice_records.id", ondelete="RESTRICT"), nullable=False, index=True)
+    external_reference: Mapped[str] = mapped_column(String(240), nullable=False)
+    amount_minor: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    payment_method: Mapped[str] = mapped_column(String(40), nullable=False)
+    source: Mapped[str] = mapped_column(String(80), nullable=False)
+    paid_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    notes: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
+    recorded_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
 class ScopeChangeRequest(Base):
     __tablename__ = "scope_change_requests"
     __table_args__ = (
