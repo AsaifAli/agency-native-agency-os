@@ -154,6 +154,25 @@ def bootstrap_workforce(org_id: str, workspace_id: str,
         raise
 
 
+
+@app.get("/v1/orgs/{org_id}/workforce")
+def list_workforce(org_id: str, workspace_id: str,
+                   db: Session = Depends(get_db),
+                   p: Principal = Depends(get_principal)):
+    from app.workforce_models import WorkforceUnit, WorkforceMember, WorkforceCapability
+    role = require_membership(org_id, p, db)
+    require_role(role, {Role.owner, Role.admin, Role.operator, Role.reviewer})
+    workspace_in_org(db, org_id, workspace_id)
+    units = db.query(WorkforceUnit).filter_by(org_id=org_id, workspace_id=workspace_id).all()
+    members = db.query(WorkforceMember).filter_by(org_id=org_id, workspace_id=workspace_id).all()
+    capabilities = db.query(WorkforceCapability).filter_by(org_id=org_id, workspace_id=workspace_id).all()
+    return {
+        "units": [{"id":x.id,"parent_unit_id":x.parent_unit_id,"name":x.name,"unit_type":x.unit_type,"department_key":x.department_key,"description":x.description} for x in units],
+        "members": [{"id":x.id,"unit_id":x.unit_id,"manager_member_id":x.manager_member_id,"agent_id":x.agent_id,"member_type":x.member_type,"name":x.name,"title":x.title,"department_key":x.department_key,"responsibilities":x.responsibilities,"autonomy_level":x.autonomy_level,"status":x.status,"is_founder_reserved":x.is_founder_reserved,"created_at":x.created_at,"updated_at":x.updated_at} for x in members],
+        "capabilities": [{"id":x.id,"member_id":x.member_id,"capability_key":x.capability_key,"scope":x.scope,"allowed_data_classes":x.allowed_data_classes,"allowed_actions":x.allowed_actions,"tool_allowlist":x.tool_allowlist,"budget_minor":x.budget_minor,"currency":x.currency,"enabled":x.enabled} for x in capabilities],
+    }
+
+
 # Workspaces
 # ---------------------------------------------------------------------------
 
