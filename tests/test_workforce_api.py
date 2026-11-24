@@ -669,3 +669,144 @@ def test_non_founder_cannot_refresh_orchestration_plan(app_client):
     )
     assert response.status_code == 403
 
+def _activate_plan_draft_chief(app_client):
+    from app.models import Agent, DataClass
+    from app.workforce_models import WorkforceMember, WorkforceCapability
+
+    i = app_client.identity
+    boot = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/bootstrap",
+        params={"workspace_id": i["workspace"].id},
+    )
+    assert boot.status_code == 200, boot.text
+    db = app_client.factory()
+    try:
+        chief = db.query(WorkforceMember).filter_by(
+            org_id=i["org"].id, workspace_id=i["workspace"].id,
+            department_key="office_chief_of_staff",
+        ).one()
+        chief.status = "active"
+        chief.autonomy_level = 2
+        agent = db.get(Agent, chief.agent_id)
+        agent.enabled = True
+        agent.runtime = "claude_managed_agents"
+        agent.data_class = DataClass.synthetic
+        capability = WorkforceCapability(
+            org_id=i["org"].id, workspace_id=i["workspace"].id,
+            member_id=chief.id, capability_key="plan.generate",
+            scope="self", allowed_data_classes=["synthetic"],
+            allowed_actions=["plan.generate"], tool_allowlist=[],
+            budget_minor=0, currency="INR", enabled=True,
+        )
+        db.add(capability)
+        db.commit()
+        return chief.id
+    finally:
+        db.close()
+
+
+def test_plan_draft_queue_is_founder_only_and_idempotent(app_client, monkeypatch):
+    from app.workforce_models import OrchestrationPlanDraft
+    from app.models import Execution
+    from app.auth import Principal, get_principal
+
+    chief_id = _activate_plan_draft_chief(app_client)
+    monkeypatch.setattr("app.workforce_routes.settings.claude_managed_agents_enabled", True)
+    monkeypatch.setattr("app.workforce_routes.is_runtime_available", lambda runtime: True)
+    monkeypatch.setattr("app.execution_service.is_runtime_available", lambda runtime: True)
+
+    i = app_client.identity
+    payload = {
+        "workspace_id": i["workspace"].id,
+        "objective": "Prepare a synthetic agency workflow modernization plan",
+        "plan_title": "Workflow modernization",
+        "idempotency_key": "plan-draft-idempotency-001",
+    }
+    first = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/plan-drafts", json=payload,
+    )
+    assert first.status_code == 202, first.text
+    result = first.json()
+    assert result["status"] == "queued"
+    assert result["execution_id"]
+
+    second = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/plan-drafts", json=payload,
+    )
+    assert second.status_code == 202, second.text
+    assert second.json()["id"] == result["id"]
+    assert second.json()["execution_id"] == result["execution_id"]
+
+    db = app_client.factory()
+    try:
+        assert db.query(OrchestrationPlanDraft).count() == 1
+        assert db.query(Execution).count() == 1
+        draft = db.get(OrchestrationPlanDraft, result["id"])
+        execution = db.get(Execution, result["execution_id"])
+        assert draft.created_by_member_id == chief_id
+        assert execution.request_metadata == {
+            "purpose": "workforce.plan_draft",
+            "plan_draft_id": draft.id,
+            "schema_version": 1,
+        }
+    finally:
+        db.close()
+
+    app_client.app.dependency_overrides[get_principal] = (
+        lambda: Principal(user=i["operator"])
+    )
+    denied = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/plan-drafts", json={
+            **payload, "idempotency_key": "plan-draft-idempotency-002",
+        },
+    )
+    assert denied.status_code == 403
+
+
+def test_plan_draft_rejects_personal_contact_data(app_client):
+    i = app_client.identity
+    response = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/plan-drafts",
+        json={
+            "workspace_id": i["workspace"].id,
+            "objective": "Prepare a plan and contact asaif@example.com about delivery",
+            "plan_title": "Unsafe objective",
+            "idempotency_key": "plan-draft-pii-guard-001",
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_plan_draft_schema_rejects_forward_dependencies():
+    from app.workforce_planning import PlanDraftOutputError, validate_plan_draft_output
+
+    valid = {
+        "schema_version": 1,
+        "summary": "A staged synthetic delivery plan",
+        "tasks": [
+            {
+                "title": "Prepare implementation outline",
+                "description": "Define the implementation boundaries and acceptance tests.",
+                "department_key": "solutions_consulting_strategy",
+                "depends_on_ordinal": None,
+                "acceptance_criteria": ["The outline contains testable milestones."],
+                "review_required": True,
+            },
+            {
+                "title": "Implement synthetic prototype",
+                "description": "Build a bounded prototype using synthetic inputs.",
+                "department_key": "ai_engineering_development",
+                "depends_on_ordinal": 1,
+                "acceptance_criteria": ["The prototype passes the stated tests."],
+                "review_required": True,
+            },
+        ],
+        "risks": [],
+        "founder_decisions": [],
+    }
+    parsed = validate_plan_draft_output(__import__("json").dumps(valid))
+    assert len(parsed["tasks"]) == 2
+    valid["tasks"][0]["depends_on_ordinal"] = 2
+    with pytest.raises(PlanDraftOutputError, match="schema_invalid"):
+        validate_plan_draft_output(__import__("json").dumps(valid))
+
