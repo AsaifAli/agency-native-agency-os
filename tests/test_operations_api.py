@@ -350,17 +350,19 @@ def test_service_catalogue_draft_requires_founder_activation(client):
 
 
 
-def _create_approved_proposal_for_contract(client):
+def _create_approved_proposal_for_contract(client, engagement_terms=None):
+    proposal_payload = {
+        "workspace_id": client.ws_id, "opportunity_id": client.opportunity_id,
+        "title": "Signed AI workflow engagement", "service_line": "AI Engineering",
+        "scope_summary": "Design, implement and evaluate a governed AI workflow for the client.",
+        "deliverables": ["Workflow API", "Evaluation report"],
+        "assumptions": ["Client provides access"], "exclusions": ["Cloud subscription fees"],
+        "amount_minor": 1800000, "currency": "INR", "validity_days": 30,
+    }
+    proposal_payload.update(engagement_terms or {})
     response = client.post(
         "/v1/orgs/" + client.org_id + "/operations/proposals",
-        headers=headers(), json={
-            "workspace_id": client.ws_id, "opportunity_id": client.opportunity_id,
-            "title": "Signed AI workflow engagement", "service_line": "AI Engineering",
-            "scope_summary": "Design, implement and evaluate a governed AI workflow for the client.",
-            "deliverables": ["Workflow API", "Evaluation report"],
-            "assumptions": ["Client provides access"], "exclusions": ["Cloud subscription fees"],
-            "amount_minor": 1800000, "currency": "INR", "validity_days": 30,
-        },
+        headers=headers(), json=proposal_payload,
     )
     assert response.status_code == 201, response.text
     db = client.session_factory()
@@ -386,6 +388,31 @@ def _create_approved_proposal_for_contract(client):
     finally:
         db.close()
     return response.json()["id"]
+
+
+def test_contract_snapshots_retainer_commercial_terms(client):
+    proposal_id = _create_approved_proposal_for_contract(client, {
+        "engagement_type": "retainer", "billing_frequency": "monthly",
+        "term_months": 12, "included_hours_per_period": 60,
+        "rollover_hours": True, "support_response_hours": 4,
+        "auto_renew": False,
+    })
+    created = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/contracts",
+        headers=headers(), json={
+            "workspace_id": client.ws_id, "proposal_id": proposal_id,
+            "contract_number": "AG-2026-RETAINER", "title": "Managed AI Services Retainer",
+        },
+    )
+    assert created.status_code == 201, created.text
+    terms = created.json()["terms_snapshot"]
+    assert terms["engagement_type"] == "retainer"
+    assert terms["billing_frequency"] == "monthly"
+    assert terms["term_months"] == 12
+    assert terms["included_hours_per_period"] == 60
+    assert terms["rollover_hours"] is True
+    assert terms["support_response_hours"] == 4
+    assert terms["auto_renew"] is False
 
 
 def test_contract_requires_approved_proposal_and_records_signed_evidence(client):
