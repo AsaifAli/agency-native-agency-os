@@ -53,6 +53,7 @@ def _event(db, org_id, actor_id, event_type, resource_type, resource_id, workspa
 
 @router.get("/clients", response_model=list[ClientOut])
 def list_clients(
+    org_id: str,
     workspace_id: str = Query(min_length=1),
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
@@ -91,6 +92,7 @@ def create_client(
 
 @router.get("/contacts", response_model=list[ContactOut])
 def list_contacts(
+    org_id: str,
     workspace_id: str = Query(min_length=1),
     client_id: str | None = None,
     limit: int = Query(default=100, ge=1, le=500),
@@ -190,6 +192,7 @@ def create_contact_activity(
 
 @router.get("/leads", response_model=list[LeadOut])
 def list_leads(
+    org_id: str,
     workspace_id: str = Query(min_length=1),
     stage: str | None = None,
     limit: int = Query(default=100, ge=1, le=500),
@@ -309,6 +312,7 @@ def create_lead_research(
 
 @router.get("/outreach-drafts", response_model=list[OutreachDraftOut])
 def list_outreach_drafts(
+    org_id: str,
     workspace_id: str = Query(min_length=1), status: str | None = None,
     limit: int = Query(default=100, ge=1, le=300),
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
@@ -408,6 +412,7 @@ def review_outreach_draft(
 
 @router.get("/opportunities", response_model=list[OpportunityOut])
 def list_opportunities(
+    org_id: str,
     workspace_id: str = Query(min_length=1),
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
@@ -474,6 +479,7 @@ def update_opportunity_stage(
 
 @router.get("/projects", response_model=list[ProjectOut])
 def list_projects(
+    org_id: str,
     workspace_id: str = Query(min_length=1),
     status: str | None = None,
     limit: int = Query(default=100, ge=1, le=500),
