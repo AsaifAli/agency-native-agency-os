@@ -6,6 +6,7 @@ from alembic import context
 from app.config import settings
 from app.db import Base, engine
 import app.models  # noqa: F401 — register all models with Base.metadata
+import app.domain_models  # noqa: F401 — register Revenue/Delivery metadata
 
 
 config = context.config

@@ -716,3 +716,8 @@ def list_evaluations(
         .limit(500)
         .all()
     )
+
+
+# Revenue and Delivery API module installed by Agency OS bundle.
+from app.domain_routes import router as revenue_delivery_router
+app.include_router(revenue_delivery_router)

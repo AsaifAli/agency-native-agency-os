@@ -7,3 +7,6 @@ __pycache__/
 .coverage
 dist/
 build/
+# Ignore local environment files; retain safe examples
+.env*
+!.env.example
