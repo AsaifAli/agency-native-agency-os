@@ -4,6 +4,7 @@ These endpoints persist operational records. They do not send invoices, collect
 payments, authorize scope changes without a founder approval, or dispatch events.
 """
 from datetime import datetime, timedelta, timezone
+import calendar
 import uuid
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -61,6 +62,19 @@ def _read_or_founder(
     if role not in roles and not has_founder_authority(db, org_id, p.user.id):
         require_role(role, roles)
     _workspace(db, org_id, workspace_id)
+
+
+
+def _add_calendar_months(value: datetime, months: int) -> datetime:
+    """Add calendar months while preserving the original day when possible."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    value = value.astimezone(timezone.utc)
+    month_index = value.year * 12 + (value.month - 1) + months
+    year, month_zero = divmod(month_index, 12)
+    month = month_zero + 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return value.replace(year=year, month=month, day=day)
 
 
 def _event(db, org_id, actor_id, event_type, resource_type, resource_id, workspace_id, payload=None):
@@ -1913,16 +1927,29 @@ def create_retainer_period(org_id: str, body: RetainerPeriodCreate, db: Session 
     onboarding = db.query(ClientOnboarding).filter_by(org_id=org_id, workspace_id=body.workspace_id, contract_id=contract.id, project_id=body.project_id, status="active").first()
     if onboarding is None:
         raise HTTPException(422, "Project must be activated through this contract's onboarding")
+    cadence_months = {"monthly": 1, "quarterly": 3, "annual": 12}.get(terms.get("billing_frequency"))
+    if cadence_months is None:
+        raise HTTPException(409, "Retainer billing cadence is invalid")
     previous = None
+    first_period = None
     if body.period_number > 1:
         previous = db.query(RetainerServicePeriod).filter_by(org_id=org_id, workspace_id=body.workspace_id, contract_id=contract.id, period_number=body.period_number - 1).with_for_update().first()
-        if previous is None or previous.status != "closed":
-            raise HTTPException(409, "The preceding service period must exist and be closed first")
-        previous_end = previous.ends_at
-        if previous_end.tzinfo is None:
-            previous_end = previous_end.replace(tzinfo=timezone.utc)
-        if body.starts_at.astimezone(timezone.utc) != previous_end.astimezone(timezone.utc):
-            raise HTTPException(422, "Retainer periods must be contiguous with the preceding period")
+        first_period = db.query(RetainerServicePeriod).filter_by(
+            org_id=org_id, workspace_id=body.workspace_id, contract_id=contract.id, period_number=1,
+        ).first()
+        if previous is None or previous.status != "closed" or first_period is None:
+            raise HTTPException(409, "The preceding and first service periods must exist; the preceding period must be closed")
+    elif db.query(RetainerServicePeriod.id).filter_by(
+        org_id=org_id, workspace_id=body.workspace_id, contract_id=contract.id,
+    ).first():
+        raise HTTPException(409, "Period one already exists")
+    anchor = first_period.starts_at if first_period else body.starts_at
+    expected_start = _add_calendar_months(anchor, (body.period_number - 1) * cadence_months)
+    expected_end = _add_calendar_months(anchor, body.period_number * cadence_months)
+    actual_start = body.starts_at.astimezone(timezone.utc)
+    actual_end = body.ends_at.astimezone(timezone.utc)
+    if actual_start != expected_start or actual_end != expected_end:
+        raise HTTPException(422, "Retainer service period dates must match the contracted calendar billing cadence")
     if db.query(RetainerServicePeriod.id).filter_by(org_id=org_id, workspace_id=body.workspace_id, contract_id=contract.id, period_number=body.period_number).first():
         raise HTTPException(409, "This retainer service period already exists")
     rollover = 0
