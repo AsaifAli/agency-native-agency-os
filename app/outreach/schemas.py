@@ -44,6 +44,11 @@ class StopEventCreate(BaseModel):
     note: str = Field(default="", max_length=2000)
 
 
+class MessageReject(BaseModel):
+    approval_id: str = Field(min_length=1, max_length=36)
+    note: str = Field(min_length=3, max_length=2000)
+
+
 class BlockRelease(BaseModel):
     note: str = Field(min_length=3, max_length=2000)
 
