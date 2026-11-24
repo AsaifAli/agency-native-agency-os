@@ -283,6 +283,8 @@ def release_block(
         raise HTTPException(404, "Communication block not found")
     _write(org_id, item.workspace_id, p, db)
     require_founder_authority(db, org_id, p.user.id)
+    if len(body.note.strip()) < 3:
+        raise HTTPException(422, "Founder release rationale must be non-empty")
     if item.status != "active":
         raise HTTPException(409, "Communication block is already released")
     latest = _latest_consent(db, org_id, item.workspace_id, item.contact_id, item.channel)
@@ -565,6 +567,8 @@ def record_message_stop_event(
             org_id=org_id, workspace_id=item.workspace_id, external_event_id=body.external_event_id,
         ).first()
         if duplicate:
+            if duplicate.message_id != item.id:
+                raise HTTPException(409, "Provider event reference already belongs to another message")
             return duplicate
     occurred_at = body.occurred_at or datetime.now(timezone.utc)
     event = OutboundMessageEvent(
