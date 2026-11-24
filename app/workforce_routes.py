@@ -6,7 +6,7 @@ from app.auth import Principal, get_principal, require_founder_authority, requir
 from app.db import get_db
 from app.models import Role, Workspace, Task
 from app.audit import record_event
-from app.workforce_models import WorkforceUnit, WorkforceMember, WorkforceCapability, Delegation
+from app.workforce_models import WorkforceUnit, WorkforceMember, WorkforceCapability, WorkforcePosition, Delegation
 from app.workforce_schemas import (
     WorkforceInit, WorkforceCapabilityCreate, WorkforceCapabilityOut,
     DelegationCreate, DelegationOut,
@@ -39,10 +39,12 @@ def list_workforce(org_id: str, workspace_id: str = Query(min_length=1),
     units = db.query(WorkforceUnit).filter_by(org_id=org_id, workspace_id=workspace_id).all()
     members = db.query(WorkforceMember).filter_by(org_id=org_id, workspace_id=workspace_id).all()
     capabilities = db.query(WorkforceCapability).filter_by(org_id=org_id, workspace_id=workspace_id).all()
+    positions = db.query(WorkforcePosition).filter_by(org_id=org_id, workspace_id=workspace_id).order_by(WorkforcePosition.department_key, WorkforcePosition.title).all()
     return {
         "units": [{"id":x.id,"parent_unit_id":x.parent_unit_id,"name":x.name,"unit_type":x.unit_type,"department_key":x.department_key,"description":x.description} for x in units],
         "members": [{"id":x.id,"unit_id":x.unit_id,"manager_member_id":x.manager_member_id,"agent_id":x.agent_id,"member_type":x.member_type,"name":x.name,"title":x.title,"department_key":x.department_key,"responsibilities":x.responsibilities,"autonomy_level":x.autonomy_level,"status":x.status,"is_founder_reserved":x.is_founder_reserved,"created_at":x.created_at,"updated_at":x.updated_at} for x in members],
         "capabilities": [{"id":x.id,"member_id":x.member_id,"capability_key":x.capability_key,"scope":x.scope,"allowed_data_classes":x.allowed_data_classes,"allowed_actions":x.allowed_actions,"tool_allowlist":x.tool_allowlist,"budget_minor":x.budget_minor,"currency":x.currency,"enabled":x.enabled} for x in capabilities],
+        "positions": [{"id":x.id,"unit_id":x.unit_id,"team_unit_id":x.team_unit_id,"assigned_member_id":x.assigned_member_id,"position_key":x.position_key,"title":x.title,"department_key":x.department_key,"group_key":x.group_key,"team_key":x.team_key,"reports_to_position_key":x.reports_to_position_key,"responsibilities":x.responsibilities,"autonomy_ceiling":x.autonomy_ceiling,"status":x.status} for x in positions],
     }
 
 

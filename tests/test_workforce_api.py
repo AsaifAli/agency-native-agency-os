@@ -55,6 +55,9 @@ def test_founder_initializes_full_chart_idempotently(app_client):
     assert r.json()["departments"]==16
     assert r.json()["department_heads"]==16
     assert r.json()["specialists"]==16
+    assert r.json()["group_heads"]==5
+    assert r.json()["teams"] >= 20
+    assert r.json()["positions"] >= 80
     r2=app_client.post(f"/v1/orgs/{i['org'].id}/workforce/bootstrap",params={"workspace_id":i["workspace"].id})
     assert r2.status_code==200, r2.text
     listing=app_client.get(f"/v1/orgs/{i['org'].id}/workforce",params={"workspace_id":i["workspace"].id})
@@ -67,8 +70,11 @@ def test_founder_initializes_full_chart_idempotently(app_client):
         "infrastructure_it_operations","pmo","delivery_implementation",
         "quality_assurance_security","client_success_support","hr_people_operations",
         "administration_procurement","office_founder","office_chief_of_staff",
-        "office_executive_assistant",
+        "office_executive_assistant","growth","strategy_commercial","technology",
+        "delivery_quality","business_operations",
     ])
+    assert len(listing.json()["positions"]) >= 80
+    assert len([u for u in listing.json()["units"] if u["unit_type"] == "team"]) >= 20
 
 
 def test_organization_owner_without_founder_grant_cannot_initialize(app_client):

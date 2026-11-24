@@ -106,3 +106,31 @@ class Delegation(Base):
     review_required: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
     review_status: Mapped[str] = mapped_column(String(24), default="pending", server_default="pending", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class WorkforcePosition(Base):
+    """Durable role/position catalogue, independent from a person or agent session."""
+    __tablename__ = "workforce_positions"
+    __table_args__ = (
+        CheckConstraint("autonomy_ceiling BETWEEN 0 AND 3", name="ck_workforce_position_autonomy"),
+        CheckConstraint("status IN ('planned','active','paused','retired')", name="ck_workforce_position_status"),
+        UniqueConstraint("org_id", "workspace_id", "position_key", name="uq_workforce_position_key"),
+        Index("ix_workforce_position_scope_department", "org_id", "workspace_id", "department_key"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    unit_id: Mapped[str | None] = mapped_column(ForeignKey("workforce_units.id", ondelete="CASCADE"))
+    team_unit_id: Mapped[str | None] = mapped_column(ForeignKey("workforce_units.id", ondelete="SET NULL"))
+    assigned_member_id: Mapped[str | None] = mapped_column(ForeignKey("workforce_members.id", ondelete="SET NULL"))
+    position_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    department_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    group_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    team_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    reports_to_position_key: Mapped[str | None] = mapped_column(String(160))
+    responsibilities: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    autonomy_ceiling: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="planned", server_default="planned", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)

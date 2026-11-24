@@ -35,7 +35,22 @@ type Capability = {
   allowed_data_classes: string[];
   tool_allowlist: string[];
 };
-type Workforce = { units: Unit[]; members: Member[]; capabilities: Capability[] };
+type Position = {
+  id: string;
+  unit_id: string | null;
+  team_unit_id: string | null;
+  assigned_member_id: string | null;
+  position_key: string;
+  title: string;
+  department_key: string;
+  group_key: string;
+  team_key: string;
+  reports_to_position_key: string | null;
+  responsibilities: string[];
+  autonomy_ceiling: number;
+  status: string;
+};
+type Workforce = { units: Unit[]; members: Member[]; capabilities: Capability[]; positions: Position[] };
 
 const GROUP_ORDER = [
   "Growth",
@@ -48,7 +63,7 @@ const GROUP_ORDER = [
 export default function WorkforcePage() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspaceId, setWorkspaceId] = useState("");
-  const [workforce, setWorkforce] = useState<Workforce>({ units: [], members: [], capabilities: [] });
+  const [workforce, setWorkforce] = useState<Workforce>({ units: [], members: [], capabilities: [], positions: [] });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [bootstrapping, setBootstrapping] = useState(false);
@@ -62,7 +77,7 @@ export default function WorkforcePage() {
       const chosen = selected || available[0]?.id || "";
       setWorkspaceId(chosen);
       if (!chosen) {
-        setWorkforce({ units: [], members: [], capabilities: [] });
+        setWorkforce({ units: [], members: [], capabilities: [], positions: [] });
         return;
       }
       const result = await api<Workforce>(
@@ -112,6 +127,7 @@ export default function WorkforcePage() {
     groups: workforce.units.filter((u) => u.unit_type === "group").length,
     departments: workforce.units.filter((u) => u.unit_type === "department").length,
     teams: workforce.units.filter((u) => u.unit_type === "team").length,
+    positions: workforce.positions.length,
     members: workforce.members.length,
     active: workforce.members.filter((m) => m.status === "active").length,
   };
@@ -143,6 +159,7 @@ export default function WorkforcePage() {
           <div className="panel"><div className="panel-note">Functional groups</div><div className="stat-value">{counts.groups}/5</div></div>
           <div className="panel"><div className="panel-note">Departments</div><div className="stat-value">{counts.departments}/16</div></div>
           <div className="panel"><div className="panel-note">Teams</div><div className="stat-value">{counts.teams}</div></div>
+          <div className="panel"><div className="panel-note">Defined positions</div><div className="stat-value">{counts.positions}</div></div>
           <div className="panel"><div className="panel-note">Active members</div><div className="stat-value">{counts.active}/{counts.members}</div></div>
         </div>
         {!workforce.units.length && !loading && (
@@ -209,6 +226,36 @@ export default function WorkforcePage() {
             </tbody>
           </table>
           {!workforce.members.length && <div className="empty">Workforce members will appear after provisioning.</div>}
+        </div>
+      </section>
+      <div style={{ height: 16 }} />
+      <section className="panel">
+        <div className="panel-head">
+          <div className="panel-title">Position & team catalogue</div>
+          <span className="panel-note">{workforce.positions.length} defined positions</span>
+        </div>
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead><tr><th>Position</th><th>Department / group</th><th>Team</th><th>Reports to</th><th>Autonomy ceiling</th><th>Occupancy</th></tr></thead>
+            <tbody>
+              {workforce.positions.map((position) => {
+                const assigned = workforce.members.find((member) => member.id === position.assigned_member_id);
+                const team = workforce.units.find((unit) => unit.id === position.team_unit_id);
+                const manager = workforce.positions.find((candidate) => candidate.position_key === position.reports_to_position_key);
+                return (
+                  <tr key={position.id}>
+                    <td>{position.title}<div className="activity-meta">{position.position_key}</div></td>
+                    <td>{position.department_key}</td>
+                    <td>{team?.name || position.group_key}</td>
+                    <td>{manager?.title || "Founder / executive authority"}</td>
+                    <td>L{position.autonomy_ceiling}</td>
+                    <td>{assigned ? assigned.status : "Unassigned position"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {!workforce.positions.length && <div className="empty">Position catalogue will be provisioned with the workforce chart.</div>}
         </div>
       </section>
       <div style={{ height: 16 }} />
