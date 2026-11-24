@@ -1,5 +1,4 @@
 """Idempotent provisioning of the full target agency workforce chart."""
-"""Initialize the target workforce chart without activating external autonomy."""
 from __future__ import annotations
 
 from sqlalchemy.orm import Session
