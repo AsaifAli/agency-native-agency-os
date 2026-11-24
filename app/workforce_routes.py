@@ -8,8 +8,10 @@ from app.models import Role, Workspace, Task
 from app.audit import record_event
 from app.workforce_models import WorkforceUnit, WorkforceMember, WorkforceCapability, Delegation
 from app.workforce_schemas import (
-    WorkforceCapabilityCreate, WorkforceCapabilityOut, DelegationCreate, DelegationOut,
+    WorkforceInit, WorkforceCapabilityCreate, WorkforceCapabilityOut,
+    DelegationCreate, DelegationOut,
 )
+from app.workforce_service import initialize_workforce
 
 router = APIRouter(prefix="/v1/orgs/{org_id}/workforce", tags=["workforce"])
 WRITERS = {Role.owner, Role.admin, Role.operator}

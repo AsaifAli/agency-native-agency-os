@@ -109,3 +109,20 @@ def test_initialize_workforce_reuses_existing_founder_and_chief(app_client):
     db.commit()
     assert result==result2
     db.close()
+
+
+
+def test_founder_bootstrap_route_and_workspace_scoped_workforce_read(app_client):
+    i=app_client.identity
+    bootstrap=app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/bootstrap",
+        params={"workspace_id":i["workspace"].id},
+    )
+    assert bootstrap.status_code==200, bootstrap.text
+    assert bootstrap.json()["departments"]==16
+    listing=app_client.get(
+        f"/v1/orgs/{i['org'].id}/workforce",
+        params={"workspace_id":i["workspace"].id},
+    )
+    assert listing.status_code==200
+    assert len([m for m in listing.json()["members"] if m["department_key"].endswith("_head")])==16
