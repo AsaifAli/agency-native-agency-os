@@ -306,7 +306,8 @@ def update_opportunity_stage(
     elif body.stage == "lost":
         item.probability = 0
     _event(db, org_id, p.user.id, "opportunity.stage_changed",
-           "opportunity", item.id, item.workspace_id, {"stage": item.stage})
+           "opportunity", item.id, item.workspace_id,
+           {"stage": item.stage, "client_id": item.client_id})
     db.commit()
     db.refresh(item)
     return item
