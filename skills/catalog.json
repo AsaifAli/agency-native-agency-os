@@ -4,7 +4,10 @@
   "policy": {
     "default_enabled": false,
     "default_allowed_tools": [],
-    "default_allowed_data_classes": ["public", "synthetic"],
+    "default_allowed_data_classes": [
+      "public",
+      "synthetic"
+    ],
     "execution_mode": "manual_review_only",
     "note": "Catalog entries are reviewed reusable instructions, not runtime grants. Backend policy remains authoritative."
   },
@@ -65,15 +68,219 @@
     }
   },
   "skills": [
-    {"name":"grill-before-building","path":"grill-before-building/SKILL.md","category":"planning","description":"Clarify outcomes, constraints, domain language, and acceptance criteria before non-trivial work.","sources":["matt-pocock","superpowers"],"recommended_departments":["chief-of-staff","solutions-consulting","ai-engineering"],"review_status":"reviewed","enabled":false,"allowed_data_classes":["public","synthetic"],"allowed_tools":[]},
-    {"name":"test-driven-development","path":"test-driven-development/SKILL.md","category":"engineering","description":"Implement behavior through a focused red-green-refactor loop and regression tests.","sources":["matt-pocock","superpowers"],"recommended_departments":["ai-engineering","automation-integration","quality-assurance-security"],"review_status":"reviewed","enabled":false,"allowed_data_classes":["public","synthetic"],"allowed_tools":[]},
-    {"name":"systematic-debugging","path":"systematic-debugging/SKILL.md","category":"engineering","description":"Diagnose defects through reproduction, competing hypotheses, safe instrumentation, and regression tests.","sources":["matt-pocock"],"recommended_departments":["ai-engineering","infrastructure-it-operations","quality-assurance-security"],"review_status":"reviewed","enabled":false,"allowed_data_classes":["public","synthetic"],"allowed_tools":[]},
-    {"name":"independent-code-review","path":"independent-code-review/SKILL.md","category":"quality","description":"Review diffs independently for specification coverage, correctness, maintainability, security, and operational risk.","sources":["matt-pocock","coderabbit-skills"],"recommended_departments":["quality-assurance-security","ai-engineering"],"review_status":"reviewed","enabled":false,"allowed_data_classes":["public","synthetic"],"allowed_tools":[]},
-    {"name":"karpathy-engineering-discipline","path":"karpathy-engineering-discipline/SKILL.md","category":"engineering","description":"Think before coding, choose simplicity, make surgical changes, and define verifiable goals.","sources":["karpathy-guidelines"],"recommended_departments":["ai-engineering","automation-integration","infrastructure-it-operations"],"review_status":"reviewed","enabled":false,"allowed_data_classes":["public","synthetic"],"allowed_tools":[]},
-    {"name":"ponytail-minimal-change","path":"ponytail-minimal-change/SKILL.md","category":"engineering","description":"Minimize code and complexity while preserving required security and reliability controls.","sources":["ponytail"],"recommended_departments":["ai-engineering","automation-integration","infrastructure-it-operations"],"review_status":"reviewed","enabled":false,"allowed_data_classes":["public","synthetic"],"allowed_tools":[]},
-    {"name":"secure-skill-admission","path":"secure-skill-admission/SKILL.md","category":"governance","description":"Review third-party skills for provenance, licensing, scripts, tool requests, data access, and execution risk.","sources":["ecc","anthropic-skills","agent-skills-spec"],"recommended_departments":["quality-assurance-security","human-resources-people-operations"],"review_status":"reviewed","enabled":false,"allowed_data_classes":["public","synthetic"],"allowed_tools":[]},
-    {"name":"claude-runtime-engineering","path":"claude-runtime-engineering/SKILL.md","category":"runtime","description":"Integrate Claude APIs through current documentation, adapter contracts, and fail-closed runtime eligibility.","sources":["anthropic-skills"],"recommended_departments":["ai-research-innovation","ai-engineering"],"review_status":"reviewed","enabled":false,"allowed_data_classes":["public","synthetic"],"allowed_tools":[]},
-    {"name":"research-first-engineering","path":"research-first-engineering/SKILL.md","category":"research","description":"Research unfamiliar APIs, dependencies, and architecture decisions using primary sources.","sources":["ecc","matt-pocock"],"recommended_departments":["market-research-intelligence","ai-research-innovation","ai-engineering"],"review_status":"reviewed","enabled":false,"allowed_data_classes":["public","synthetic"],"allowed_tools":[]},
-    {"name":"release-readiness","path":"release-readiness/SKILL.md","category":"quality","description":"Verify changes through deterministic checks, independent review, security gates, and founder-controlled release approval.","sources":["superpowers","coderabbit-skills","ecc"],"recommended_departments":["quality-assurance-security","infrastructure-it-operations"],"review_status":"reviewed","enabled":false,"allowed_data_classes":["public","synthetic"],"allowed_tools":[]}
+    {
+      "name": "grill-before-building",
+      "path": "grill-before-building/SKILL.md",
+      "category": "planning",
+      "description": "Clarify the user's outcome, constraints, domain language, and acceptance criteria before non-trivial design or implementation work.",
+      "sources": [
+        "matt-pocock",
+        "superpowers"
+      ],
+      "recommended_departments": [
+        "chief-of-staff",
+        "solutions-consulting",
+        "ai-engineering"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "test-driven-development",
+      "path": "test-driven-development/SKILL.md",
+      "category": "engineering",
+      "description": "Implement or change behavior through a focused red-green-refactor loop with regression tests and deterministic verification.",
+      "sources": [
+        "matt-pocock",
+        "superpowers"
+      ],
+      "recommended_departments": [
+        "ai-engineering",
+        "automation-integration",
+        "quality-assurance-security"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "systematic-debugging",
+      "path": "systematic-debugging/SKILL.md",
+      "category": "engineering",
+      "description": "Diagnose defects and regressions using reproducible evidence, competing hypotheses, instrumentation, and a regression test before changing code.",
+      "sources": [
+        "matt-pocock"
+      ],
+      "recommended_departments": [
+        "ai-engineering",
+        "infrastructure-it-operations",
+        "quality-assurance-security"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "independent-code-review",
+      "path": "independent-code-review/SKILL.md",
+      "category": "quality",
+      "description": "Review a proposed diff independently for specification coverage, correctness, maintainability, security, and operational risk before it is merged.",
+      "sources": [
+        "matt-pocock",
+        "coderabbit-skills"
+      ],
+      "recommended_departments": [
+        "quality-assurance-security",
+        "ai-engineering"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "karpathy-engineering-discipline",
+      "path": "karpathy-engineering-discipline/SKILL.md",
+      "category": "engineering",
+      "description": "Reduce coding-agent mistakes by thinking before coding, choosing simplicity, making surgical changes, and defining verifiable goals.",
+      "sources": [
+        "karpathy-guidelines"
+      ],
+      "recommended_departments": [
+        "ai-engineering",
+        "automation-integration",
+        "infrastructure-it-operations"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "ponytail-minimal-change",
+      "path": "ponytail-minimal-change/SKILL.md",
+      "category": "engineering",
+      "description": "Minimize code and complexity by checking whether a change is needed, already solved, or supported by existing platform features before adding implementation.",
+      "sources": [
+        "ponytail"
+      ],
+      "recommended_departments": [
+        "ai-engineering",
+        "automation-integration",
+        "infrastructure-it-operations"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "secure-skill-admission",
+      "path": "secure-skill-admission/SKILL.md",
+      "category": "governance",
+      "description": "Assess third-party agent skills before admission by checking provenance, license, scripts, tool requests, data access, and execution risk.",
+      "sources": [
+        "ecc",
+        "anthropic-skills",
+        "agent-skills-spec"
+      ],
+      "recommended_departments": [
+        "quality-assurance-security",
+        "human-resources-people-operations"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "claude-runtime-engineering",
+      "path": "claude-runtime-engineering/SKILL.md",
+      "category": "runtime",
+      "description": "Implement Claude API or Managed Agents integrations through current official documentation, explicit adapter contracts, and fail-closed runtime eligibility checks.",
+      "sources": [
+        "anthropic-skills"
+      ],
+      "recommended_departments": [
+        "ai-research-innovation",
+        "ai-engineering"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "research-first-engineering",
+      "path": "research-first-engineering/SKILL.md",
+      "category": "research",
+      "description": "Research unfamiliar libraries, APIs, security-sensitive behavior, and architecture choices using primary sources before implementation.",
+      "sources": [
+        "ecc",
+        "matt-pocock"
+      ],
+      "recommended_departments": [
+        "market-research-intelligence",
+        "ai-research-innovation",
+        "ai-engineering"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "release-readiness",
+      "path": "release-readiness/SKILL.md",
+      "category": "quality",
+      "description": "Verify a change through deterministic checks, independent review, security gates, migration safety, and founder-controlled release approval.",
+      "sources": [
+        "superpowers",
+        "coderabbit-skills",
+        "ecc"
+      ],
+      "recommended_departments": [
+        "quality-assurance-security",
+        "infrastructure-it-operations"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    }
   ]
 }
