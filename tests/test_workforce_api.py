@@ -676,7 +676,7 @@ def test_skill_catalog_api_is_authenticated_and_tool_free(app_client):
     response = app_client.get(f"/v1/orgs/{identity['org'].id}/skills")
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert len(payload["skills"]) == 10
+    assert len(payload["skills"]) == 18
     assert all(skill["enabled"] is False for skill in payload["skills"])
     assert all(skill["allowed_tools"] == [] for skill in payload["skills"])
 
