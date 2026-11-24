@@ -19,7 +19,7 @@ from app.db import get_db
 from app.models import Role, Workspace, Approval, ApprovalStatus, Execution, ExecutionStatus, Task, Agent
 
 from app.domain_models import Project, Opportunity
-from app.operations_models import ServicePlaybook, Proposal, ScopeChangeRequest, TimeEntry, ProjectCost
+from app.operations_models import ServicePlaybook, ServiceOffering, Proposal, ScopeChangeRequest, TimeEntry, ProjectCost
 from app.telephony.models import OutboxEvent
 from app.action_policy import require_approved_action
 from app.audit import record_event
@@ -88,6 +88,50 @@ class PlaybookOut(BaseModel):
     deliverables: list
     acceptance_criteria: list
     security_checks: list
+    created_at: datetime
+    updated_at: datetime
+
+
+class ServiceOfferingCreate(BaseModel):
+    workspace_id: str
+    code: str = Field(pattern="^[a-z0-9][a-z0-9_-]{1,59}$")
+    name: str = Field(min_length=2, max_length=200)
+    service_line: str = Field(min_length=2, max_length=120)
+    description: str = Field(min_length=10, max_length=8000)
+    pricing_model: str = Field(pattern="^(fixed|hourly|retainer|custom)$")
+    indicative_price_minor: int | None = Field(default=None, ge=0, le=2_000_000_000)
+    currency: str = Field(default="INR", pattern="^[A-Z]{3}$")
+    typical_duration_days: int = Field(default=0, ge=0, le=3650)
+    target_outcomes: list[str] = Field(default_factory=list, max_length=50)
+    deliverables: list[str] = Field(default_factory=list, max_length=100)
+    required_inputs: list[str] = Field(default_factory=list, max_length=100)
+    exclusions: list[str] = Field(default_factory=list, max_length=100)
+    notes: str = Field(default="", max_length=8000)
+
+
+class ServiceOfferingStatusUpdate(BaseModel):
+    status: str = Field(pattern="^(active|retired)$")
+
+
+class ServiceOfferingOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    workspace_id: str
+    code: str
+    name: str
+    service_line: str
+    description: str
+    pricing_model: str
+    indicative_price_minor: int | None
+    currency: str
+    typical_duration_days: int
+    target_outcomes: list
+    deliverables: list
+    required_inputs: list
+    exclusions: list
+    notes: str
+    version: int
+    status: str
     created_at: datetime
     updated_at: datetime
 
@@ -222,6 +266,80 @@ class ProjectCostOut(BaseModel):
     incurred_at: datetime
     recorded_by: str
     created_at: datetime
+
+
+@router.get("/service-catalog", response_model=list[ServiceOfferingOut])
+def list_service_offerings(
+    org_id: str, workspace_id: str = Query(min_length=1), status: str | None = None,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    role = require_membership(org_id, p, db)
+    require_role(role, {Role.owner, Role.admin, Role.operator, Role.reviewer})
+    _workspace(db, org_id, workspace_id)
+    query = db.query(ServiceOffering).filter_by(org_id=org_id, workspace_id=workspace_id)
+    if status:
+        if status not in {"draft", "active", "retired"}:
+            raise HTTPException(422, "Unsupported service offering status")
+        query = query.filter_by(status=status)
+    return query.order_by(ServiceOffering.updated_at.desc(), ServiceOffering.name.asc()).limit(250).all()
+
+
+@router.post("/service-catalog", response_model=ServiceOfferingOut, status_code=201)
+def create_service_offering(
+    org_id: str, body: ServiceOfferingCreate,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    _write(org_id, body.workspace_id, p, db)
+    if body.pricing_model == "fixed" and body.indicative_price_minor is None:
+        raise HTTPException(422, "Fixed-price offerings require an indicative price")
+    code = body.code.lower().strip()
+    existing = db.query(ServiceOffering.id).filter_by(
+        org_id=org_id, workspace_id=body.workspace_id, code=code,
+    ).first()
+    if existing:
+        raise HTTPException(409, "Service offering code already exists in this workspace")
+    item = ServiceOffering(
+        org_id=org_id, workspace_id=body.workspace_id, code=code,
+        name=body.name.strip(), service_line=body.service_line.strip(),
+        description=body.description.strip(), pricing_model=body.pricing_model,
+        indicative_price_minor=body.indicative_price_minor, currency=body.currency,
+        typical_duration_days=body.typical_duration_days,
+        target_outcomes=body.target_outcomes, deliverables=body.deliverables,
+        required_inputs=body.required_inputs, exclusions=body.exclusions,
+        notes=body.notes, created_by=p.user.id,
+    )
+    db.add(item)
+    db.flush()
+    _event(db, org_id, p.user.id, "commercial.service_offering_created", "service_offering", item.id,
+           body.workspace_id, {"code": item.code, "pricing_model": item.pricing_model})
+    _outbox(db, org_id, body.workspace_id, "commercial.service_offering_created", "service_offering", item.id,
+            {"code": item.code})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.patch("/service-catalog/{offering_id}/status", response_model=ServiceOfferingOut)
+def update_service_offering_status(
+    org_id: str, offering_id: str, body: ServiceOfferingStatusUpdate,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    item = db.query(ServiceOffering).filter_by(id=offering_id, org_id=org_id).with_for_update().first()
+    if item is None:
+        raise HTTPException(404, "Service offering not found")
+    _write(org_id, item.workspace_id, p, db)
+    require_founder_authority(db, org_id, p.user.id)
+    if item.status == body.status:
+        return item
+    item.status = body.status
+    item.version += 1
+    _event(db, org_id, p.user.id, "commercial.service_offering_status_changed", "service_offering", item.id,
+           item.workspace_id, {"status": item.status, "version": item.version})
+    _outbox(db, org_id, item.workspace_id, "commercial.service_offering_status_changed", "service_offering", item.id,
+            {"status": item.status, "version": item.version})
+    db.commit()
+    db.refresh(item)
+    return item
 
 
 @router.get("/playbooks", response_model=list[PlaybookOut])
