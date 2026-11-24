@@ -1146,6 +1146,16 @@ def create_contract_draft(
     ).first()
     if duplicate:
         raise HTTPException(409, "Contract number already exists in this workspace")
+    billing_period_count = 1
+    contract_value_minor = proposal.amount_minor
+    if proposal.engagement_type == "retainer":
+        months_per_period = {"monthly": 1, "quarterly": 3, "annual": 12}[proposal.billing_frequency]
+        if proposal.term_months is None or proposal.term_months % months_per_period != 0:
+            raise HTTPException(422, "Retainer term must contain complete billing periods")
+        billing_period_count = proposal.term_months // months_per_period
+        contract_value_minor = proposal.amount_minor * billing_period_count
+        if contract_value_minor > 2_000_000_000:
+            raise HTTPException(422, "Total retainer commitment exceeds the supported contract value range")
     snapshot = {
         "proposal_id": proposal.id,
         "proposal_title": proposal.title,
@@ -1154,7 +1164,9 @@ def create_contract_draft(
         "deliverables": proposal.deliverables,
         "assumptions": proposal.assumptions,
         "exclusions": proposal.exclusions,
-        "amount_minor": proposal.amount_minor,
+        "amount_minor": contract_value_minor,
+        "billing_amount_per_period_minor": proposal.amount_minor if proposal.engagement_type == "retainer" else None,
+        "billing_period_count": billing_period_count,
         "currency": proposal.currency,
         "validity_days": proposal.validity_days,
         "engagement_type": proposal.engagement_type,
@@ -1170,7 +1182,7 @@ def create_contract_draft(
     item = ContractRecord(
         org_id=org_id, workspace_id=body.workspace_id, client_id=client.id,
         proposal_id=proposal.id, contract_number=body.contract_number.strip(),
-        title=body.title.strip(), amount_minor=proposal.amount_minor,
+        title=body.title.strip(), amount_minor=contract_value_minor,
         currency=proposal.currency, terms_snapshot=snapshot, created_by=p.user.id,
     )
     db.add(item)
