@@ -44,15 +44,13 @@ def _project(db: Session, org_id: str, workspace_id: str, project_id: str) -> Pr
 
 def _write(org_id: str, workspace_id: str, p: Principal, db: Session) -> None:
     role = require_membership(org_id, p, db)
-    require_role(role, WRITERS)
+    if role not in WRITERS and not has_founder_authority(db, org_id, p.user.id):
+        require_role(role, WRITERS)
     _workspace(db, org_id, workspace_id)
 
 
 def _write_or_founder(org_id: str, workspace_id: str, p: Principal, db: Session) -> None:
-    role = require_membership(org_id, p, db)
-    if role not in WRITERS and not has_founder_authority(db, org_id, p.user.id):
-        require_role(role, WRITERS)
-    _workspace(db, org_id, workspace_id)
+    _write(org_id, workspace_id, p, db)
 
 
 def _read_or_founder(
