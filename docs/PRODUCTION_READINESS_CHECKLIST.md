@@ -73,12 +73,12 @@ Percentages are weighted engineering estimates, not automated metrics. A partial
 
 ### 4. One-time and retainer delivery
 - [x] Contract snapshots distinguish fixed-scope one-time work from recurring retainer terms (PR #28, unmerged).
-- [x] Founder-governed retainer service periods, included hours, rollover calculation and usage snapshots (PR #28, unmerged).
+- [x] Founder-governed retainer service periods, included hours, rollover calculation and usage snapshots (PR #28, unmerged).\n- [x] Idempotent recurring invoice draft generation linked uniquely to a closed retainer period; founder approval is still required before issue (PR #28, unmerged).
 - [x] Billable time entry requires an open period for active retainer projects; closed-period backdating is blocked at the API layer (PR #28, unmerged).
 - [ ] Add concurrency and PostgreSQL locking tests for period close versus time entry creation.
 - [ ] Add adjustment/correction workflow for erroneous time entries without mutating closed snapshots.
 - [ ] Add founder approval for overage billability, rate and scope before any additional charge.
-- [ ] Generate recurring invoice drafts idempotently from executed contract schedules; founder approval before issue.
+- [x] Generate recurring invoice drafts idempotently from closed periods and executed contract schedules; founder approval before issue.\n- [ ] Add automated schedule runner, due-date policy and invoice reconciliation for missed/failed periods.
 - [ ] Add SLA/response measurement with business calendars, exclusions and evidence.
 - [ ] Add renewal decision queue, notice windows, price review and founder-approved renewal/termination.
 - [ ] Add retainer pause/resume, service suspension and final handover/knowledge export.
