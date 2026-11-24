@@ -29,6 +29,7 @@ AUTONOMOUS_ACTIONS = frozenset({
     "task.delegate",
     "transcript.process",
     "report.generate",
+    "plan.generate",
     "notification.internal",
 })
 
