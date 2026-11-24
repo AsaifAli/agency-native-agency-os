@@ -22,6 +22,10 @@ The OS already owns the organization/workspace model, task and execution records
 | Coding agent sandbox | [OpenHands](https://github.com/All-Hands-AI/OpenHands) | Isolated coding workspaces, tool/runtime adapters and controlled engineering tasks | Optional engineering workbench only; never grant production credentials or unreviewed repository write access |
 | Workflow orchestration | [Prefect](https://github.com/PrefectHQ/prefect) | Retryable data/automation flows, schedules and concurrency controls | Do not add: overlaps native workers/outbox and n8n's integration role |
 | Error monitoring | [Sentry](https://github.com/getsentry/sentry) | Exception grouping, release tracking and alerting | Candidate for later operations hardening; first establish redaction, retention and self-hosting requirements |
+| GenAI telemetry conventions | [OpenTelemetry GenAI conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) | Consistent model, token, tool and agent span attributes across providers | Adopt the semantic conventions as the future instrumentation contract; avoid storing prompt/completion bodies by default |
+| Skill security scanning | [NVIDIA SkillSpector](https://github.com/NVIDIA/SkillSpector), [Snyk agent-scan](https://github.com/snyk/agent-scan) | Detect suspicious scripts, obfuscation and risky agent-skill behavior before admission | Evaluate as pre-import checks; scan results supplement, not replace, manual review and sandboxing |
+| Fine-grained authorization | [Cedar](https://www.cedarpolicy.com/) / [Open Policy Agent](https://www.openpolicyagent.org/) | Declarative policy evaluation for tool/action/resource authorization | Keep current backend authorization authoritative; evaluate a policy engine only when rules become too complex to test and maintain in application code |
+| Browser automation | [Playwright](https://github.com/microsoft/playwright), [Browser Use](https://github.com/browser-use/browser-use) | Deterministic browser tests and bounded agent-driven browser tasks | Use Playwright for deterministic tests; agent browser access remains a separately authorized capability with domain, download, file and egress restrictions |
 | Agent and tool catalog | [MCP Registry / ToolHive Catalog](https://github.com/stacklok/toolhive-catalog) | Curated, versioned server metadata and provenance | Adopt catalog/provenance concepts; external entries remain untrusted until review |
 
 ## More patterns worth implementing in the OS itself
@@ -33,6 +37,8 @@ The OS already owns the organization/workspace model, task and execution records
 5. **Evaluation release gate:** version datasets, prompts, models and evaluator configurations; block release on failed safety, tenant-isolation, regression or quality checks.
 6. **Engineering change protocol:** research → plan → implementation → deterministic tests → independent review → security scan → founder-controlled release.
 7. **Operational recovery controls:** dead-letter review, replay with idempotency, stuck lease detection, worker health, reconciliation and restore drills.
+8. **Agent identity and delegated authority:** distinct machine identities per agent/runtime, short-lived scoped credentials, delegated user context, and policy checks at every tool invocation.
+9. **Browser capability isolation:** browser profiles and sessions are scoped to a task/workspace; downloads are quarantined and scanned; no arbitrary local file access or unrestricted internet egress.
 
 ## Adoption guardrails
 
@@ -53,5 +59,7 @@ The OS already owns the organization/workspace model, task and execution records
 - [ToolHive repository](https://github.com/stacklok/toolhive) describes isolated MCP server execution and identity-aware policy.
 - [Semgrep repository](https://github.com/semgrep/semgrep) describes static analysis and security scanning.
 - [OpenHands repository](https://github.com/All-Hands-AI/OpenHands) describes a self-hosted coding-agent runtime and sandboxed execution.
+- [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) define shared telemetry attributes for GenAI workloads.
+- [NVIDIA SkillSpector](https://github.com/NVIDIA/SkillSpector) and [Snyk agent-scan](https://github.com/snyk/agent-scan) are candidate skill-security scanners; their detection coverage and false-positive rates require evaluation.
 
 Licenses, current maturity, security posture, hosting cost and contractual terms must be checked against the exact versions selected before adoption.

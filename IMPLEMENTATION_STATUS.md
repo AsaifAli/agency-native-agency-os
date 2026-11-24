@@ -1,13 +1,13 @@
 # Agency OS implementation status — stabilization checkpoint
 
-## Previous verified checkpoint
+## Verified checkpoint
 - Working branch: `feature/agency-os-v5-stabilization`.
-- Previous verified commit: `02fe38a0dccbc888aad46890789846bc52c30adf`.
-- Previous GitHub Actions run: [45450018674](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45450018674).
-- Previous backend CI: **140 passed, 0 failed, 1 warning** (Starlette/httpx TestClient deprecation).
-- That CI validated the Alembic graph, applied migrations to PostgreSQL 16, compiled Python source and ran backend plus PostgreSQL integration tests.
-- The execution-history API, trace view, monitoring view and department selector changes described below are new and remain unverified until the current branch CI completes.
-- No frontend production build, live provider session, deployment, backup restore drill, independent penetration test or compliance assessment is claimed.
+- Verified commit: `a2f3f4a75fa6b2d4cecf49a6bc6ce5d73d054e30`.
+- GitHub Actions run: [45455127086](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45455127086).
+- Backend CI: **142 passed, 0 failed, 1 warning** (GitHub Actions Node 20 deprecation warning for actions/checkout and setup-python; no test failures).
+- CI validated the Alembic graph, applied migrations to PostgreSQL 16, compiled Python source and ran backend plus PostgreSQL integration tests.
+- The new execution history and trace API tests passed in this run.
+- Frontend production build, live provider session, deployment, backup restore drill, independent penetration test and compliance assessment are not claimed.
 
 ## Implemented source capabilities
 - Workspace-scoped, authenticated execution history API with bounded status filtering and result limits.
