@@ -11,7 +11,7 @@ SKILLS_ROOT = Path(__file__).resolve().parent.parent / "skills"
 CATALOG_PATH = SKILLS_ROOT / "catalog.json"
 _NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _FRONTMATTER_RE = re.compile(r"\A---\s*\n(?P<header>.*?)\n---\s*\n", re.DOTALL)
-_DESCRIPTION_RE = re.compile(r'^description:\s*(?:"(?P<quoted>[^"]+)"|(?P<plain>.+?))\s*
+_DESCRIPTION_RE = re.compile(r'^description:\s*(?:"(?P<quoted>[^"]+)"|(?P<plain>.+?))\s*$', re.MULTILINE)
 _SKILL_NAME_RE = re.compile(r"^name:\s*(?P<name>[a-z0-9-]+)\s*$", re.MULTILINE)
 
 
