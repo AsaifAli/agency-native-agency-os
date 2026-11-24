@@ -106,6 +106,42 @@ def test_playbook_create_and_founder_activation(client):
     assert activated.json()["version"] == 2
 
 
+def test_proposal_supports_one_time_and_retainer_engagement_terms(client):
+    org, ws = client.org_id, client.ws_id
+    base = {
+        "workspace_id": ws, "opportunity_id": client.opportunity_id,
+        "title": "Managed AI operations retainer", "service_line": "AI Engineering",
+        "scope_summary": "Ongoing operation, monitoring and improvement of the agreed AI workflows.",
+        "amount_minor": 950000, "currency": "INR",
+    }
+    invalid = client.post(f"/v1/orgs/{org}/operations/proposals", headers=headers(), json={
+        **base, "engagement_type": "retainer", "billing_frequency": "one_time",
+        "term_months": 6, "included_hours_per_period": 40,
+    })
+    assert invalid.status_code == 422
+    created = client.post(f"/v1/orgs/{org}/operations/proposals", headers=headers(), json={
+        **base, "engagement_type": "retainer", "billing_frequency": "monthly",
+        "term_months": 6, "included_hours_per_period": 40,
+        "rollover_hours": True, "support_response_hours": 8,
+        "auto_renew": False,
+    })
+    assert created.status_code == 201, created.text
+    payload = created.json()
+    assert payload["engagement_type"] == "retainer"
+    assert payload["billing_frequency"] == "monthly"
+    assert payload["term_months"] == 6
+    assert payload["included_hours_per_period"] == 40
+    assert payload["rollover_hours"] is True
+    assert payload["support_response_hours"] == 8
+    assert payload["auto_renew"] is False
+    one_time = client.post(f"/v1/orgs/{org}/operations/proposals", headers=headers(), json={
+        **base, "title": "One-time AI implementation",
+    })
+    assert one_time.status_code == 201, one_time.text
+    assert one_time.json()["engagement_type"] == "one_time"
+    assert one_time.json()["billing_frequency"] == "one_time"
+
+
 def test_proposal_requires_single_use_founder_pricing_approval(client):
     org, ws, opportunity = client.org_id, client.ws_id, client.opportunity_id
     created = client.post(f"/v1/orgs/{org}/operations/proposals", headers=headers(), json={
