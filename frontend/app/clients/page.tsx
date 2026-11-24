@@ -5,6 +5,8 @@ import Page from "@/components/page";
 import Notice from "@/components/notice";
 import { api, orgId, type Workspace } from "@/lib/api";
 
+function safeWebsite(value: string): string | null { try { const url = new URL(value); return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null; } catch { return null; } }
+
 type ClientRecord = {
   id: string;
   workspace_id: string;
@@ -119,7 +121,7 @@ export default function ClientsPage() {
                     <div style={{minWidth:0}}>
                       <div className="activity-title">{item.name}</div>
                       <div className="activity-meta">{item.legal_name || "Legal name not recorded"} · {item.industry || "Industry not set"} · {item.status}</div>
-                      {item.website && <a href={item.website} target="_blank" rel="noreferrer" className="activity-meta">{item.website}</a>}
+                      {item.website && (safeWebsite(item.website) ? <a href={safeWebsite(item.website) || undefined} target="_blank" rel="noopener noreferrer" className="activity-meta">{item.website}</a> : <div className="activity-meta">{item.website} · invalid URL scheme</div>)}
                       <div className="activity-meta">Created {new Date(item.created_at).toLocaleDateString()}</div>
                     </div>
                   </div>
