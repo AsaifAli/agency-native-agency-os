@@ -573,9 +573,9 @@ def _plan_draft_out(row: OrchestrationPlanDraft) -> dict:
 def _validate_plan_draft_objective(value: str) -> None:
     # This is a lightweight submission guard, not a complete PII/DLP gateway.
     patterns = (
-        r"(?i)\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}\\b",
-        r"(?<!\\w)(?:\\+?\\d[\\s().-]?){9,15}(?!\\w)",
-        r"(?i)\\b(?:sk-[A-Za-z0-9_-]{16,}|api[_ -]?key\\s*[:=])",
+        r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b",
+        r"(?<!\w)(?:\+?\d[\s().-]?){9,15}(?!\w)",
+        r"(?i)\b(?:sk-[A-Za-z0-9_-]{16,}|api[_ -]?key\s*[:=])",
     )
     if any(re.search(pattern, value) for pattern in patterns):
         raise HTTPException(422, "Remove personal contact details and credentials from the planning objective")
