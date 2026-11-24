@@ -146,6 +146,17 @@ export default function OutreachPage() {
     } catch(e) { setError((e as Error).message); } finally { setBusyId(""); }
   }
 
+  async function rejectMessage(item:Message) {
+    if (!item.approval_id) return;
+    setBusyId(item.id); setError("");
+    try {
+      await api<Message>(`/v1/orgs/${orgId()}/outreach/messages/${item.id}/reject`,{
+        method:"POST",body:JSON.stringify({approval_id:item.approval_id,note:"Founder rejected this outreach draft"}),
+      });
+      await loadData();
+    } catch(e) { setError((e as Error).message); } finally { setBusyId(""); }
+  }
+
   async function stopEvent(item:Message,eventType:"reply"|"opt_out"|"bounce") {
     setBusyId(item.id); setError("");
     try {
@@ -229,8 +240,8 @@ export default function OutreachPage() {
           <div className="activity-title">{item.subject}</div>
           <div className="activity-meta">To {item.recipient} · {item.status} · {item.stop_reason||"No stop condition"}</div>
           <p className="activity-meta" style={{whiteSpace:"pre-wrap"}}>{item.body}</p>
-          {item.status==="draft" && <button className="button secondary" type="button" onClick={()=>void messageAction(item,"submit-for-approval")} disabled={busyId===item.id}>Submit for Founder Approval</button>}
-          {item.status==="pending_approval" && <div style={{display:"flex",gap:8,flexWrap:"wrap"}}><Link href="/approvals" className="activity-meta">Review in Founder Approvals</Link><button className="button primary" type="button" onClick={()=>void messageAction(item,"queue")} disabled={busyId===item.id}>Queue after approval</button></div>}
+          {(item.status==="draft" || item.status==="rejected") && <button className="button secondary" type="button" onClick={()=>void messageAction(item,"submit-for-approval")} disabled={busyId===item.id}>Submit for Founder Approval</button>}
+          {item.status==="pending_approval" && <div style={{display:"flex",gap:8,flexWrap:"wrap"}}><Link href="/approvals" className="activity-meta">Review in Founder Approvals</Link><button className="button primary" type="button" onClick={()=>void messageAction(item,"queue")} disabled={busyId===item.id}>Queue after approval</button><button className="button secondary" type="button" onClick={()=>void rejectMessage(item)} disabled={busyId===item.id}>Reject draft</button></div>}
           {item.status==="queued" && <div style={{display:"grid",gridTemplateColumns:"minmax(180px,1fr) repeat(3,auto)",gap:8,marginTop:8}}>
             <input className="field" value={eventNotes[item.id]||""} onChange={e=>setEventNotes(v=>({...v,[item.id]:e.target.value}))} placeholder="Manual reply / opt-out / bounce evidence" maxLength={2000}/>
             <button className="button secondary" type="button" onClick={()=>void stopEvent(item,"reply")} disabled={busyId===item.id}>Record reply</button>
