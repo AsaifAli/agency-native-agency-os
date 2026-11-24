@@ -1721,7 +1721,7 @@ def test_delegated_task_state_tracks_execution_and_review_gate(worker_context):
 def _create_plan_draft_worker_context(ctx, detail_label="valid"):
     import json
     from app.models import Task
-    from app.workforce_models import OrchestrationPlanDraft
+    from app.workforce_models import OrchestrationPlanDraft, WorkforceMember
     from app.workforce_service import initialize_workforce
 
     db = ctx["db"]
@@ -1799,6 +1799,7 @@ def _complete_worker_execution(ctx, execution):
 
 def test_plan_draft_execution_becomes_founder_reviewable(worker_context):
     from app.workforce_models import OrchestrationPlanDraft
+    from app.models import Task
 
     ctx = worker_context
     execution, draft = _create_plan_draft_worker_context(ctx)
