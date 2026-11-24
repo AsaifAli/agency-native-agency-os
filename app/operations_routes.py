@@ -67,11 +67,12 @@ def _event(db, org_id, actor_id, event_type, resource_type, resource_id, workspa
     record_event(db, org_id, actor_id, event_type, resource_type, resource_id, workspace_id, payload or {})
 
 
-def _outbox(db, org_id, workspace_id, event_type, aggregate_type, aggregate_id, payload):
+def _outbox(db, org_id, workspace_id, event_type, aggregate_type, aggregate_id, payload, key_suffix=None):
+    key = f"{event_type}:{aggregate_id}:{key_suffix}" if key_suffix else f"{event_type}:{aggregate_id}"
     db.add(OutboxEvent(
         org_id=org_id, workspace_id=workspace_id, event_type=event_type,
         schema_version=1, aggregate_type=aggregate_type, aggregate_id=aggregate_id,
-        idempotency_key=f"{event_type}:{aggregate_id}", payload=payload,
+        idempotency_key=key, payload=payload,
     ))
 
 
@@ -678,7 +679,7 @@ def submit_onboarding_for_activation(
     _event(db, org_id, p.user.id, "delivery.onboarding_submitted", "client_onboarding", item.id,
            item.workspace_id, {"approval_id": approval.id, "action_type": "delivery.activate"})
     _outbox(db, org_id, item.workspace_id, "delivery.onboarding_submitted", "client_onboarding", item.id,
-            {"approval_id": approval.id})
+            {"approval_id": approval.id}, key_suffix=approval.id)
     db.commit()
     db.refresh(item)
     return item
