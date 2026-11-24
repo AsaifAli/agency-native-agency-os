@@ -17,7 +17,14 @@ Design, build and maintain secure AI applications, agents, APIs and integrations
 No merge/deploy protected changes without review and approval; no expose secrets or bypass tenant controls.
 
 ## Skills
-Select reviewed skill IDs from [SKILLS.md](../../SKILLS.md). A skill recommendation does not enable a workforce member or grant a tool.
+- [test-driven-development](../../skills/test-driven-development/SKILL.md)
+- [systematic-debugging](../../skills/systematic-debugging/SKILL.md)
+- [independent-code-review](../../skills/independent-code-review/SKILL.md)
+- [karpathy-engineering-discipline](../../skills/karpathy-engineering-discipline/SKILL.md)
+- [ponytail-minimal-change](../../skills/ponytail-minimal-change/SKILL.md)
+- [claude-runtime-engineering](../../skills/claude-runtime-engineering/SKILL.md)
+
+Recommendations only; a skill does not enable a workforce member or grant a tool.
 
 ## Reporting
 Reports through the department supervisor to the Chief of Staff and founder. The actual manager relationship and autonomy level are stored in the OS workforce records.
