@@ -1,0 +1,467 @@
+{
+  "schema_version": 1,
+  "catalog_version": "1.0.0",
+  "policy": {
+    "default_enabled": false,
+    "default_allowed_tools": [],
+    "default_allowed_data_classes": [
+      "public",
+      "synthetic"
+    ],
+    "execution_mode": "manual_review_only",
+    "note": "Catalog entries are reviewed reusable instructions, not runtime grants. Backend policy remains authoritative."
+  },
+  "sources": {
+    "superpowers": {
+      "repository": "https://github.com/obra/superpowers-skills",
+      "revision": "cdcd624ad3fd8026deb692e565351854569798dd",
+      "license": "MIT",
+      "use": "Adapted planning, test-first implementation, debugging, and skill-writing workflow patterns."
+    },
+    "matt-pocock": {
+      "repository": "https://github.com/mattpocock/skills",
+      "revision": "d65391149dbb5fe76478e76fa8d5122b2aa5a70e",
+      "license": "MIT",
+      "use": "Adapted grilling, TDD, debugging, code review, and composable engineering workflow patterns."
+    },
+    "ecc": {
+      "repository": "https://github.com/affaan-m/ECC",
+      "revision": "4adeee6732a12d1540f49a4d50a38ce8c97f9a53",
+      "license": "MIT",
+      "use": "Adapted research-first, security, and agent-harness governance patterns; no wholesale import."
+    },
+    "karpathy-guidelines": {
+      "repository": "https://github.com/nassimna/karpathy-guidelines",
+      "revision": "7d28f033043fd7b6ad41fd266f7997da5904a1e1",
+      "license": "No root LICENSE file found at the pinned revision; reference-only principles, no source text copied.",
+      "use": "Adapted think-before-coding, simplicity-first, surgical-change, and goal-driven execution principles."
+    },
+    "ponytail": {
+      "repository": "https://github.com/DietrichGebert/ponytail",
+      "revision": "ebd8654c2c627f721eb8f9c0d1bd4090a29f9e10",
+      "license": "MIT",
+      "use": "Adapted minimal-change and YAGNI review principles while retaining mandatory security controls."
+    },
+    "anthropic-skills": {
+      "repository": "https://github.com/anthropics/skills",
+      "revision": "e4bb5d960d87126ff3b3a8af1a104b7db67560ba",
+      "license": "No root LICENSE file found at the pinned revision path; packaging/runtime patterns only, no skill source text or assets copied.",
+      "use": "Agent Skills packaging and Claude-specific skill/runtime patterns; no document skill code copied."
+    },
+    "agent-skills-spec": {
+      "repository": "https://github.com/agentskills/agentskills",
+      "revision": "83021e2be457a9b6679148719c1f6074f0ad975e",
+      "license": "Apache-2.0 repository code; CC-BY-4.0 documentation",
+      "use": "SKILL.md directory format and progressive-disclosure conventions; specification: https://agentskills.io/specification."
+    },
+    "coderabbit-skills": {
+      "repository": "https://github.com/coderabbitai/skills",
+      "revision": "4baf5ada0b20ca2fd014660a84c43ae589ff346e",
+      "license": "MIT for this skills repository; hosted CodeRabbit service terms are separate.",
+      "use": "Optional independent review workflow patterns only. No hosted service connection or credentials configured."
+    },
+    "claude-skills-index": {
+      "repository": "https://claudeskills.info/",
+      "revision": "Discovery index; not pinned as executable source.",
+      "license": "Not verified; discovery-only, no imported content.",
+      "use": "Discovery and source-link lookup only. Never import or execute skills directly from the index."
+    }
+  },
+  "skills": [
+    {
+      "name": "grill-before-building",
+      "path": "grill-before-building/SKILL.md",
+      "category": "planning",
+      "description": "Clarify the user's outcome, constraints, domain language, and acceptance criteria before non-trivial design or implementation work.",
+      "sources": [
+        "matt-pocock",
+        "superpowers"
+      ],
+      "recommended_departments": [
+        "chief-of-staff",
+        "solutions-consulting",
+        "ai-engineering"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "test-driven-development",
+      "path": "test-driven-development/SKILL.md",
+      "category": "engineering",
+      "description": "Implement or change behavior through a focused red-green-refactor loop with regression tests and deterministic verification.",
+      "sources": [
+        "matt-pocock",
+        "superpowers"
+      ],
+      "recommended_departments": [
+        "ai-engineering",
+        "automation-integration",
+        "quality-assurance-security"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "systematic-debugging",
+      "path": "systematic-debugging/SKILL.md",
+      "category": "engineering",
+      "description": "Diagnose defects and regressions using reproducible evidence, competing hypotheses, instrumentation, and a regression test before changing code.",
+      "sources": [
+        "matt-pocock"
+      ],
+      "recommended_departments": [
+        "ai-engineering",
+        "infrastructure-it-operations",
+        "quality-assurance-security"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "independent-code-review",
+      "path": "independent-code-review/SKILL.md",
+      "category": "quality",
+      "description": "Review a proposed diff independently for specification coverage, correctness, maintainability, security, and operational risk before it is merged.",
+      "sources": [
+        "matt-pocock",
+        "coderabbit-skills"
+      ],
+      "recommended_departments": [
+        "quality-assurance-security",
+        "ai-engineering"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "karpathy-engineering-discipline",
+      "path": "karpathy-engineering-discipline/SKILL.md",
+      "category": "engineering",
+      "description": "Reduce coding-agent mistakes by thinking before coding, choosing simplicity, making surgical changes, and defining verifiable goals.",
+      "sources": [
+        "karpathy-guidelines"
+      ],
+      "recommended_departments": [
+        "ai-engineering",
+        "automation-integration",
+        "infrastructure-it-operations"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "ponytail-minimal-change",
+      "path": "ponytail-minimal-change/SKILL.md",
+      "category": "engineering",
+      "description": "Minimize code and complexity by checking whether a change is needed, already solved, or supported by existing platform features before adding implementation.",
+      "sources": [
+        "ponytail"
+      ],
+      "recommended_departments": [
+        "ai-engineering",
+        "automation-integration",
+        "infrastructure-it-operations"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "secure-skill-admission",
+      "path": "secure-skill-admission/SKILL.md",
+      "category": "governance",
+      "description": "Assess third-party agent skills before admission by checking provenance, license, scripts, tool requests, data access, and execution risk.",
+      "sources": [
+        "ecc",
+        "anthropic-skills",
+        "agent-skills-spec"
+      ],
+      "recommended_departments": [
+        "quality-assurance-security",
+        "human-resources-people-operations"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "claude-runtime-engineering",
+      "path": "claude-runtime-engineering/SKILL.md",
+      "category": "runtime",
+      "description": "Implement Claude API or Managed Agents integrations through current official documentation, explicit adapter contracts, and fail-closed runtime eligibility checks.",
+      "sources": [
+        "anthropic-skills"
+      ],
+      "recommended_departments": [
+        "ai-research-innovation",
+        "ai-engineering"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "research-first-engineering",
+      "path": "research-first-engineering/SKILL.md",
+      "category": "research",
+      "description": "Research unfamiliar libraries, APIs, security-sensitive behavior, and architecture choices using primary sources before implementation.",
+      "sources": [
+        "ecc",
+        "matt-pocock"
+      ],
+      "recommended_departments": [
+        "market-research-intelligence",
+        "ai-research-innovation",
+        "ai-engineering"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "release-readiness",
+      "path": "release-readiness/SKILL.md",
+      "category": "quality",
+      "description": "Verify a change through deterministic checks, independent review, security gates, migration safety, and founder-controlled release approval.",
+      "sources": [
+        "superpowers",
+        "coderabbit-skills",
+        "ecc"
+      ],
+      "recommended_departments": [
+        "quality-assurance-security",
+        "infrastructure-it-operations"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "market-research-briefing",
+      "path": "market-research-briefing/SKILL.md",
+      "category": "research",
+      "description": "Produce evidence-led market and company research briefs with primary sources, dated claims, counter-evidence, and explicit uncertainty.",
+      "sources": [
+        "ecc",
+        "agent-skills-spec"
+      ],
+      "recommended_departments": [
+        "market-research-intelligence",
+        "business-development-sales",
+        "ai-research-innovation"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "client-discovery-requirements",
+      "path": "client-discovery-requirements/SKILL.md",
+      "category": "discovery",
+      "description": "Turn discovery conversations and approved context into validated business needs, constraints, requirements, acceptance criteria, and open questions.",
+      "sources": [
+        "matt-pocock",
+        "anthropic-skills",
+        "agent-skills-spec"
+      ],
+      "recommended_departments": [
+        "solutions-consulting-strategy",
+        "business-development-sales",
+        "client-success-support",
+        "delivery-implementation"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "proposal-sow-drafting",
+      "path": "proposal-sow-drafting/SKILL.md",
+      "category": "commercial",
+      "description": "Draft evidence-based proposals and statements of work from approved discovery, service catalog, scope, assumptions, and commercial inputs.",
+      "sources": [
+        "anthropic-skills",
+        "matt-pocock"
+      ],
+      "recommended_departments": [
+        "business-development-sales",
+        "solutions-consulting-strategy",
+        "finance-accounts",
+        "legal-risk-compliance"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "client-communication-drafting",
+      "path": "client-communication-drafting/SKILL.md",
+      "category": "communication",
+      "description": "Draft clear, accurate client and prospect communications using approved facts, consent context, tone, and escalation rules without sending them.",
+      "sources": [
+        "anthropic-skills",
+        "agent-skills-spec"
+      ],
+      "recommended_departments": [
+        "marketing-brand",
+        "business-development-sales",
+        "client-success-support"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "project-delivery-coordination",
+      "path": "project-delivery-coordination/SKILL.md",
+      "category": "delivery",
+      "description": "Coordinate delivery work through traceable requirements, scoped tasks, dependencies, owners, milestones, risks, and evidence-backed status.",
+      "sources": [
+        "superpowers",
+        "ecc",
+        "agent-skills-spec"
+      ],
+      "recommended_departments": [
+        "project-management-office",
+        "delivery-implementation",
+        "automation-integration-engineering"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "finance-operations-analysis",
+      "path": "finance-operations-analysis/SKILL.md",
+      "category": "finance",
+      "description": "Analyze agency budgets, project costs, estimates, receivables, and variance using traceable inputs and explicit currency handling.",
+      "sources": [
+        "anthropic-skills",
+        "agent-skills-spec"
+      ],
+      "recommended_departments": [
+        "finance-accounts",
+        "project-management-office",
+        "administration-procurement"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "marketing-content-planning",
+      "path": "marketing-content-planning/SKILL.md",
+      "category": "marketing",
+      "description": "Plan evidence-led agency marketing content around audience needs, positioning, channel fit, measurable goals, and truthful claims.",
+      "sources": [
+        "anthropic-skills",
+        "agent-skills-spec"
+      ],
+      "recommended_departments": [
+        "marketing-brand",
+        "business-development-sales"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "risk-and-policy-review",
+      "path": "risk-and-policy-review/SKILL.md",
+      "category": "governance",
+      "description": "Identify operational, privacy, security, legal and delivery risks, map them to existing controls, and escalate decisions outside agent authority.",
+      "sources": [
+        "ecc",
+        "anthropic-skills",
+        "agent-skills-spec"
+      ],
+      "recommended_departments": [
+        "legal-risk-compliance",
+        "quality-assurance-security",
+        "infrastructure-it-operations",
+        "human-resources-people-operations"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    }
+  ]
+}

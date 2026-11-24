@@ -27,7 +27,7 @@ The AI workforce supports both engines. Departments, teams, positions, agents, s
 - `app/integrations/` — provider/runtime adapters; the OS retains identity, authorization and business state.
 - `migrations/` — additive Alembic migrations.
 - `tests/` — backend, security, integration and regression tests.
-- `docs/` and `skills/` — architecture, security, workforce, operating procedures and reviewed task playbooks.
+- `docs/` and `skills/` — architecture, security, workforce, operating procedures and the curated Agent Skills catalog.
 
 The former Command Center and Evaluation Harness repositories are **not separate runtimes or control planes**. Their relevant execution, workforce and evaluation capabilities have been migrated into native OS modules. Legacy source snapshots, standalone harness API/dashboard, MLOps extras, n8n workflow exports and duplicate service configuration are not part of this runtime.
 
@@ -39,7 +39,7 @@ The former Command Center and Evaluation Harness repositories are **not separate
 - Workforce activation and capability enablement are founder-only, opt-in operations. Capabilities default disabled.
 - Tool grants remain disabled until the OS MCP gateway and scoped tool authorization are implemented.
 - Managed Agents is beta and is not eligible for ZDR or HIPAA BAA. The current adapter is opt-in and synthetic-first; live provider setup and production eligibility are not claimed.
-- Website lead intake is signed and idempotent, disabled by default, and does not trigger outreach or execution.
+- Website lead intake is signed and idempotent across the separate website and OS repositories. Website PR #30 and OS intake are merged; forwarding remains disabled until external configuration and a synthetic end-to-end test pass. It does not trigger outreach or execution.
 - Do not put secrets, customer data or production data in source control.
 
 ## Local development
@@ -78,12 +78,23 @@ Never commit `.env`. Use separate dev, staging and production configuration. Rev
 - `docs/WORKFORCE_AUTONOMY_AND_FOUNDER_AUTHORITY.md` and `docs/FOUNDER_AUTONOMY_MODEL.md` — founder authority and governed autonomy.
 - `docs/INTEGRATION_MAP.md` — migration decisions and native module boundaries.
 - `docs/CLAUDE_MANAGED_AGENTS_ADAPTER.md` — runtime adapter behavior and limitations.
+- `docs/SKILLS_AND_SKILL_GOVERNANCE.md` — curated, provenance-pinned Agent Skills library, admission policy and runtime boundary.
 - `docs/WEBSITE_LEAD_INTAKE.md` — signed website-to-OS boundary.
 - `docs/DELIVERY_OPERATIONS_V5.md` — delivery operations.
 - `IMPLEMENTATION_STATUS.md` — implemented, tested, partial and unverified capabilities.
 
 ## Verification boundary
 
-The native-source cleanup commit (`80b989ae611b08d9a9c37925195517417ba79b05`) passed backend CI: **162 passed, 1 warning** (run [45471143658](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45471143658)). The Chief of Staff orchestration foundation commit (`a3f3784e8fb5a75efb8212c0de0002b7a741cec5`) passed backend CI: **168 passed, 1 warning** (run [45477077236](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45477077236)). Both runs validated PostgreSQL 16 migrations and Python compilation; the latter also exercised the new orchestration and delegated-execution tests. The frontend production build, live Claude sessions, website deployment, backup restore, penetration testing and regulatory compliance remain unverified.
+The native-source cleanup commit (`80b989ae611b08d9a9c37925195517417ba79b05`) passed backend CI: **162 passed, 1 warning** (run [45471143658](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45471143658)). The Chief of Staff orchestration and subsequent reporting-tree authorization hardening are merged to `main`; main commit `387d283bfe65f470cacc9b9a2785de8fce141b78` passed PostgreSQL 16 migration validation, Python compilation, **168 backend tests (1 warning)**, frontend TypeScript checking and Next.js production build (run [45481253037](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45481253037)). Website PR #30 and BYOK/studio PR #32 are merged. Website PR #30's quality workflow passed lint, typecheck, dependency audit, structure checks, build, Playwright smoke tests and Lighthouse (run [45467278242](https://github.com/AsaifAli/asaifali-ai-service-agency/actions/runs/45467278242)); the post-merge website main workflow was still pending at the last check. Live Claude sessions, production deployment, external lead-bridge configuration, backup restore, penetration testing and regulatory compliance remain unverified.
 
 This repository is a substantial development foundation, **not a production-ready or fully autonomous agency OS**. See `IMPLEMENTATION_STATUS.md` for the remaining work and evidence boundaries.
+
+## Agent operating documents
+
+- [AGENTS.md](AGENTS.md) — entry point and hierarchy for all agents and contributors.
+- [INSTRUCTIONS.md](INSTRUCTIONS.md) — mandatory operating, engineering and security rules.
+- [SKILLS.md](SKILLS.md) — curated skill index.
+- [agents/](agents/README.md) — role profiles, template and all 16 department charters.
+- [instructions/](instructions/FOUNDER_AUTHORITY.md) — founder authority, security/data and execution/approval instructions.
+- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) — skill-source provenance and license notes.
+

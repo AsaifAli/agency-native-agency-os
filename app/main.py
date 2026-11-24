@@ -853,6 +853,10 @@ app.include_router(website_intake_router)
 from app.workforce_routes import router as workforce_router
 app.include_router(workforce_router)
 
+# Curated Agent Skills catalog (read-only; no runtime grants).
+from app.skills_routes import router as skills_router
+app.include_router(skills_router)
+
 # Lightweight service playbooks, scope control, time and project cost operations.
 from app.operations_routes import router as operations_router
 app.include_router(operations_router)

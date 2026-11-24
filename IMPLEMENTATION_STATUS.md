@@ -6,7 +6,7 @@
 - GitHub Actions run: [45471143658](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45471143658) — **162 passed, 1 warning**.
 - CI validated the Alembic graph, applied migrations to PostgreSQL 16, compiled Python source and ran backend plus PostgreSQL integration tests after the evaluation move and snapshot cleanup.
 - The warning is the Starlette/httpx TestClient deprecation; no test failures were reported.
-- Frontend production build, live Claude provider session, website deployment, backup restore drill, independent penetration test and compliance assessment are not claimed.
+- Frontend TypeScript checking and Next.js production build are validated in main CI. Live Claude provider sessions, production deployment, backup restore drill, independent penetration test and compliance assessment are not claimed.
 
 ## Implemented source capabilities
 - Governed workforce schema for offices, functional groups, departments, teams, human/agent/supervisor/sub-agent members, 121 durable position records, capability grants and task delegation lineage; backend migrations and tests passed.
@@ -31,12 +31,15 @@
 - Founder-only outbox health endpoint.
 - Workspace-scoped call/transcript records; no live voice provider or dialing.
 - Delivery playbooks, founder-approved scope changes, time/cost records, provisional project financial summaries, exception inbox and execution reliability views.
-- Target organization model and governance skills are documented in `docs/AGENCY_ORGANIZATION_WORKFORCE_BLUEPRINT.md`, `docs/REFERENCE_INTEGRATION_DECISIONS.md` and `skills/`; this does not mean all positions/skills are provisioned as live agents.
+- Curated Agent Skills catalog contains eighteen reviewed, source-pinned instruction packs with authenticated read-only catalog/detail APIs, license/provenance metadata, and per-file SHA-256 digests. All entries are disabled, tool-free, and limited to public/synthetic data; the catalog does not yet assign skills to workforce members or load provider-side Claude skills.
+- Founder Console Skills & Tools page now browses the catalog, filters by category/search, and displays skill instructions, provenance, and SHA-256 digest through the authenticated API.
+- Expanded 18-skill catalog CI run [45487106060](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45487106060) passed PostgreSQL 16 migration validation, Python compilation, **177 backend tests (1 warning)**, frontend TypeScript checking, and the Next.js production build on code commit `524d6369bd98feef77818de412b7a978e66222b7`.
+- Target organization model and workforce governance are documented in `docs/AGENCY_ORGANIZATION_WORKFORCE_BLUEPRINT.md` and `docs/REFERENCE_INTEGRATION_DECISIONS.md`; skill availability does not mean every role has a live runtime.
 
 ## Workforce/runtime gaps still open
 - Workforce bootstrap provisions organisational profiles and positions inactive. Founder-only capability enablement and member activation are implemented as explicit, policy-checked operations; this does not automatically provision separate provider Agents or start Claude sessions.
-- **Orchestration foundation (verified backend commit `a3f3784e8fb5a75efb8212c0de0002b7a741cec5`):** founder-authorized plans persist a root task, ordered child-task DAG, direct-manager delegation lineage, earlier-step dependency ordinals and workspace-scoped plan state. Worker maintenance creates idempotent executions for eligible Agent assignments, releases dependent work after prerequisites succeed, and synchronizes task/delegation lifecycle state. Policy/runtime-blocked work remains blocked with a recorded reason and requires a founder requeue. Required review is founder-only and cannot pass before the child task is terminal.
-- **Still not autonomous supervisor reasoning:** the plan API currently accepts a founder-supplied structured task list. Claude does not yet generate the plan, recursively decompose work across multiple supervisor layers, or initiate OS actions through a scoped machine identity. The latest verification run passed the PostgreSQL 16 migration graph/upgrade, Python compilation and backend/PostgreSQL integration suite (**168 passed, 1 warning**), plus Founder Console TypeScript checking and a Next.js production build ([run 45479376879](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45479376879)).
+- **Orchestration and authorization hardening (main commit `387d283bfe65f470cacc9b9a2785de8fce141b78`; CI run [45481253037](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45481253037), 168 passed, 1 warning):** founder-authorized plans persist a root task, ordered child-task DAG, direct-manager delegation lineage, earlier-step dependency ordinals and workspace-scoped plan state. Plan creation requires an active non-founder Chief of Staff/supervisor with planning authority; all delegators must be within that creator's reporting subtree. Plan refresh is founder-only. Worker maintenance creates idempotent executions for eligible Agent assignments, releases dependent work after prerequisites succeed, and synchronizes task/delegation lifecycle state. Policy/runtime-blocked work remains blocked with a recorded reason and requires a founder requeue. Required review is founder-only and cannot pass before the child task is terminal.
+- **Still not autonomous supervisor reasoning:** the plan API currently accepts a founder-supplied structured task list. Claude does not yet generate the plan, recursively decompose work across multiple supervisor layers, or initiate OS actions through a scoped machine identity. The latest verification run passed the PostgreSQL 16 migration graph/upgrade, Python compilation and backend/PostgreSQL integration suite (**168 passed, 1 warning**), plus Founder Console TypeScript checking and a Next.js production build ([main run 45481253037](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45481253037)).
 - Capability records deliberately default disabled. Tool grants cannot be enabled until the OS MCP gateway and narrowly scoped tool authorization are implemented.
 - Group heads, department heads and specialist Agent definitions are local OS profiles. They are not automatically provisioned as separate Anthropic provider Agents.
 - Founder and Executive Office workforce records are chart entries; they are not live human identity accounts.
@@ -56,8 +59,8 @@
 - Live telephony, signed webhooks, STT/TTS and recording lifecycle are not implemented.
 - Full finance ledger, invoicing, payment collection and tax/accounting are not implemented.
 - Complete QA acceptance/rework metrics and production release gates are incomplete.
-- Frontend production build, monitoring/alerting, SBOM, restore drill and security review are not validated.
-- Website-to-OS endpoint is implemented and CI-tested on the stabilization branch. Website forwarding/admin retry code is on the separate website branch `feature/agency-os-lead-intake`; it has not been merged, configured or deployed. The bridge remains disabled until both sides are configured and the synthetic end-to-end test is completed.
+- Frontend TypeScript checking and production build pass in main CI. Production monitoring/alerting, SBOM generation, backup restore drill and independent security review are not validated.
+- Website-to-OS endpoint is implemented and backend-tested on OS main. Website forwarding/admin retry merged to website main via PR #30 (merge commit `89bbed3484b11b78db2b0ca3d98744cb409a8c48`). The PR quality workflow passed lint, typecheck, dependency audit, structure, build, Playwright and Lighthouse. The post-merge website main workflow was pending at last check. Neither side is externally configured or deployed; the bridge remains disabled until migrations, matching server-only secrets, fixed org/workspace mapping, HTTPS and synthetic end-to-end idempotency/recovery checks are complete.
 
 ## Additional feature discovery
 - `docs/FEATURE_DISCOVERY_AND_ADOPTION.md` records reviewed patterns from LangGraph, Temporal, Langfuse, Arize Phoenix, ToolHive, Semgrep, OpenHands, Prefect and Sentry. These are research references, not installed integrations.
@@ -67,6 +70,7 @@
 - ECC: selected research-first engineering, skill governance and independent review patterns; no wholesale harness import.
 - Strix: optional isolated, authorization-gated QA/Security runner; not installed or executed.
 - Claude Skills Hub: discovery index only; imported skills require provenance, license, static review, sandbox test and pinning.
+- Agent Skills: ten curated adaptations are available through the authenticated read-only skills API; all remain disabled with no tool grants. Provider-side skill injection and per-agent assignment are not implemented.
 - CodeRabbit: optional PR review signal after privacy, retention, subprocessor, pricing and GitHub permission review; not connected and never a replacement for CI/QA/founder approval.
 
 ## Safety boundary
