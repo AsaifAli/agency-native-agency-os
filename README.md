@@ -27,7 +27,7 @@ The AI workforce supports both engines. Departments, teams, positions, agents, s
 - `app/integrations/` — provider/runtime adapters; the OS retains identity, authorization and business state.
 - `migrations/` — additive Alembic migrations.
 - `tests/` — backend, security, integration and regression tests.
-- `docs/` and `skills/` — architecture, security, workforce, operating procedures and reviewed task playbooks.
+- `docs/` and `skills/` — architecture, security, workforce, operating procedures and the curated Agent Skills catalog.
 
 The former Command Center and Evaluation Harness repositories are **not separate runtimes or control planes**. Their relevant execution, workforce and evaluation capabilities have been migrated into native OS modules. Legacy source snapshots, standalone harness API/dashboard, MLOps extras, n8n workflow exports and duplicate service configuration are not part of this runtime.
 
@@ -78,6 +78,7 @@ Never commit `.env`. Use separate dev, staging and production configuration. Rev
 - `docs/WORKFORCE_AUTONOMY_AND_FOUNDER_AUTHORITY.md` and `docs/FOUNDER_AUTONOMY_MODEL.md` — founder authority and governed autonomy.
 - `docs/INTEGRATION_MAP.md` — migration decisions and native module boundaries.
 - `docs/CLAUDE_MANAGED_AGENTS_ADAPTER.md` — runtime adapter behavior and limitations.
+- `docs/SKILLS_AND_SKILL_GOVERNANCE.md` — curated, provenance-pinned Agent Skills library, admission policy and runtime boundary.
 - `docs/WEBSITE_LEAD_INTAKE.md` — signed website-to-OS boundary.
 - `docs/DELIVERY_OPERATIONS_V5.md` — delivery operations.
 - `IMPLEMENTATION_STATUS.md` — implemented, tested, partial and unverified capabilities.
