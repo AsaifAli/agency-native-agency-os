@@ -496,6 +496,8 @@ def record_message_stop_event(
         raise HTTPException(403, "Provider events require a signed provider webhook adapter; manual event recording only is enabled")
     if body.event_type not in {"reply", "opt_out", "bounce"}:
         raise HTTPException(422, "Only reply, opt-out and bounce stop events can be recorded manually")
+    if len(body.note.strip()) < 3:
+        raise HTTPException(422, "A stop-event evidence note is required")
     if item.status not in {"queued", "sent", "delivered"}:
         raise HTTPException(409, "Stop events require a queued or sent message")
     if body.occurred_at and (body.occurred_at.tzinfo is None or body.occurred_at > datetime.now(timezone.utc)):
