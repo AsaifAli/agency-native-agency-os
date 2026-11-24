@@ -40,7 +40,7 @@ Native Python workers and the PostgreSQL transactional outbox are the initial au
 
 ## Other systems
 
-- Public agency website: separate application; signed, idempotent server-to-server lead intake is disabled by default until external configuration and end-to-end validation.
+- Public agency website: separate application; signed, idempotent server-to-server lead intake is implemented in both repositories and merged to main (website PR #30; OS endpoint already merged). It remains disabled until external configuration and end-to-end validation.
 - EvidenceFlow, QuoteSense, LegacyLens and WebQA Intelligence: separate portfolio/client-demo applications, not OS modules.
 - OpenClaw: not part of this private OS.
 - Telephony: provider-neutral record foundation; no live dialing, STT/TTS or voice runtime is claimed.
