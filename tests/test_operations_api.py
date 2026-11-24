@@ -623,6 +623,56 @@ def test_onboarding_requires_executed_contract_checklist_and_delivery_approval(c
     assert replay.status_code == 409
 
 
+
+def test_rejected_delivery_activation_returns_to_preparation_for_retry(client):
+    contract_id = _create_executed_contract(client, "AG-2026-RETRY")
+    created = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/onboardings",
+        headers=headers(), json={"workspace_id": client.ws_id, "contract_id": contract_id},
+    )
+    assert created.status_code == 201, created.text
+    onboarding_id = created.json()["id"]
+    checklist = client.get(
+        "/v1/orgs/" + client.org_id + "/operations/onboardings/" + onboarding_id + "/checklist",
+        headers=headers(),
+    ).json()
+    for item in checklist:
+        updated = client.patch(
+            "/v1/orgs/" + client.org_id + "/operations/onboardings/" + onboarding_id + "/checklist/" + item["id"],
+            headers=headers(), json={"status": "completed", "note": "Confirmed for retry test."},
+        )
+        assert updated.status_code == 200, updated.text
+    plan = {
+        "project_name": "Retryable delivery project",
+        "budget_minor": 500000, "estimated_hours": 60,
+    }
+    first = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/onboardings/" + onboarding_id + "/submit-for-activation",
+        headers=headers(), json=plan,
+    )
+    assert first.status_code == 200, first.text
+    first_approval_id = first.json()["approval_id"]
+    rejected = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/onboardings/" + onboarding_id + "/reject-activation",
+        headers=headers(), json={"approval_id": first_approval_id, "note": "Revise the delivery budget"},
+    )
+    assert rejected.status_code == 200, rejected.text
+    assert rejected.json()["status"] == "preparing"
+    db = client.session_factory()
+    try:
+        first_approval = db.query(Approval).filter_by(id=first_approval_id).one()
+        assert first_approval.status == ApprovalStatus.rejected
+    finally:
+        db.close()
+    second = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/onboardings/" + onboarding_id + "/submit-for-activation",
+        headers=headers(), json=plan,
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["status"] == "pending_approval"
+    assert second.json()["approval_id"] != first_approval_id
+
+
 def test_only_founder_can_waive_required_onboarding_checklist_item(client):
     contract_id = _create_executed_contract(client, "AG-2026-WAIVE")
     created = client.post(
