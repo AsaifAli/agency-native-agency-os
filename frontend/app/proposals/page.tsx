@@ -161,7 +161,7 @@ export default function ProposalsPage() {
           </select>
           <input className="field" value={title} onChange={e => setTitle(e.target.value)} placeholder="Proposal title" maxLength={240} minLength={3} required />
           <input className="field" value={serviceLine} onChange={e => setServiceLine(e.target.value)} placeholder="Service line" maxLength={120} required />
-          <input className="field" type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="Proposed fee (INR)" min={0} step="0.01" required />
+          <input className="field" type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder={`Proposed fee (${opportunities.find(item => item.id === opportunityId)?.currency || "currency"})`} min={0} step="0.01" required />
           <input className="field" type="number" value={validity} onChange={e => setValidity(e.target.value)} placeholder="Validity days" min={1} max={180} required />
           <textarea className="field" value={scope} onChange={e => setScope(e.target.value)} placeholder="Scope summary" maxLength={12000} minLength={10} rows={3} style={{gridColumn:"1 / -1"}} required />
           <textarea className="field" value={deliverables} onChange={e => setDeliverables(e.target.value)} placeholder="Deliverables (one per line)" maxLength={6000} rows={3} />
