@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.auth import Principal, get_principal, require_founder_authority, require_membership, require_role
+from app.config import settings
 from app.db import get_db
 from app.models import Role, Workspace, Task, Agent
 from app.autonomy_policy import action_disposition, ActionDisposition
