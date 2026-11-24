@@ -201,7 +201,7 @@ class InvoiceOut(BaseModel):
     due_date: datetime
     status: str
     approval_id: str | None
-    external_reference: str
+    external_reference: str | None
     issued_at: datetime | None
     issued_by: str | None
     created_by: str
@@ -706,7 +706,6 @@ def record_invoice_issued(
         InvoiceRecord.workspace_id == item.workspace_id,
         InvoiceRecord.external_reference == body.external_reference.strip(),
         InvoiceRecord.id != item.id,
-        InvoiceRecord.external_reference != "",
     ).first()
     if duplicate_reference:
         raise HTTPException(409, "External invoice reference already belongs to another invoice")
