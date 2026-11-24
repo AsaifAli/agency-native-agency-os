@@ -25,7 +25,7 @@ Status meanings:
 | Market intelligence | ICPs, verticals, geography, buying signals, competitor/service research | Missing as an operational pipeline | P0 |
 | Prospect acquisition | Company/contact discovery, enrichment, evidence URLs, source and confidence | Missing | P0 |
 | CRM | Companies, contacts, leads, opportunities, stages | Foundation implemented | P0 |
-| CRM integrity | Deduplication, merge review, relationship timeline, activities, next actions | Partial/missing | P0 |
+| CRM integrity | Deduplication, merge review, relationship timeline, activities, next actions | Append-only contact activity timeline implemented; deduplication/merge review and structured next-action queue remain incomplete | P0 |
 | Outreach | Personalized email/LinkedIn drafts, approved sender identities, delivery tracking | Missing | P0 |
 | Outreach governance | Consent/provenance, suppression, opt-out, bounce/complaint stop, contact windows, rate limits, idempotency | Required but incomplete | P0 |
 | AI phone agent | Inbound answering, outbound authorized callbacks, qualification, transfer/escalation | Call/transcript records only; live telephony missing | P0/P1 |
@@ -37,19 +37,19 @@ Status meanings:
 | Publishing | Approved social scheduling/publishing and post performance | Missing; provider integrations required | P2 |
 | Website conversion | Signed website lead intake exists, disabled pending external config and E2E validation | Foundation implemented; activation pending | P0 |
 | Sales | Qualification, discovery, objections, follow-up, pipeline forecasting | Partial CRM foundation | P0 |
-| Service catalogue | Versioned agency offers, deliverables, assumptions, exclusions, estimation inputs | Missing | P0 |
-| Proposals | Proposal/quotation/SOW drafts, revisions, approvals, send status | Missing | P0 |
+| Service catalogue | Versioned agency offers, deliverables, assumptions, exclusions, estimation inputs | Founder-governed, draft-first versioned catalogue implemented; proposal snapshot linkage pending PR #26 validation | P0 |
+| Proposals | Proposal/quotation/SOW drafts, revisions, approvals, send status | Internal proposal drafts and single-use founder pricing approval implemented; revisioning and governed sending remain missing | P0 |
 | Contracts | NDA/MSA/SOW metadata, signature status, obligations, renewals | Missing; external signature/legal review | P1 |
-| Client onboarding | Won deal to workspace, kickoff, access, requirements, baseline, acceptance | Partial delivery foundation | P0 |
+| Client onboarding | Won deal to workspace, kickoff, access, requirements, baseline, acceptance | Contract-backed onboarding checklist and founder-approved activation into delivery project implemented; complete workspace provisioning and acceptance/handover remain partial | P0 |
 | Project delivery | Projects, milestones, tasks, budgets, time/cost | Foundation implemented | P0 |
 | Requirements and change control | Requirements traceability, scope change, approval, impact | Partial; scope-change foundation exists | P1 |
 | QA and release | Acceptance criteria, evidence, security review, release approval, rollback | Partial; full gates incomplete | P0 |
 | Client success | Status updates, satisfaction, issue escalation, renewals, referrals | Missing/partial | P1 |
 | Support | Requests, incidents, priority, SLA/response targets, resolution and knowledge articles | Missing as complete workflow | P1 |
 | Finance | Project estimates, budget, time/cost and provisional summaries | Foundation implemented | P0 |
-| Invoicing | Invoice numbers, line items, tax fields, due dates, revisions, status | Missing | P0 |
-| Payments | Payment links/provider adapter, webhook verification, reconciliation, refunds | Missing; payment execution requires approval | P0/P1 |
-| Receivables | Due/overdue tracking, reminders, aging and collection status | Missing | P0 |
+| Invoicing | Invoice numbers, line items, tax fields, due dates, revisions, status | Internal invoice draft, overbilling guard, founder issue approval and issue-evidence recording implemented; tax fields, document generation and sending remain missing | P0 |
+| Payments | Payment links/provider adapter, webhook verification, reconciliation, refunds | Append-only manual receipt reconciliation with duplicate/overpayment guards implemented; provider webhooks, collection and refunds remain external/missing | P0/P1 |
+| Receivables | Due/overdue tracking, reminders, aging and collection status | Invoice outstanding balances and partial/paid state implemented; aging reports and reminders remain missing | P0 |
 | Expenses and profitability | Expenses, provider usage allocation, project/client margin | Partial | P1 |
 | Accounting export | Reconciled export for external accounting/tax professional | Missing | P2 |
 | Analytics | Lead source, conversion, campaign ROI, pipeline, revenue, margin, delivery health | Partial dashboard/read models; business analytics incomplete | P1 |
@@ -199,3 +199,7 @@ A capability is not complete because a schema, UI, role prompt or route exists. 
 The highest-value gap is not another dashboard. It is a complete, governed revenue-to-delivery loop: find prospects, communicate with permission, convert opportunities, contract and invoice, deliver reliably, collect payment, support clients and measure the business.
 
 AI calling belongs in that loop, with inbound qualification and requested callbacks before any broader outbound automation. The immediate next action should be to approve this audit as the capability baseline, then implement P0 in small tested slices without activating external side effects prematurely.
+
+
+## Implementation reconciliation (2026-11-25)
+Merged code includes contact relationship activities, Leads/Opportunities Founder Console workflows, proposal drafts with founder pricing approval, a founder-governed service catalogue, a contract register requiring approved proposal and signed evidence, contract-backed onboarding with checklist/activation approval, and an invoice/receivables register with founder issue approval and append-only payment receipt reconciliation. These are internal control-plane workflows, not external delivery: there is no proposal/contract/invoice sending, payment collection, or autonomous outreach. PR #26 proposes immutable service-offering snapshots on linked proposals and remains unvalidated until CI passes.

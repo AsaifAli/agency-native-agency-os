@@ -20,6 +20,8 @@
 - Agent Studio department selector now exposes all 16 departments in the workforce blueprint.
 - FastAPI modular backend and Next.js Founder Console foundation.
 - Organization/workspace-scoped clients, contacts, leads, opportunities, projects and milestones.
+- CRM relationship timeline: workspace-scoped append-only contact activities with notes, calls, emails, meetings, tasks and status updates; no activity creates an external communication.
+- Founder Console Revenue workflow pages for Contacts, Leads, Opportunities and Proposals, including source/qualification notes, suppression reasons, opportunity stage progression and founder pricing approval.
 - Agent, task, approval and audit foundations. Deterministic RAG and agent-workflow evaluation packs, metrics, weighted scores and quality gates are first-party modules under `app/evaluation/`; evaluation run persistence and audit remain in the OS database.
 - Explicit Founder Authority separate from organization-owner membership; founder provisioning CLI and founder-only decisions.
 - Single-use approval consumption with action/resource/workspace matching and active Founder Authority recheck.
@@ -31,6 +33,10 @@
 - Founder-only outbox health endpoint.
 - Workspace-scoped call/transcript records; no live voice provider or dialing.
 - Delivery playbooks, founder-approved scope changes, time/cost records, provisional project financial summaries, exception inbox and execution reliability views.
+- Founder-governed service catalogue with draft-first offerings, founder-only activation/retirement, immutable code/version revisions, workspace-scoped constraints and audit/outbox events.
+- Proposal drafts linked to opportunities with single-use founder pricing approval.
+- Contract register requires an approved proposal and records signed evidence before executed status; client onboarding requires an executed contract, evidence-backed checklist and founder approval before project activation.
+- Invoice register requires an executed contract, prevents overbilling, requires single-use founder approval before issue evidence is recorded, and maintains an append-only payment receipt ledger. No payment collection is integrated.
 - Curated Agent Skills catalog contains eighteen reviewed, source-pinned instruction packs with authenticated read-only catalog/detail APIs, license/provenance metadata, and per-file SHA-256 digests. All entries are disabled, tool-free, and limited to public/synthetic data; the catalog does not yet assign skills to workforce members or load provider-side Claude skills.
 - Founder Console Skills & Tools page now browses the catalog, filters by category/search, and displays skill instructions, provenance, and SHA-256 digest through the authenticated API.
 - Expanded 18-skill catalog CI run [45487106060](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45487106060) passed PostgreSQL 16 migration validation, Python compilation, **177 backend tests (1 warning)**, frontend TypeScript checking, and the Next.js production build on code commit `524d6369bd98feef77818de412b7a978e66222b7`.
@@ -55,10 +61,10 @@
 - Full OIDC/JWKS/MFA, secure frontend session lifecycle and scoped machine identities are not implemented.
 - Complete cross-workspace isolation across APIs/workers/files/sessions/caches and PostgreSQL RLS are not validated.
 - Complete Data Protection Gateway, PII redaction and retention/deletion lifecycle are not implemented.
-- Revenue operations are only partially implemented: CRM contact/lead/opportunity foundations and signed website intake exist, but prospect discovery/enrichment, outbound outreach agent, approved email/social dispatch, campaign/ad operations, reply/opt-out/bounce stop handling, relationship timeline and end-to-end pipeline automation remain incomplete.
-- Proposal/SOW/contract lifecycle, service catalog/estimation, invoicing, payment reconciliation/collection and receivables workflows remain incomplete. Existing project cost/time summaries are not a full finance ledger or statutory accounting system.
+- Revenue operations remain partial: CRM clients/contacts/leads/opportunities, contact activity history, lead suppression, proposal drafts and founder pricing approval are implemented. Prospect research/enrichment, evidence/provenance capture at scale, deduplication/merge review, governed outreach drafting/dispatch, sender identity, reply/opt-out/bounce event handling, campaign operations and revenue attribution remain incomplete. No external message dispatch is enabled.
+- Proposal drafts and founder pricing approval, service catalogue, contract register, contract-backed onboarding, invoice approval/issue evidence and payment receipt reconciliation are implemented as internal records. Remaining gaps include proposal revision/versioning and client delivery, legal template review/e-signature provider, invoice document generation/sending, payment-provider reconciliation/webhooks, refunds/credit notes, tax/accounting integrations and statutory accounting. Existing records are not a full finance ledger or statutory accounting system.
 - Marketing content/ad generation and campaign analytics are not yet connected to governed publishing/advertising integrations. Draft generation must be separated from paid spend or publication approval.
-- Client lifecycle support, renewal and handover workflows remain incomplete.
+- Client success, support case management, service-level tracking, renewal/expansion workflows and structured delivery handover remain incomplete. Contract-backed onboarding and delivery activation foundations exist.
 - Live telephony, signed webhooks, STT/TTS and recording lifecycle are not implemented.
 - Complete QA acceptance/rework metrics and production release gates are incomplete.
 - Frontend TypeScript checking and production build pass in main CI. Production monitoring/alerting, SBOM generation, backup restore drill and independent security review are not validated.
@@ -88,3 +94,9 @@ The agreed agency workflow starts before an inbound website enquiry. The Revenue
 - PR #11 merged to main as `9674c40f08228b032ae79f8e9df590609d8463df`; exact PR head CI passed backend/PostgreSQL migration tests, Python compilation, frontend TypeScript checking and Next.js production build.
 - PR #10 was closed as superseded by PR #11.
 - Website Supabase project `AI-Agency-Service` has the lead-sync migration applied. A further migration `20261124212429_restrict_admin_helper_execution` was applied and committed to website source as `supabase/migrations/202611250002_restrict_admin_helper_execution.sql`. It moves admin policy checks to trusted JWT app_metadata expressions and revokes direct anon/authenticated EXECUTE on the SECURITY DEFINER helper. Post-change advisor no longer reports the exposed helper; remaining findings are leaked-password protection disabled and an informational RLS/no-policy notice on the service-only rate-limit table.
+
+
+## Revenue and delivery implementation reconciliation (2026-11-25)
+The internal workflow now present in source is: contact → lead qualification/suppression → opportunity → proposal draft → founder pricing approval → contract draft/approval → recorded signed evidence → onboarding checklist → founder-approved delivery activation → project-linked invoice draft → founder invoice approval/issue evidence → append-only payment receipt reconciliation. These are internal records and approval workflows only; they do not send proposals/contracts/invoices, collect money, contact prospects, place calls, or activate external integrations.
+
+Merged work includes PR #17 (contact timeline), PR #19 (leads/opportunities), PR #20 (proposal approval lifecycle) and PR #21 (service catalogue). Main CI passed after PR #21 merge on commit `7801ab0b42788fb06077e5937038dd0a79dce286` (backend and frontend checks). PR #26 adds immutable catalogue snapshots to proposals but remains open and unvalidated; its GitHub Actions jobs failed before exposing step/log details and must be diagnosed and pass before merge.
