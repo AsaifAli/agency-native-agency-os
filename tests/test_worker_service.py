@@ -1760,12 +1760,13 @@ def _create_plan_draft_worker_context(ctx, detail_label="valid"):
         plan_title="Synthetic quality plan",
         status="queued", suggested_plan={},
     )
+    db.add(draft)
+    db.flush()
     execution.request_metadata = {
         "purpose": "workforce.plan_draft",
         "plan_draft_id": draft.id,
         "schema_version": 1,
     }
-    db.add(draft)
     db.commit()
     return execution, draft
 
