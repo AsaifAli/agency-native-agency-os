@@ -190,6 +190,39 @@ def test_founder_can_reject_proposal_and_approval_together(client):
         db.close()
 
 
+def test_proposal_can_sync_an_existing_founder_rejection(client):
+    org = client.org_id
+    created = client.post(f"/v1/orgs/{org}/operations/proposals", headers=headers(), json={
+        "workspace_id": client.ws_id, "opportunity_id": client.opportunity_id,
+        "title": "Proposal requiring revision", "service_line": "AI Engineering",
+        "scope_summary": "A proposal draft that must be rejected through the approvals queue.",
+        "amount_minor": 250000, "currency": "INR",
+    })
+    assert created.status_code == 201, created.text
+    proposal_id = created.json()["id"]
+    submitted = client.post(
+        f"/v1/orgs/{org}/operations/proposals/{proposal_id}/submit-for-approval",
+        headers=headers(),
+    )
+    approval_id = submitted.json()["approval_id"]
+    db = client.session_factory()
+    try:
+        approval = db.query(Approval).filter_by(id=approval_id).one()
+        approval.status = ApprovalStatus.rejected
+        approval.decided_by = client.user_id
+        approval.decision_note = "Rejected in the central approval queue"
+        approval.decided_at = datetime.now(timezone.utc)
+        db.commit()
+    finally:
+        db.close()
+    synced = client.post(
+        f"/v1/orgs/{org}/operations/proposals/{proposal_id}/reject",
+        headers=headers(), json={"approval_id": approval_id, "note": "Synchronize proposal status"},
+    )
+    assert synced.status_code == 200, synced.text
+    assert synced.json()["status"] == "rejected"
+
+
 def test_proposal_rejects_cross_workspace_opportunity_and_currency(client):
     org = client.org_id
     payload = {
