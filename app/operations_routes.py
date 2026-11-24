@@ -20,7 +20,7 @@ from app.db import get_db
 from app.models import Role, Workspace, Approval, ApprovalStatus, Execution, ExecutionStatus, Task, Agent
 
 from app.domain_models import Project, Opportunity, Client
-from app.operations_models import ServicePlaybook, ServiceOffering, Proposal, ContractRecord, ClientOnboarding, OnboardingChecklistItem, InvoiceRecord, PaymentReceipt, ScopeChangeRequest, TimeEntry, ProjectCost
+from app.operations_models import ServicePlaybook, ServiceOffering, Proposal, ContractRecord, ClientOnboarding, OnboardingChecklistItem, InvoiceRecord, PaymentReceipt, ScopeChangeRequest, TimeEntry, ProjectCost, RetainerServicePeriod
 from app.telephony.models import OutboxEvent
 from app.action_policy import require_approved_action
 from app.audit import record_event
@@ -1575,7 +1575,26 @@ def create_time_entry(
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
     _write(org_id, body.workspace_id, p, db)
-    _project(db, org_id, body.workspace_id, body.project_id)
+    project = _project(db, org_id, body.workspace_id, body.project_id)
+    if body.started_at.tzinfo is None:
+        raise HTTPException(422, "Time entry start timestamp must include a timezone")
+    onboarding = db.query(ClientOnboarding).filter_by(
+        org_id=org_id, workspace_id=body.workspace_id, project_id=project.id, status="active",
+    ).first()
+    if onboarding and body.billable:
+        contract = db.query(ContractRecord).filter_by(
+            id=onboarding.contract_id, org_id=org_id, workspace_id=body.workspace_id,
+        ).first()
+        if contract and (contract.terms_snapshot or {}).get("engagement_type") == "retainer":
+            period = db.query(RetainerServicePeriod).filter(
+                RetainerServicePeriod.org_id == org_id,
+                RetainerServicePeriod.workspace_id == body.workspace_id,
+                RetainerServicePeriod.project_id == project.id,
+                RetainerServicePeriod.starts_at <= body.started_at,
+                RetainerServicePeriod.ends_at > body.started_at,
+            ).with_for_update().first()
+            if period is None or period.status != "open":
+                raise HTTPException(409, "Billable retainer time requires an open service period")
     if body.task_id:
         from app.models import Task
         if not db.query(Task.id).filter_by(id=body.task_id, org_id=org_id, workspace_id=body.workspace_id).first():
@@ -1836,3 +1855,106 @@ def outbox_health(
         "dead_letter_count": counts.get("dead_letter", 0),
         "published_count": counts.get("published", 0),
     }
+class RetainerPeriodCreate(BaseModel):
+    workspace_id: str
+    contract_id: str
+    project_id: str
+    period_number: int = Field(ge=1, le=60)
+    starts_at: datetime
+    ends_at: datetime
+
+
+class RetainerPeriodOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    workspace_id: str
+    contract_id: str
+    project_id: str
+    period_number: int
+    starts_at: datetime
+    ends_at: datetime
+    included_hours: int
+    rollover_in_hours: int
+    used_minutes: int
+    overage_minutes: int
+    status: str
+    closed_by: str | None
+    closed_at: datetime | None
+    created_by: str
+    created_at: datetime
+
+
+@router.get("/retainer-periods", response_model=list[RetainerPeriodOut])
+def list_retainer_periods(org_id: str, workspace_id: str = Query(min_length=1), contract_id: str | None = None, db: Session = Depends(get_db), p: Principal = Depends(get_principal)):
+    _read_or_founder(org_id, workspace_id, p, db, {Role.owner, Role.admin, Role.operator, Role.reviewer})
+    q = db.query(RetainerServicePeriod).filter_by(org_id=org_id, workspace_id=workspace_id)
+    if contract_id:
+        if not db.query(ContractRecord.id).filter_by(id=contract_id, org_id=org_id, workspace_id=workspace_id).first():
+            raise HTTPException(404, "Contract not found")
+        q = q.filter_by(contract_id=contract_id)
+    return q.order_by(RetainerServicePeriod.period_number.asc()).limit(500).all()
+
+
+@router.post("/retainer-periods", response_model=RetainerPeriodOut, status_code=201)
+def create_retainer_period(org_id: str, body: RetainerPeriodCreate, db: Session = Depends(get_db), p: Principal = Depends(get_principal)):
+    _write(org_id, body.workspace_id, p, db)
+    require_founder_authority(db, org_id, p.user.id)
+    if body.starts_at.tzinfo is None or body.ends_at.tzinfo is None or body.ends_at <= body.starts_at:
+        raise HTTPException(422, "Retainer period dates must be timezone-aware and end after start")
+    contract = db.query(ContractRecord).filter_by(id=body.contract_id, org_id=org_id, workspace_id=body.workspace_id, status="executed").with_for_update().first()
+    if contract is None:
+        raise HTTPException(409, "Retainer periods require an executed contract in this workspace")
+    terms = contract.terms_snapshot or {}
+    if terms.get("engagement_type") != "retainer":
+        raise HTTPException(422, "Only retainer contracts have service periods")
+    if body.period_number > int(terms.get("billing_period_count") or 0):
+        raise HTTPException(422, "Period number exceeds the contracted billing periods")
+    onboarding = db.query(ClientOnboarding).filter_by(org_id=org_id, workspace_id=body.workspace_id, contract_id=contract.id, project_id=body.project_id, status="active").first()
+    if onboarding is None:
+        raise HTTPException(422, "Project must be activated through this contract's onboarding")
+    previous = None
+    if body.period_number > 1:
+        previous = db.query(RetainerServicePeriod).filter_by(org_id=org_id, workspace_id=body.workspace_id, contract_id=contract.id, period_number=body.period_number - 1).with_for_update().first()
+        if previous is None or previous.status != "closed":
+            raise HTTPException(409, "The preceding service period must exist and be closed first")
+        if body.starts_at != previous.ends_at:
+            raise HTTPException(422, "Retainer periods must be contiguous with the preceding period")
+    if db.query(RetainerServicePeriod.id).filter_by(org_id=org_id, workspace_id=body.workspace_id, contract_id=contract.id, period_number=body.period_number).first():
+        raise HTTPException(409, "This retainer service period already exists")
+    rollover = 0
+    if terms.get("rollover_hours") and previous:
+        unused = max(0, (previous.included_hours + previous.rollover_in_hours) * 60 - previous.used_minutes)
+        rollover = unused // 60
+    item = RetainerServicePeriod(org_id=org_id, workspace_id=body.workspace_id, contract_id=contract.id, project_id=body.project_id, period_number=body.period_number, starts_at=body.starts_at, ends_at=body.ends_at, included_hours=int(terms.get("included_hours_per_period") or 0), rollover_in_hours=rollover, created_by=p.user.id)
+    db.add(item)
+    db.flush()
+    _event(db, org_id, p.user.id, "retainer.period_created", "retainer_service_period", item.id, body.workspace_id, {"contract_id": contract.id, "period_number": item.period_number})
+    _outbox(db, org_id, body.workspace_id, "retainer.period_created", "retainer_service_period", item.id, {"contract_id": contract.id, "period_number": item.period_number})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.post("/retainer-periods/{period_id}/close", response_model=RetainerPeriodOut)
+def close_retainer_period(org_id: str, period_id: str, db: Session = Depends(get_db), p: Principal = Depends(get_principal)):
+    item = db.query(RetainerServicePeriod).filter_by(id=period_id, org_id=org_id).with_for_update().first()
+    if item is None:
+        raise HTTPException(404, "Retainer service period not found")
+    _write(org_id, item.workspace_id, p, db)
+    require_founder_authority(db, org_id, p.user.id)
+    if item.status == "closed":
+        return item
+    now = datetime.now(timezone.utc)
+    if now < item.ends_at:
+        raise HTTPException(409, "A service period cannot be closed before its end date")
+    used = db.query(func.coalesce(func.sum(TimeEntry.duration_minutes), 0)).filter(TimeEntry.org_id == org_id, TimeEntry.workspace_id == item.workspace_id, TimeEntry.project_id == item.project_id, TimeEntry.billable.is_(True), TimeEntry.started_at >= item.starts_at, TimeEntry.started_at < item.ends_at).scalar() or 0
+    item.used_minutes = int(used)
+    item.overage_minutes = max(0, item.used_minutes - (item.included_hours + item.rollover_in_hours) * 60)
+    item.status = "closed"
+    item.closed_by = p.user.id
+    item.closed_at = now
+    _event(db, org_id, p.user.id, "retainer.period_closed", "retainer_service_period", item.id, item.workspace_id, {"used_minutes": item.used_minutes, "overage_minutes": item.overage_minutes})
+    _outbox(db, org_id, item.workspace_id, "retainer.period_closed", "retainer_service_period", item.id, {"contract_id": item.contract_id, "used_minutes": item.used_minutes, "overage_minutes": item.overage_minutes})
+    db.commit()
+    db.refresh(item)
+    return item
