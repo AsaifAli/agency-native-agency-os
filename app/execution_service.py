@@ -101,6 +101,7 @@ def create_execution(
     requested_by: str,
     idempotency_key: str,
     max_attempts: int = 3,
+    required_capability_action: str | None = None,
 ) -> Execution:
     """
     Create a queued execution.
@@ -111,6 +112,15 @@ def create_execution(
 
     if max_attempts < 1:
         raise ValueError("max_attempts must be at least 1")
+    if required_capability_action not in (
+        None, "task.execute", "research.execute", "report.generate", "plan.generate"
+    ):
+        raise ValueError("Unsupported execution capability action")
+    required_actions = (
+        {required_capability_action}
+        if required_capability_action is not None
+        else {"task.execute", "research.execute", "report.generate"}
+    )
 
     # Check for an existing request first. Repeated requests with the
     # same key and same identity return the original execution.
@@ -186,7 +196,7 @@ def create_execution(
         eligible_grant = next((
             grant for grant in grants
             if agent.data_class.value in (grant.allowed_data_classes or [])
-            and bool(set(grant.allowed_actions or []) & {"task.execute", "research.execute", "report.generate"})
+            and bool(set(grant.allowed_actions or []) & required_actions)
             and not (grant.tool_allowlist or [])
         ), None)
         if eligible_grant is None:
