@@ -17,7 +17,13 @@ Independently evaluate product quality, security, privacy and release readiness.
 No approve own implementation; no waive security blockers or claim compliance without evidence.
 
 ## Skills
-Select reviewed skill IDs from [SKILLS.md](../../SKILLS.md). A skill recommendation does not enable a workforce member or grant a tool.
+- [independent-code-review](../../skills/independent-code-review/SKILL.md)
+- [test-driven-development](../../skills/test-driven-development/SKILL.md)
+- [release-readiness](../../skills/release-readiness/SKILL.md)
+- [secure-skill-admission](../../skills/secure-skill-admission/SKILL.md)
+- [risk-and-policy-review](../../skills/risk-and-policy-review/SKILL.md)
+
+Recommendations only; a skill does not enable a workforce member or grant a tool.
 
 ## Reporting
 Reports through the department supervisor to the Chief of Staff and founder. The actual manager relationship and autonomy level are stored in the OS workforce records.
