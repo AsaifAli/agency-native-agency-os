@@ -86,6 +86,9 @@ class Proposal(Base):
         CheckConstraint("status IN ('draft','pending_approval','approved','rejected','withdrawn')", name="ck_proposal_status"),
         CheckConstraint("amount_minor >= 0", name="ck_proposal_amount_nonnegative"),
         CheckConstraint("validity_days >= 1 AND validity_days <= 180", name="ck_proposal_validity_days"),
+        CheckConstraint("engagement_type IN ('one_time','retainer')", name="ck_proposal_engagement_type"),
+        CheckConstraint("billing_frequency IN ('one_time','monthly','quarterly','annual')", name="ck_proposal_billing_frequency"),
+        CheckConstraint("(engagement_type = 'one_time' AND billing_frequency = 'one_time' AND term_months IS NULL AND included_hours_per_period IS NULL AND rollover_hours = false AND auto_renew = false) OR (engagement_type = 'retainer' AND billing_frequency IN ('monthly','quarterly','annual') AND term_months BETWEEN 1 AND 60 AND included_hours_per_period IS NOT NULL AND included_hours_per_period >= 0)", name="ck_proposal_engagement_terms"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
@@ -101,6 +104,13 @@ class Proposal(Base):
     amount_minor: Mapped[int] = mapped_column(Integer, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     validity_days: Mapped[int] = mapped_column(Integer, default=30, server_default="30", nullable=False)
+    engagement_type: Mapped[str] = mapped_column(String(24), default="one_time", server_default="one_time", nullable=False)
+    billing_frequency: Mapped[str] = mapped_column(String(24), default="one_time", server_default="one_time", nullable=False)
+    term_months: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    included_hours_per_period: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rollover_hours: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
+    support_response_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    auto_renew: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
     status: Mapped[str] = mapped_column(String(24), default="draft", server_default="draft", nullable=False)
     approval_id: Mapped[str | None] = mapped_column(ForeignKey("approvals.id"), nullable=True)
     approved_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
