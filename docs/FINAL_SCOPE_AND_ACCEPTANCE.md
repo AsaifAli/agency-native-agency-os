@@ -5,7 +5,7 @@
 
 ## 1. Product model
 
-The public agency website is a separate application and is intentionally excluded from this build. It will later submit enquiries through a protected server-to-server intake API. The website must never access the OS database or private Founder Console.
+The public agency website is a separate application and remains outside the private OS runtime. The optional signed, idempotent server-to-server lead-intake bridge is implemented and merged in both repositories (website PR #30 and OS intake endpoint). It remains disabled pending external configuration and synthetic end-to-end validation. The website must never access the OS database or private Founder Console.
 
 The Agency OS is the private operational source of truth. The founder remains the final authority for commercial commitments, sensitive communications, production releases, payments and destructive actions.
 
@@ -163,9 +163,11 @@ Dashboards are read models. They must not become a second source of business tru
 - Tamper-evident audit of access, processing, policy, approvals, runtime routing, provider actions and security events.
 - Isolated worker sandboxes, resource quotas, restricted egress, safe file handling and bounded execution cost/duration.
 
-## 11. Future website boundary (not part of this bundle's implementation)
+## 11. Separate website boundary (signed lead intake implemented; activation pending)
 
-When the website is ready:
+The optional bridge is implemented and merged in both repositories. Keep it disabled until both migrations, matching server-only secrets, fixed org/workspace mapping, HTTPS and synthetic end-to-end idempotency/recovery tests are complete.
+
+The integration follows this boundary:
 1. Browser submits to a website server-side route/Cloudflare Worker, not directly to the OS.
 2. Validate schema, request size, origin, honeypot, rate limits and Turnstile where enabled.
 3. Worker signs service-to-service request with timestamp, nonce and replay protection.
