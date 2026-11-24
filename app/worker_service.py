@@ -48,7 +48,7 @@ def _sync_plan_draft_execution(
 ) -> None:
     """Keep a durable Chief of Staff draft in step with its OS execution."""
     draft = db.query(OrchestrationPlanDraft).filter_by(
-        id=execution.request_metadata.get("plan_draft_id"),
+        id=(execution.request_metadata or {}).get("plan_draft_id"),
         org_id=execution.org_id,
         workspace_id=execution.workspace_id,
         execution_id=execution.id,
