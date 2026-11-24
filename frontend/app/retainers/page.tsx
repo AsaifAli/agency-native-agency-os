@@ -7,7 +7,8 @@ import { api, orgId, type Workspace } from "@/lib/api";
 
 type Contract = { id:string; contract_number:string; title:string; status:string; terms_snapshot:Record<string,unknown>; };
 type Onboarding = { id:string; contract_id:string; project_id:string|null; status:string; project_name:string; };
-type Invoice = { id:string; retainer_period_id:string|null; invoice_number:string; amount_minor:number; status:string; currency:string; };\ntype Period = { id:string; contract_id:string; project_id:string; period_number:number; starts_at:string; ends_at:string; included_hours:number; rollover_in_hours:number; used_minutes:number; overage_minutes:number; status:string; closed_at:string|null; };
+type Invoice = { id:string; retainer_period_id:string|null; invoice_number:string; amount_minor:number; status:string; currency:string; };
+type Period = { id:string; contract_id:string; project_id:string; period_number:number; starts_at:string; ends_at:string; included_hours:number; rollover_in_hours:number; used_minutes:number; overage_minutes:number; status:string; closed_at:string|null; };
 const dateValue = (value:string) => {
   if (!value) return "";
   const date = new Date(value);
@@ -19,7 +20,9 @@ export default function RetainersPage() {
   const [workspace,setWorkspace]=useState("");
   const [contracts,setContracts]=useState<Contract[]>([]);
   const [onboardings,setOnboardings]=useState<Onboarding[]>([]);
-  const [periods,setPeriods]=useState<Period[]>([]);\n  const [invoices,setInvoices]=useState<Invoice[]>([]);\n  const [dueDate,setDueDate]=useState("");
+  const [periods,setPeriods]=useState<Period[]>([]);
+  const [invoices,setInvoices]=useState<Invoice[]>([]);
+  const [dueDate,setDueDate]=useState("");
   const [onboardingId,setOnboardingId]=useState("");
   const [startsAt,setStartsAt]=useState("");
   const [endsAt,setEndsAt]=useState("");
@@ -37,7 +40,8 @@ export default function RetainersPage() {
       const [cs,os,ps,is]=await Promise.all([
         api<Contract[]>(`/v1/orgs/${orgId()}/operations/contracts?workspace_id=${encodeURIComponent(workspace)}`),
         api<Onboarding[]>(`/v1/orgs/${orgId()}/operations/onboardings?workspace_id=${encodeURIComponent(workspace)}`),
-        api<Period[]>(`/v1/orgs/${orgId()}/operations/retainer-periods?workspace_id=${encodeURIComponent(workspace)}`),\n        api<Invoice[]>(`/v1/orgs/${orgId()}/operations/invoices?workspace_id=${encodeURIComponent(workspace)}`),
+        api<Period[]>(`/v1/orgs/${orgId()}/operations/retainer-periods?workspace_id=${encodeURIComponent(workspace)}`),
+        api<Invoice[]>(`/v1/orgs/${orgId()}/operations/invoices?workspace_id=${encodeURIComponent(workspace)}`),
       ]);
       setContracts(cs);setOnboardings(os);setPeriods(ps);setInvoices(is);
       const eligible=os.filter(o=>o.status==="active"&&!!o.project_id&&cs.some(c=>c.id===o.contract_id&&c.status==="executed"&&c.terms_snapshot.engagement_type==="retainer"));
