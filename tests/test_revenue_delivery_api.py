@@ -174,7 +174,7 @@ def test_contact_activity_timeline_is_scoped_and_append_only(client):
         f"/v1/orgs/{org}/contact-activities/{activity_id}",
         headers=auth(), json={"body": "rewritten history"},
     )
-    assert changed.status_code == 405
+    assert changed.status_code == 404
 
 
 def test_cross_workspace_parent_reference_is_rejected(client):
