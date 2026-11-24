@@ -2,17 +2,17 @@
 
 ## Verified checkpoint
 - Working branch: `feature/agency-os-v5-stabilization`.
-- Verified commit: `a2f3f4a75fa6b2d4cecf49a6bc6ce5d73d054e30`.
-- GitHub Actions run: [45455127086](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45455127086).
-- Backend CI: **142 passed, 0 failed, 1 warning** (GitHub Actions Node 20 deprecation warning for actions/checkout and setup-python; no test failures).
+- Verified commit: `23fe0bb9f3c51c50b453b7bba4b9904b91f59f5d`.
+- GitHub Actions run: [45460843173](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45460843173).
+- Backend CI: **148 passed, 0 failed, 1 warning** (Starlette/httpx TestClient deprecation; separate Node 20 action deprecation warning).
 - CI validated the Alembic graph, applied migrations to PostgreSQL 16, compiled Python source and ran backend plus PostgreSQL integration tests.
-- The new execution history and trace API tests passed in this run.
-- Frontend production build, live provider session, deployment, backup restore drill, independent penetration test and compliance assessment are not claimed.
+- Workforce schema, founder bootstrap, workspace read, disabled capability setup and initializer idempotence tests passed.
+- Frontend production build, live Claude provider session, website-to-OS integration, deployment, backup restore drill, independent penetration test and compliance assessment are not claimed.
 
 ## Implemented source capabilities
-- Governed workforce schema for hierarchy units, human/agent/supervisor/sub-agent members, revocable capability grants and task delegation lineage; pending CI validation.
-- Founder-only, idempotent initializer for the 16-department chart, five functional groups, Chief of Staff, Executive Assistant, department heads and disabled specialist agent definitions; pending CI validation.
-- Authenticated workspace-scoped workforce read API, founder-only capability configuration (always disabled until separately approved) and explicit manager-chain delegation API; pending CI validation.
+- Governed workforce schema for hierarchy units, human/agent/supervisor/sub-agent members, capability grants and task delegation lineage; backend migrations and tests passed at the verified checkpoint.
+- Founder-only, idempotent bootstrap for the 16-department chart, five functional groups, Chief of Staff, Executive Assistant, department heads and disabled specialist agent definitions; backend tests passed.
+- Authenticated workspace-scoped workforce read API; founder-only capability configuration remains disabled by default; explicit delegation API enforces manager relationships and founder exclusion. Backend tests passed.
 - Workspace-scoped, authenticated execution history API with bounded status filtering and result limits.
 - Execution trace API that joins execution and attempt lifecycle audit events after verifying the execution belongs to the requested organization/workspace.
 - Founder Console Processes page for execution history and event timelines; Monitoring page for persisted execution status/retry summaries.
@@ -32,6 +32,12 @@
 - Workspace-scoped call/transcript records; no live voice provider or dialing.
 - Delivery playbooks, founder-approved scope changes, time/cost records, provisional project financial summaries, exception inbox and execution reliability views.
 - Target organization model and governance skills are documented in `docs/AGENCY_ORGANIZATION_WORKFORCE_BLUEPRINT.md`, `docs/REFERENCE_INTEGRATION_DECISIONS.md` and `skills/`; this does not mean all positions/skills are provisioned as live agents.
+
+## Workforce/runtime gaps still open
+- Workforce initialization provisions planned records only; no member or Claude session is auto-activated.
+- Supervisor task decomposition, real delegation execution, child-task dependency scheduling, specialist result aggregation and escalation workflow are not yet implemented.
+- Capability grants are stored but are not yet enforced at every tool invocation because the OS MCP tool gateway is not implemented; keep all grants disabled.
+- Office of CEO workforce entries are organisational placeholders, not live human/agent accounts.
 
 ## Known gaps / not validated
 - No production outbox handlers are registered; external side effects remain disabled.
