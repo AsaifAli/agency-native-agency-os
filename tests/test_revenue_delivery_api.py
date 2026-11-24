@@ -177,6 +177,35 @@ def test_contact_activity_timeline_is_scoped_and_append_only(client):
     assert changed.status_code == 404
 
 
+
+def test_opportunity_can_be_linked_to_workspace_client_only(client):
+    org, ws = client.org_id, client.ws_id
+    local_client = client.post(
+        f"/v1/orgs/{org}/clients", headers=auth(),
+        json={"workspace_id": ws, "name": "Contract-ready Client"},
+    )
+    assert local_client.status_code == 201, local_client.text
+    opportunity = client.post(
+        f"/v1/orgs/{org}/opportunities", headers=auth(), json={
+            "workspace_id": ws, "title": "Contract-ready engagement",
+            "amount_minor": 500000, "currency": "INR", "probability": 80,
+        },
+    )
+    assert opportunity.status_code == 201, opportunity.text
+    linked = client.patch(
+        f"/v1/orgs/{org}/opportunities/{opportunity.json()['id']}",
+        headers=auth(), json={"stage": "proposal", "client_id": local_client.json()["id"]},
+    )
+    assert linked.status_code == 200, linked.text
+    assert linked.json()["client_id"] == local_client.json()["id"]
+
+    foreign = client.patch(
+        f"/v1/orgs/{org}/opportunities/{opportunity.json()['id']}",
+        headers=auth(), json={"stage": "proposal", "client_id": client.foreign_client_id},
+    )
+    assert foreign.status_code == 404
+
+
 def test_cross_workspace_parent_reference_is_rejected(client):
     org, ws, other_ws = client.org_id, client.ws_id, client.other_ws_id
     # A real client in another organization/workspace must not be attachable.
