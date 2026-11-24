@@ -215,11 +215,15 @@ def create_lead(
     if body.client_id:
         _scoped_parent(db, Client, object_id=body.client_id, org_id=org_id,
                        workspace_id=body.workspace_id, label="Client")
+    contact = None
     if body.contact_id:
-        _scoped_parent(db, Contact, object_id=body.contact_id, org_id=org_id,
-                       workspace_id=body.workspace_id, label="Contact")
+        contact = _scoped_parent(db, Contact, object_id=body.contact_id, org_id=org_id,
+                                 workspace_id=body.workspace_id, label="Contact")
+        if body.client_id and contact.client_id and contact.client_id != body.client_id:
+            raise HTTPException(422, "Lead contact must belong to the selected client")
+    client_id = body.client_id or (contact.client_id if contact else None)
     item = Lead(org_id=org_id, workspace_id=body.workspace_id,
-                client_id=body.client_id, contact_id=body.contact_id,
+                client_id=client_id, contact_id=body.contact_id,
                 company_name=body.company_name, contact_name=body.contact_name,
                 email=body.email.lower().strip(), source=body.source,
                 score=body.score, qualification_notes=body.qualification_notes,
@@ -278,18 +282,26 @@ def create_lead_research(
                           workspace_id=body.workspace_id, label="Lead")
     if lead.stage == "suppressed":
         raise HTTPException(409, "Suppressed leads cannot receive new research activity")
+    now = datetime.now(timezone.utc)
+    researched_at = body.researched_at or now
+    if researched_at.tzinfo is None or researched_at > now:
+        raise HTTPException(422, "Research timestamp must be timezone-aware and cannot be in the future")
     references = []
     for source in body.source_references:
         parsed = urlsplit(source.url)
-        if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
             raise HTTPException(422, "Research source references must be valid HTTPS URLs without embedded credentials")
+        if source.accessed_at.tzinfo is None or source.accessed_at > now:
+            raise HTTPException(422, "Source access timestamps must be timezone-aware and cannot be in the future")
+        if source.published_at and source.published_at.tzinfo is None:
+            raise HTTPException(422, "Source publication timestamps must include a timezone")
         references.append(source.model_dump(mode="json"))
     item = LeadResearchRecord(
         org_id=org_id, workspace_id=body.workspace_id, lead_id=lead.id,
         summary=body.summary, fit_score=body.fit_score,
         confidence_score=body.confidence_score, buying_signals=body.buying_signals,
         risks=body.risks, source_references=references,
-        researched_at=body.researched_at or datetime.now(timezone.utc),
+        researched_at=researched_at,
         created_by=p.user.id,
     )
     db.add(item)
@@ -321,6 +333,8 @@ def list_outreach_drafts(
     _workspace(db, org_id, workspace_id)
     query = db.query(OutreachDraft).filter_by(org_id=org_id, workspace_id=workspace_id)
     if status:
+        if status not in {"draft", "approved_draft", "rejected"}:
+            raise HTTPException(422, "Unsupported outreach draft status")
         query = query.filter_by(status=status)
     return query.order_by(OutreachDraft.created_at.desc()).limit(limit).all()
 
@@ -432,11 +446,17 @@ def create_opportunity(
     if body.client_id:
         _scoped_parent(db, Client, object_id=body.client_id, org_id=org_id,
                        workspace_id=body.workspace_id, label="Client")
+    lead = None
     if body.lead_id:
-        _scoped_parent(db, Lead, object_id=body.lead_id, org_id=org_id,
-                       workspace_id=body.workspace_id, label="Lead")
+        lead = _scoped_parent(db, Lead, object_id=body.lead_id, org_id=org_id,
+                              workspace_id=body.workspace_id, label="Lead")
+        if lead.stage in {"suppressed", "unqualified"}:
+            raise HTTPException(409, "Suppressed or unqualified leads cannot create opportunities")
+        if body.client_id and lead.client_id and body.client_id != lead.client_id:
+            raise HTTPException(422, "Opportunity client must match the linked lead's client")
+    client_id = body.client_id or (lead.client_id if lead else None)
     item = Opportunity(org_id=org_id, workspace_id=body.workspace_id,
-                       client_id=body.client_id, lead_id=body.lead_id,
+                       client_id=client_id, lead_id=body.lead_id,
                        title=body.title, amount_minor=body.amount_minor,
                        currency=body.currency, probability=body.probability,
                        expected_close_date=body.expected_close_date,
