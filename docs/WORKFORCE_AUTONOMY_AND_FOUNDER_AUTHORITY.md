@@ -60,7 +60,7 @@ The agency is AI-native: Claude-backed agents are intended to perform research, 
 - One-time projects have a fixed scoped deliverable, agreed milestones, acceptance criteria, change-control path, budget and completion/handover state.
 - Retainers have a defined billing cadence, initial term, included service hours/allowance per period, rollover policy, response target, renewal terms and explicit service boundaries. They also need period-by-period usage, capacity, SLA/response tracking, overage/change approval, invoice reconciliation, renewal/termination notice and final handover/knowledge export.
 - Auto-renewal is a proposed contract term only; it must never execute automatically without an explicit authorized policy and legal review. Retainer overages, unused-hour rollover, service credits, scope changes and renewal pricing are not inferred by an agent.
-- Proposal records now distinguish one-time vs retainer terms and contract creation snapshots those terms. Period ledgers, usage aggregation, automated billing schedules, renewal notices and SLA measurement remain subsequent implementation work.
+- Proposal records now distinguish one-time vs retainer terms and contract creation snapshots those terms. The current PR adds a founder-governed service-period ledger, billable usage aggregation, rollover snapshots and overage visibility. Period closeout does not authorize extra charges. Automated recurring invoice drafts, overage approval, renewal notices, termination workflow and SLA measurement remain subsequent implementation work.
 
 ### Delivery and client success agents
 - Discovery agents turn conversations and documents into traceable requirements, decisions, assumptions and acceptance criteria.
