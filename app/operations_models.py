@@ -141,6 +141,61 @@ class ContractRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
 
 
+class ClientOnboarding(Base):
+    """Internal client handoff, gated by an executed contract and delivery approval."""
+    __tablename__ = "client_onboardings"
+    __table_args__ = (
+        UniqueConstraint("org_id", "workspace_id", "contract_id", name="uq_onboarding_contract"),
+        Index("ix_client_onboardings_scope_status", "org_id", "workspace_id", "status"),
+        CheckConstraint("status IN ('preparing','pending_approval','active','paused','completed','cancelled')", name="ck_client_onboarding_status"),
+        CheckConstraint("budget_minor >= 0 AND estimated_hours >= 0", name="ck_onboarding_project_plan_nonnegative"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    client_id: Mapped[str] = mapped_column(ForeignKey("clients.id", ondelete="RESTRICT"), nullable=False, index=True)
+    contract_id: Mapped[str] = mapped_column(ForeignKey("contract_records.id", ondelete="RESTRICT"), nullable=False, index=True)
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id", ondelete="RESTRICT"), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(24), default="preparing", server_default="preparing", nullable=False)
+    approval_id: Mapped[str | None] = mapped_column(ForeignKey("approvals.id"), nullable=True)
+    activation_plan: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    project_name: Mapped[str] = mapped_column(String(240), default="", server_default="", nullable=False)
+    budget_minor: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    estimated_hours: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    activated_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
+
+
+class OnboardingChecklistItem(Base):
+    __tablename__ = "onboarding_checklist_items"
+    __table_args__ = (
+        UniqueConstraint("org_id", "workspace_id", "onboarding_id", "code", name="uq_onboarding_item_code"),
+        Index("ix_onboarding_items_scope_status", "org_id", "workspace_id", "onboarding_id", "status"),
+        CheckConstraint("status IN ('open','completed','waived')", name="ck_onboarding_item_status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    onboarding_id: Mapped[str] = mapped_column(ForeignKey("client_onboardings.id", ondelete="CASCADE"), nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(80), nullable=False)
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
+    required: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="open", server_default="open", nullable=False)
+    completion_note: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
+    completed_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    waived_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    waived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
 class ScopeChangeRequest(Base):
     __tablename__ = "scope_change_requests"
     __table_args__ = (
