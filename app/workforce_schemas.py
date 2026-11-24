@@ -68,6 +68,7 @@ class DelegationCreate(BaseModel):
     assigned_to_member_id: str
     dependency_task_id: str | None = None
     review_required: bool = True
+    sequence_no: int = Field(default=1, ge=1, le=10000)
 
 
 class DelegationOut(BaseModel):
@@ -81,4 +82,30 @@ class DelegationOut(BaseModel):
     dependency_task_id: str | None
     review_required: bool
     review_status: str
+    status: str
+    sequence_no: int
+    last_error_code: str | None
     created_at: datetime
+    updated_at: datetime
+
+
+class OrchestrationPlanCreate(BaseModel):
+    workspace_id: str
+    objective: str = Field(min_length=5, max_length=2000)
+    created_by_member_id: str
+    plan_title: str = Field(default="Agency work plan", min_length=2, max_length=200)
+    tasks: list[DelegationCreate] = Field(min_length=1, max_length=50)
+
+
+class OrchestrationPlanOut(BaseModel):
+    id: str
+    objective: str
+    status: str
+    task_count: int
+    ready_count: int
+    blocked_count: int
+    awaiting_review_count: int
+    failed_count: int
+    succeeded_count: int
+    created_at: datetime
+    updated_at: datetime
