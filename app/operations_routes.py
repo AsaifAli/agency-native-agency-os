@@ -190,6 +190,7 @@ class InvoiceOut(BaseModel):
     client_id: str
     contract_id: str
     project_id: str | None
+    retainer_period_id: str | None
     invoice_number: str
     title: str
     description: str
@@ -1961,6 +1962,97 @@ def close_retainer_period(org_id: str, period_id: str, db: Session = Depends(get
     item.closed_at = now
     _event(db, org_id, p.user.id, "retainer.period_closed", "retainer_service_period", item.id, item.workspace_id, {"used_minutes": item.used_minutes, "overage_minutes": item.overage_minutes})
     _outbox(db, org_id, item.workspace_id, "retainer.period_closed", "retainer_service_period", item.id, {"contract_id": item.contract_id, "used_minutes": item.used_minutes, "overage_minutes": item.overage_minutes})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+
+class RetainerInvoiceDraftCreate(BaseModel):
+    due_date: datetime
+
+
+@router.post("/retainer-periods/{period_id}/invoice-draft", response_model=InvoiceOut)
+def create_retainer_invoice_draft(
+    org_id: str, period_id: str, body: RetainerInvoiceDraftCreate,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    period = db.query(RetainerServicePeriod).filter_by(
+        id=period_id, org_id=org_id,
+    ).with_for_update().first()
+    if period is None:
+        raise HTTPException(404, "Retainer service period not found")
+    _write(org_id, period.workspace_id, p, db)
+    if period.status != "closed":
+        raise HTTPException(409, "Retainer period must be closed before invoice draft generation")
+    if body.due_date.tzinfo is None:
+        raise HTTPException(422, "Invoice due date must include a timezone")
+    existing = db.query(InvoiceRecord).filter_by(
+        org_id=org_id, workspace_id=period.workspace_id,
+        retainer_period_id=period.id,
+    ).with_for_update().first()
+    if existing:
+        return existing
+    contract = db.query(ContractRecord).filter_by(
+        id=period.contract_id, org_id=org_id, workspace_id=period.workspace_id,
+        status="executed",
+    ).with_for_update().first()
+    if contract is None:
+        raise HTTPException(409, "An executed contract is required for recurring invoice drafts")
+    terms = contract.terms_snapshot or {}
+    if terms.get("engagement_type") != "retainer":
+        raise HTTPException(409, "The linked contract is not a retainer")
+    fee_minor = int(terms.get("billing_amount_per_period_minor") or 0)
+    if fee_minor <= 0:
+        raise HTTPException(422, "Retainer contract has no positive recurring fee to invoice")
+    onboarding = db.query(ClientOnboarding.id).filter_by(
+        org_id=org_id, workspace_id=period.workspace_id,
+        contract_id=contract.id, project_id=period.project_id, status="active",
+    ).first()
+    if onboarding is None:
+        raise HTTPException(409, "Active contract onboarding is required for recurring invoice drafts")
+    billed = db.query(func.coalesce(func.sum(InvoiceRecord.amount_minor), 0)).filter(
+        InvoiceRecord.org_id == org_id,
+        InvoiceRecord.workspace_id == period.workspace_id,
+        InvoiceRecord.contract_id == contract.id,
+        InvoiceRecord.status.notin_(["rejected", "cancelled"]),
+    ).scalar() or 0
+    if fee_minor > contract.amount_minor - int(billed):
+        raise HTTPException(409, "Recurring invoice would exceed the remaining executed contract commitment")
+    invoice_number = f"RET-{contract.id[:8].upper()}-P{period.period_number:02d}"
+    collision = db.query(InvoiceRecord.id).filter_by(
+        org_id=org_id, workspace_id=period.workspace_id, invoice_number=invoice_number,
+    ).first()
+    if collision:
+        raise HTTPException(409, "Deterministic retainer invoice number is already assigned to another invoice")
+    overage_note = (
+        f" Recorded overage: {period.overage_minutes} minutes; this amount is not included and requires separate approval."
+        if period.overage_minutes else ""
+    )
+    item = InvoiceRecord(
+        org_id=org_id, workspace_id=period.workspace_id, client_id=contract.client_id,
+        contract_id=contract.id, project_id=period.project_id,
+        retainer_period_id=period.id, invoice_number=invoice_number,
+        title=f"Retainer service period {period.period_number}",
+        description=(
+            f"Recurring retainer fee for service period {period.period_number} "
+            f"({period.starts_at.isoformat()} to {period.ends_at.isoformat()})."
+            f"{overage_note}"
+        ),
+        line_items=[{
+            "description": f"Contracted recurring retainer fee — period {period.period_number}",
+            "amount_minor": fee_minor,
+        }],
+        amount_minor=fee_minor, currency=contract.currency,
+        due_date=body.due_date.astimezone(timezone.utc), created_by=p.user.id,
+    )
+    db.add(item)
+    db.flush()
+    _event(db, org_id, p.user.id, "finance.retainer_invoice_drafted", "invoice", item.id,
+           period.workspace_id, {"contract_id": contract.id, "retainer_period_id": period.id,
+                                 "amount_minor": fee_minor, "overage_minutes": period.overage_minutes})
+    _outbox(db, org_id, period.workspace_id, "finance.retainer_invoice_drafted", "invoice", item.id,
+            {"contract_id": contract.id, "retainer_period_id": period.id, "amount_minor": fee_minor})
     db.commit()
     db.refresh(item)
     return item
