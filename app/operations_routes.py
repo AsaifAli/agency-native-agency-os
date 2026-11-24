@@ -20,7 +20,7 @@ from app.db import get_db
 from app.models import Role, Workspace, Approval, ApprovalStatus, Execution, ExecutionStatus, Task, Agent
 
 from app.domain_models import Project, Opportunity, Client
-from app.operations_models import ServicePlaybook, ServiceOffering, Proposal, ContractRecord, ClientOnboarding, OnboardingChecklistItem, ScopeChangeRequest, TimeEntry, ProjectCost
+from app.operations_models import ServicePlaybook, ServiceOffering, Proposal, ContractRecord, ClientOnboarding, OnboardingChecklistItem, InvoiceRecord, PaymentReceipt, ScopeChangeRequest, TimeEntry, ProjectCost
 from app.telephony.models import OutboxEvent
 from app.action_policy import require_approved_action
 from app.audit import record_event
@@ -150,6 +150,78 @@ class ServiceOfferingOut(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+
+
+class InvoiceLineItem(BaseModel):
+    description: str = Field(min_length=2, max_length=500)
+    amount_minor: int = Field(gt=0, le=2_000_000_000)
+
+
+class InvoiceCreate(BaseModel):
+    workspace_id: str
+    contract_id: str
+    project_id: str | None = None
+    invoice_number: str = Field(pattern="^[A-Za-z0-9][A-Za-z0-9._/-]{1,79}$")
+    title: str = Field(min_length=3, max_length=240)
+    description: str = Field(default="", max_length=8000)
+    line_items: list[InvoiceLineItem] = Field(min_length=1, max_length=50)
+    due_date: datetime
+
+
+class InvoiceIssueEvidence(BaseModel):
+    approval_id: str = Field(min_length=1, max_length=36)
+    external_reference: str = Field(min_length=3, max_length=240)
+    issued_at: datetime
+
+
+class PaymentReceiptCreate(BaseModel):
+    external_reference: str = Field(min_length=3, max_length=240)
+    amount_minor: int = Field(gt=0, le=2_000_000_000)
+    payment_method: str = Field(pattern="^(bank_transfer|cash|card|upi|cheque|other)$")
+    source: str = Field(min_length=2, max_length=80)
+    paid_at: datetime
+    notes: str = Field(default="", max_length=2000)
+
+
+class InvoiceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    workspace_id: str
+    client_id: str
+    contract_id: str
+    project_id: str | None
+    invoice_number: str
+    title: str
+    description: str
+    line_items: list
+    amount_minor: int
+    paid_minor: int
+    outstanding_minor: int
+    currency: str
+    due_date: datetime
+    status: str
+    approval_id: str | None
+    external_reference: str
+    issued_at: datetime | None
+    issued_by: str | None
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class PaymentReceiptOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    invoice_id: str
+    external_reference: str
+    amount_minor: int
+    currency: str
+    payment_method: str
+    source: str
+    paid_at: datetime
+    notes: str
+    recorded_by: str
+    created_at: datetime
 
 
 class OnboardingCreate(BaseModel):
@@ -501,6 +573,236 @@ def update_playbook_status(
     db.commit()
     db.refresh(item)
     return item
+
+
+@router.get("/invoices", response_model=list[InvoiceOut])
+def list_invoices(
+    org_id: str, workspace_id: str = Query(min_length=1), status: str | None = None,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    _read_or_founder(org_id, workspace_id, p, db, {Role.owner, Role.admin, Role.operator, Role.reviewer})
+    query = db.query(InvoiceRecord).filter_by(org_id=org_id, workspace_id=workspace_id)
+    if status:
+        if status not in {"draft", "pending_approval", "issued", "partially_paid", "paid", "rejected", "cancelled"}:
+            raise HTTPException(422, "Unsupported invoice status")
+        query = query.filter_by(status=status)
+    return query.order_by(InvoiceRecord.created_at.desc()).limit(250).all()
+
+
+@router.post("/invoices", response_model=InvoiceOut, status_code=201)
+def create_invoice_draft(
+    org_id: str, body: InvoiceCreate,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    _write(org_id, body.workspace_id, p, db)
+    contract = db.query(ContractRecord).filter_by(
+        id=body.contract_id, org_id=org_id, workspace_id=body.workspace_id, status="executed",
+    ).first()
+    if contract is None:
+        raise HTTPException(409, "Invoice drafts require an executed contract in this workspace")
+    if body.due_date.tzinfo is None:
+        raise HTTPException(422, "Invoice due date must include a timezone")
+    project_id = body.project_id
+    if project_id:
+        project = db.query(Project).filter_by(
+            id=project_id, org_id=org_id, workspace_id=body.workspace_id,
+            client_id=contract.client_id,
+        ).first()
+        if project is None:
+            raise HTTPException(404, "Project not found for this contract client")
+        onboarding = db.query(ClientOnboarding.id).filter_by(
+            org_id=org_id, workspace_id=body.workspace_id,
+            contract_id=contract.id, project_id=project.id, status="active",
+        ).first()
+        if onboarding is None:
+            raise HTTPException(422, "Project is not linked through the executed contract onboarding")
+    amount_minor = sum(line.amount_minor for line in body.line_items)
+    billed = db.query(func.coalesce(func.sum(InvoiceRecord.amount_minor), 0)).filter(
+        InvoiceRecord.org_id == org_id,
+        InvoiceRecord.workspace_id == body.workspace_id,
+        InvoiceRecord.contract_id == contract.id,
+        InvoiceRecord.status.notin_(["rejected", "cancelled"]),
+    ).scalar() or 0
+    if amount_minor > contract.amount_minor - billed:
+        raise HTTPException(422, "Invoice amount exceeds the unbilled executed contract value")
+    duplicate = db.query(InvoiceRecord.id).filter_by(
+        org_id=org_id, workspace_id=body.workspace_id, invoice_number=body.invoice_number.strip(),
+    ).first()
+    if duplicate:
+        raise HTTPException(409, "Invoice number already exists in this workspace")
+    item = InvoiceRecord(
+        org_id=org_id, workspace_id=body.workspace_id, client_id=contract.client_id,
+        contract_id=contract.id, project_id=project_id,
+        invoice_number=body.invoice_number.strip(), title=body.title.strip(),
+        description=body.description.strip(),
+        line_items=[line.model_dump() for line in body.line_items],
+        amount_minor=amount_minor, currency=contract.currency, due_date=body.due_date,
+        created_by=p.user.id,
+    )
+    db.add(item)
+    db.flush()
+    _event(db, org_id, p.user.id, "finance.invoice_drafted", "invoice", item.id,
+           body.workspace_id, {"contract_id": contract.id, "amount_minor": amount_minor, "currency": contract.currency})
+    _outbox(db, org_id, body.workspace_id, "finance.invoice_drafted", "invoice", item.id,
+            {"contract_id": contract.id, "amount_minor": amount_minor})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.post("/invoices/{invoice_id}/submit-for-approval", response_model=InvoiceOut)
+def submit_invoice_for_approval(
+    org_id: str, invoice_id: str,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    item = db.query(InvoiceRecord).filter_by(id=invoice_id, org_id=org_id).with_for_update().first()
+    if item is None:
+        raise HTTPException(404, "Invoice not found")
+    _write(org_id, item.workspace_id, p, db)
+    if item.status == "pending_approval":
+        return item
+    if item.status not in {"draft", "rejected"}:
+        raise HTTPException(409, "Only draft or rejected invoices can be submitted")
+    approval = Approval(
+        org_id=org_id, workspace_id=item.workspace_id, action_type="invoice.issue",
+        resource_id=item.id, idempotency_key=f"invoice-issue:{item.id}:{uuid.uuid4()}",
+        request_payload={
+            "invoice_number": item.invoice_number, "contract_id": item.contract_id,
+            "amount_minor": item.amount_minor, "currency": item.currency,
+            "client_id": item.client_id, "due_date": item.due_date.isoformat(),
+        },
+        requested_by=p.user.id,
+    )
+    db.add(approval)
+    db.flush()
+    item.status = "pending_approval"
+    item.approval_id = approval.id
+    _event(db, org_id, p.user.id, "finance.invoice_submitted", "invoice", item.id,
+           item.workspace_id, {"approval_id": approval.id, "action_type": "invoice.issue"})
+    _outbox(db, org_id, item.workspace_id, "finance.invoice_submitted", "invoice", item.id,
+            {"approval_id": approval.id}, key_suffix=approval.id)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.post("/invoices/{invoice_id}/record-issued", response_model=InvoiceOut)
+def record_invoice_issued(
+    org_id: str, invoice_id: str, body: InvoiceIssueEvidence,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    item = db.query(InvoiceRecord).filter_by(id=invoice_id, org_id=org_id).with_for_update().first()
+    if item is None:
+        raise HTTPException(404, "Invoice not found")
+    _write_or_founder(org_id, item.workspace_id, p, db)
+    if item.status != "pending_approval" or item.approval_id != body.approval_id:
+        raise HTTPException(409, "Invoice is not awaiting this approval")
+    if body.issued_at.tzinfo is None or body.issued_at > datetime.now(timezone.utc):
+        raise HTTPException(422, "Invoice issue timestamp must be timezone-aware and cannot be in the future")
+    require_approved_action(
+        db, approval_id=body.approval_id, org_id=org_id,
+        workspace_id=item.workspace_id, action_type="invoice.issue",
+        resource_id=item.id, actor_user_id=p.user.id,
+    )
+    item.status = "issued"
+    item.external_reference = body.external_reference.strip()
+    item.issued_at = body.issued_at
+    item.issued_by = p.user.id
+    _event(db, org_id, p.user.id, "finance.invoice_issued_recorded", "invoice", item.id,
+           item.workspace_id, {"approval_id": body.approval_id, "external_reference": item.external_reference})
+    _outbox(db, org_id, item.workspace_id, "finance.invoice_issued_recorded", "invoice", item.id,
+            {"approval_id": body.approval_id})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.post("/invoices/{invoice_id}/reject", response_model=InvoiceOut)
+def reject_invoice(
+    org_id: str, invoice_id: str, body: ContractReject,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    item = db.query(InvoiceRecord).filter_by(id=invoice_id, org_id=org_id).with_for_update().first()
+    if item is None:
+        raise HTTPException(404, "Invoice not found")
+    require_founder_authority(db, org_id, p.user.id)
+    if item.status != "pending_approval" or item.approval_id != body.approval_id:
+        raise HTTPException(409, "Invoice is not awaiting this approval")
+    approval = db.query(Approval).filter_by(
+        id=body.approval_id, org_id=org_id, workspace_id=item.workspace_id,
+        action_type="invoice.issue", resource_id=item.id,
+    ).with_for_update().first()
+    if approval is None:
+        raise HTTPException(404, "Invoice approval not found")
+    if approval.status == ApprovalStatus.pending:
+        approval.status = ApprovalStatus.rejected
+        approval.decided_by = p.user.id
+        approval.decision_note = body.note
+        approval.decided_at = datetime.now(timezone.utc)
+    elif approval.status != ApprovalStatus.rejected or not approval.decided_by or not has_founder_authority(db, org_id, approval.decided_by):
+        raise HTTPException(409, "Invoice approval is no longer rejectable")
+    item.status = "rejected"
+    _event(db, org_id, p.user.id, "finance.invoice_rejected", "invoice", item.id,
+           item.workspace_id, {"approval_id": approval.id})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.get("/invoices/{invoice_id}/payments", response_model=list[PaymentReceiptOut])
+def list_invoice_payments(
+    org_id: str, invoice_id: str,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    item = db.query(InvoiceRecord).filter_by(id=invoice_id, org_id=org_id).first()
+    if item is None:
+        raise HTTPException(404, "Invoice not found")
+    require_membership(org_id, p, db)
+    _workspace(db, org_id, item.workspace_id)
+    return (db.query(PaymentReceipt).filter_by(
+        org_id=org_id, workspace_id=item.workspace_id, invoice_id=item.id,
+    ).order_by(PaymentReceipt.paid_at.asc()).limit(500).all())
+
+
+@router.post("/invoices/{invoice_id}/payments", response_model=PaymentReceiptOut, status_code=201)
+def record_payment_receipt(
+    org_id: str, invoice_id: str, body: PaymentReceiptCreate,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    item = db.query(InvoiceRecord).filter_by(id=invoice_id, org_id=org_id).with_for_update().first()
+    if item is None:
+        raise HTTPException(404, "Invoice not found")
+    _write(org_id, item.workspace_id, p, db)
+    if item.status not in {"issued", "partially_paid"}:
+        raise HTTPException(409, "Payments can only be reconciled against an issued, unpaid invoice")
+    if body.paid_at.tzinfo is None or body.paid_at > datetime.now(timezone.utc):
+        raise HTTPException(422, "Payment timestamp must be timezone-aware and cannot be in the future")
+    if body.amount_minor > item.amount_minor - item.paid_minor:
+        raise HTTPException(422, "Payment exceeds the invoice outstanding balance")
+    reference = body.external_reference.strip()
+    duplicate = db.query(PaymentReceipt.id).filter_by(
+        org_id=org_id, workspace_id=item.workspace_id, external_reference=reference,
+    ).first()
+    if duplicate:
+        raise HTTPException(409, "Payment reference already reconciled in this workspace")
+    receipt = PaymentReceipt(
+        org_id=org_id, workspace_id=item.workspace_id, invoice_id=item.id,
+        external_reference=reference, amount_minor=body.amount_minor,
+        currency=item.currency, payment_method=body.payment_method,
+        source=body.source.strip(), paid_at=body.paid_at,
+        notes=body.notes.strip(), recorded_by=p.user.id,
+    )
+    db.add(receipt)
+    item.paid_minor += body.amount_minor
+    item.status = "paid" if item.paid_minor == item.amount_minor else "partially_paid"
+    db.flush()
+    _event(db, org_id, p.user.id, "finance.payment_receipt_recorded", "payment_receipt", receipt.id,
+           item.workspace_id, {"invoice_id": item.id, "amount_minor": receipt.amount_minor, "currency": receipt.currency})
+    _outbox(db, org_id, item.workspace_id, "finance.payment_receipt_recorded", "payment_receipt", receipt.id,
+            {"invoice_id": item.id, "amount_minor": receipt.amount_minor})
+    db.commit()
+    db.refresh(receipt)
+    return receipt
 
 
 @router.get("/onboardings", response_model=list[OnboardingOut])
