@@ -3,8 +3,10 @@ export function orgId(){return process.env.NEXT_PUBLIC_ORG_ID || ""}
 export function authHeaders(): HeadersInit {
   if (typeof window === "undefined") return {};
   const stored = window.localStorage.getItem("agency_os_token");
+  const allowDev = process.env.NEXT_PUBLIC_ALLOW_DEV_AUTH === "true" && process.env.NODE_ENV !== "production";
   const email = process.env.NEXT_PUBLIC_DEV_EMAIL || "founder@example.com";
-  return { "Content-Type":"application/json", "Authorization":`Bearer ${stored || `dev:${email}`}` };
+  const token = stored || (allowDev ? `dev:${email}` : "");
+  return { "Content-Type":"application/json", ...(token ? { "Authorization":`Bearer ${token}` } : {}) };
 }
 export async function api<T>(path:string, init:RequestInit={}):Promise<T>{
   const response=await fetch(`${API}${path}`,{...init,headers:{...authHeaders(),...(init.headers||{})},cache:"no-store"});

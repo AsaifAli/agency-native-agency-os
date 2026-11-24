@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db import SessionLocal
 from app.worker.processor import process_one_execution
+from app.outbox_handlers import OUTBOX_HANDLERS
+from app.outbox_service import dispatch_outbox_batch, reconcile_outbox_events
 from app.worker_service import (
     promote_due_retries,
     recover_expired_execution_leases,
@@ -41,6 +43,34 @@ def _run_maintenance(
         db.commit()
 
     return promoted_count, recovered_count
+
+
+def _run_outbox_maintenance(
+    session_factory: SessionFactory,
+    *,
+    worker_id: str,
+    batch_size: int,
+) -> tuple[int, int, int, int]:
+    """Always reconcile durable outbox state; dispatch only registered types."""
+    with session_factory() as db:
+        requeued, dead_lettered = reconcile_outbox_events(
+            db, limit=batch_size
+        )
+        db.commit()
+
+    if not OUTBOX_HANDLERS:
+        return 0, 0, dead_lettered, requeued
+
+    published, retried, dispatched_dead = dispatch_outbox_batch(
+        session_factory,
+        worker_id=worker_id,
+        handlers=OUTBOX_HANDLERS,
+        limit=min(batch_size, 250),
+        lease_seconds=settings.outbox_lease_seconds,
+        base_retry_seconds=settings.outbox_base_retry_seconds,
+        max_retry_seconds=settings.outbox_max_retry_seconds,
+    )
+    return published, retried, dead_lettered + dispatched_dead, requeued
 
 
 def run_worker(
@@ -120,6 +150,18 @@ def run_worker(
                     "promoted=%s recovered=%s",
                     promoted,
                     recovered,
+                )
+
+            published, retried, dead_lettered, requeued = _run_outbox_maintenance(
+                session_factory=session_factory,
+                worker_id=worker_id,
+                batch_size=maintenance_batch_size,
+            )
+            if published or retried or dead_lettered or requeued:
+                logger.info(
+                    "Outbox maintenance completed: published=%s retried=%s "
+                    "dead_lettered=%s requeued=%s",
+                    published, retried, dead_lettered, requeued,
                 )
 
             next_maintenance_at = (

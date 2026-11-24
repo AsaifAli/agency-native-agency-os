@@ -1,3 +1,9 @@
+"""Legacy n8n HTTP adapter retained for migration reference only.
+
+Not imported by the Agency OS runtime. Native OS processes and workers are the
+initial automation architecture; do not enable this adapter without an explicit
+architecture decision and security review.
+"""
 import httpx
 
 class N8nClient:

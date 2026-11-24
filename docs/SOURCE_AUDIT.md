@@ -17,7 +17,7 @@ Reusable strengths:
 - Telemetry, deployment and security documentation.
 
 Gaps against Agency OS requirements:
-- LangGraph workflow orchestration must not remain a competing business workflow engine; n8n owns visual automation.
+- LangGraph may be used only for bounded agent reasoning where justified. No external workflow engine owns business process state; native OS services and durable workers are the initial approach.
 - Existing role/API-key model is not sufficient for organization and tenant isolation.
 - Existing run and approval concepts need canonical OS task/session/approval records.
 - Existing app does not provide the complete Agent Registry, client, budget, permissions and founder governance domain.
@@ -33,7 +33,7 @@ Reusable strengths:
 - Shared `AgentRun`/trajectory concepts.
 - Evaluation packs and deterministic metrics, quality gates and regression baselines.
 - Judge abstraction, plugin/adapter contracts, prompt/model lineage and experiment tracking.
-- n8n JSON workflow templates for approval and evaluation-related automation.
+- Legacy workflow JSON exports retained as migration references only; they are not an enabled runtime dependency.
 - API, security, evaluation, harness, plugin and target tests.
 
 Gaps against Agency OS requirements:
@@ -53,4 +53,4 @@ The uploaded archives contained local `.env` files and secret-like artifacts. Th
 
 ## Overall conclusion
 
-Both repositories contain useful implementation assets, but neither is the finished Agency OS. The correct path is a controlled migration into the OS domain model and security boundary—not a blind file merge. The integration snapshots are retained to make the migration traceable and testable.
+Both repositories contain useful implementation assets, but neither is the finished Agency OS. The correct path is a controlled migration into the OS domain model and security boundary—not a blind file merge. See `FINAL_SCOPE_AND_ACCEPTANCE.md` and `ARCHITECTURE_DECISIONS.md` for the frozen target. The integration snapshots are retained to make the migration traceable and testable.

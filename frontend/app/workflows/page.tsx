@@ -1,1 +1,20 @@
-import Page from '@/components/page'; export default function Workflows(){return <Page eyebrow='AUTOMATION' title='Workflows' description='n8n-backed workflow catalogue and run history.'><div className='panel'><div className='empty'><strong>n8n integration boundary is prepared</strong>Next: authenticated workflow discovery, version pinning, webhook allowlists, callback verification and run-state reconciliation into PostgreSQL.</div></div></Page>}
+import Page from '@/components/page';
+
+export default function Workflows() {
+  return (
+    <Page
+      eyebrow="AUTOMATION"
+      title="Processes"
+      description="Native Agency OS business processes and durable execution history."
+    >
+      <div className="panel">
+        <div className="empty">
+          <strong>Native process orchestration is planned</strong>
+          Business state, authorization and execution records will remain owned by the Agency OS.
+          The current source includes execution and outbox foundations; dispatch, retries,
+          reconciliation and process-level views still require implementation and validation.
+        </div>
+      </div>
+    </Page>
+  );
+}

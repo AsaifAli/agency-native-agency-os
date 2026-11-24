@@ -1,0 +1,111 @@
+"""Lightweight delivery operations: playbooks, scope control, time and costs."""
+import uuid
+from datetime import datetime, timezone
+
+from sqlalchemy import (
+    Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, JSON,
+    String, Text,
+)
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db import Base
+
+
+def _uid() -> str:
+    return str(uuid.uuid4())
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class ServicePlaybook(Base):
+    __tablename__ = "service_playbooks"
+    __table_args__ = (
+        Index("ix_playbooks_scope_status", "org_id", "workspace_id", "status"),
+        CheckConstraint("status IN ('draft','active','retired')", name="ck_playbook_status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    service_line: Mapped[str] = mapped_column(String(80), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="draft", server_default="draft", nullable=False)
+    workflow: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    required_inputs: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    deliverables: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    acceptance_criteria: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    security_checks: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
+
+
+class ScopeChangeRequest(Base):
+    __tablename__ = "scope_change_requests"
+    __table_args__ = (
+        Index("ix_scope_changes_project_status", "org_id", "workspace_id", "project_id", "status"),
+        CheckConstraint("status IN ('pending_approval','approved','rejected')", name="ck_scope_change_status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    impact_summary: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    estimated_hours_delta: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    budget_delta_minor: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    contract_value_delta_minor: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    schedule_days_delta: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="pending_approval", server_default="pending_approval")
+    requested_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    decided_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    approval_id: Mapped[str | None] = mapped_column(ForeignKey("approvals.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class TimeEntry(Base):
+    __tablename__ = "time_entries"
+    __table_args__ = (
+        Index("ix_time_entries_project_date", "org_id", "workspace_id", "project_id", "started_at"),
+        CheckConstraint("duration_minutes > 0 AND duration_minutes <= 1440", name="ck_time_entry_duration"),
+        CheckConstraint("hourly_cost_minor >= 0", name="ck_time_entry_cost_rate"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    billable: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
+    hourly_cost_minor: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class ProjectCost(Base):
+    __tablename__ = "project_costs"
+    __table_args__ = (
+        Index("ix_project_costs_project_date", "org_id", "workspace_id", "project_id", "incurred_at"),
+        CheckConstraint("amount_minor >= 0", name="ck_project_cost_nonnegative"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(80), nullable=False)
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    amount_minor: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    incurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    recorded_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)

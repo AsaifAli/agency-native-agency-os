@@ -14,6 +14,7 @@ from app.models import (
     Workspace,
     Membership,
     Role,
+    FounderAuthority,
 )
 from app.action_policy import require_approved_action
 
@@ -54,6 +55,9 @@ def db():
         Membership(org_id=org.id, user_id=reviewer.id, role=Role.reviewer),
         Membership(org_id=org.id, user_id=actor.id, role=Role.operator),
     ])
+    session.add(FounderAuthority(
+        org_id=org.id, user_id=reviewer.id, grant_source="test_fixture"
+    ))
 
     approval = Approval(
         org_id=org.id,
@@ -190,3 +194,27 @@ def test_rollback_restores_approval_consumption(db):
     ).count()
 
     assert audit_count == 0
+
+
+def test_founder_may_approve_own_initiated_action(db):
+    session, org, workspace, owner, founder, actor, approval = db
+    approval.requested_by = founder.id
+    approval.decided_by = founder.id
+    session.commit()
+
+    result = consume(session, approval, org, workspace, actor)
+    assert result.consumed_at is not None
+
+
+def test_approval_from_revoked_founder_is_not_consumable(db):
+    session, org, workspace, owner, founder, actor, approval = db
+    grant = session.query(FounderAuthority).filter_by(
+        org_id=org.id, user_id=founder.id
+    ).one()
+    grant.active = False
+    session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        consume(session, approval, org, workspace, actor)
+
+    assert exc.value.status_code == 403

@@ -6,7 +6,8 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.audit import record_event
-from app.models import Approval, ApprovalStatus
+from app.models import Approval, ApprovalStatus, Membership, User
+from app.auth import has_founder_authority
 
 
 MANDATORY_APPROVAL_ACTIONS = {
@@ -18,6 +19,7 @@ MANDATORY_APPROVAL_ACTIONS = {
     "resource.delete",
     "client_data.delete",
     "security.permission.change",
+    "scope.change.accept",
 }
 
 
@@ -46,6 +48,23 @@ def require_approved_action(
         raise HTTPException(
             status_code=403,
             detail="An authenticated actor is required",
+        )
+
+    actor_is_active_member = (
+        db.query(User.id)
+        .join(Membership, Membership.user_id == User.id)
+        .filter(
+            User.id == actor_user_id,
+            User.active.is_(True),
+            Membership.org_id == org_id,
+        )
+        .first()
+        is not None
+    )
+    if not actor_is_active_member:
+        raise HTTPException(
+            status_code=403,
+            detail="The action actor is not an active member of this organization",
         )
 
     approval = (
@@ -80,13 +99,12 @@ def require_approved_action(
             detail="Approval has not been approved",
         )
 
-    if (
-        approval.decided_by is None
-        or approval.decided_by == approval.requested_by
+    if approval.decided_by is None or not has_founder_authority(
+        db, org_id, approval.decided_by
     ):
         raise HTTPException(
             status_code=403,
-            detail="Approval does not have a valid independent reviewer",
+            detail="Approval was not decided by an authorized founder",
         )
 
     if approval.consumed_at is not None or approval.consumed_by is not None:

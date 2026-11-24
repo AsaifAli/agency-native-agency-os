@@ -13,6 +13,7 @@ from app.models import (
     Workspace,
 )
 from app.policy import assert_managed_agents_eligible
+from app.integrations.runtime_registry import is_runtime_available
 
 
 class ExecutionServiceError(Exception):
@@ -35,15 +36,18 @@ class PolicyViolation(ExecutionServiceError):
     pass
 
 
-SUPPORTED_RUNTIMES = {
-    "claude_managed_agents",
-    "claude_agent_sdk",
-}
-
-
 def _validate_runtime_policy(agent: Agent) -> None:
-    if agent.runtime not in SUPPORTED_RUNTIMES:
-        raise PolicyViolation("The agent runtime is not supported")
+    # Reject unavailable runtimes before queueing. This registry is shared
+    # with the worker factory so API and worker capabilities cannot drift.
+    if not is_runtime_available(agent.runtime):
+        raise PolicyViolation(
+            "The agent runtime is not configured for this environment"
+        )
+
+    if agent.runtime == "mock" and agent.data_class != DataClass.synthetic:
+        raise PolicyViolation(
+            "The mock runtime is restricted to synthetic data"
+        )
 
     # No confidential or regulated workload is eligible until an
     # alternative runtime has been explicitly assessed and approved.

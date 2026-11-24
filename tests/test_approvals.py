@@ -11,6 +11,7 @@ from app.models import (
     Membership,
     Workspace,
     Role,
+    FounderAuthority,
 )
 
 client = TestClient(app)
@@ -18,6 +19,7 @@ client = TestClient(app)
 OWNER_EMAIL = "approval-owner@test.local"
 ADMIN_EMAIL = "approval-admin@test.local"
 REVIEWER_EMAIL = "approval-reviewer@test.local"
+FOUNDER_EMAIL = "approval-founder@test.local"
 OPERATOR_EMAIL = "approval-operator@test.local"
 ORG_NAME = "Approval Test Org"
 WORKSPACE_ID = "approval-ws-test"
@@ -39,6 +41,7 @@ def setup_module():
             (ADMIN_EMAIL, "Admin", Role.admin),
             (REVIEWER_EMAIL, "Reviewer", Role.reviewer),
             (OPERATOR_EMAIL, "Operator", Role.operator),
+            (FOUNDER_EMAIL, "Founder Authority", Role.viewer),
         ]
 
         for email, display_name, role in users_and_roles:
@@ -61,6 +64,15 @@ def setup_module():
                         role=role,
                     )
                 )
+
+        founder_user = db.query(User).filter_by(email=FOUNDER_EMAIL).one()
+        founder_grant = db.query(FounderAuthority).filter_by(
+            org_id=org.id, user_id=founder_user.id
+        ).first()
+        if founder_grant is None:
+            db.add(FounderAuthority(
+                org_id=org.id, user_id=founder_user.id, grant_source="test_fixture"
+            ))
 
         workspace = db.query(Workspace).filter_by(
             id=WORKSPACE_ID
@@ -120,7 +132,7 @@ def _decide(org_id, approval_id, email):
     )
 
 
-def test_approval_request_is_idempotent_and_owner_can_approve():
+def test_approval_request_is_idempotent_and_explicit_founder_can_approve():
     org_id = _org_id()
     payload = {
         "workspace_id": WORKSPACE_ID,
@@ -131,32 +143,45 @@ def test_approval_request_is_idempotent_and_owner_can_approve():
     }
 
     operator_headers = _headers(OPERATOR_EMAIL)
-
     first = client.post(
-        f"/v1/orgs/{org_id}/approvals",
-        json=payload,
-        headers=operator_headers,
+        f"/v1/orgs/{org_id}/approvals", json=payload, headers=operator_headers
     )
     assert first.status_code == 201, first.text
-
     second = client.post(
-        f"/v1/orgs/{org_id}/approvals",
-        json=payload,
-        headers=operator_headers,
+        f"/v1/orgs/{org_id}/approvals", json=payload, headers=operator_headers
     )
     assert second.status_code == 201, second.text
     assert first.json()["id"] == second.json()["id"]
-
     approval_id = first.json()["id"]
 
-    # The requester cannot approve their own request.
-    own_decision = _decide(org_id, approval_id, OPERATOR_EMAIL)
-    assert own_decision.status_code == 403
-
-    # The founder-controlled owner can approve another user's request.
+    # Organization owner is not automatically founder authority.
     owner_decision = _decide(org_id, approval_id, OWNER_EMAIL)
-    assert owner_decision.status_code == 200, owner_decision.text
-    assert owner_decision.json()["status"] == "approved"
+    assert owner_decision.status_code == 403
+
+    # Explicit founder authority is independent of the user's organization role.
+    founder_decision = _decide(org_id, approval_id, FOUNDER_EMAIL)
+    assert founder_decision.status_code == 200, founder_decision.text
+    assert founder_decision.json()["status"] == "approved"
+
+
+def test_founder_can_request_and_approve_own_decision():
+    org_id = _org_id()
+    payload = {
+        "workspace_id": WORKSPACE_ID,
+        "action_type": "pricing.change",
+        "resource_id": "founder-initiated-pricing-review",
+        "idempotency_key": f"founder-own-{uuid.uuid4().hex}",
+        "request_payload": {"reason": "Founder initiated protected change"},
+    }
+    requested = client.post(
+        f"/v1/orgs/{org_id}/approvals",
+        json=payload,
+        headers=_headers(FOUNDER_EMAIL),
+    )
+    assert requested.status_code == 201, requested.text
+    decided = _decide(org_id, requested.json()["id"], FOUNDER_EMAIL)
+    assert decided.status_code == 200, decided.text
+    assert decided.json()["status"] == "approved"
 
 
 def test_admin_cannot_decide_approval():

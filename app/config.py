@@ -1,5 +1,6 @@
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import model_validator
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -9,6 +10,7 @@ class Settings(BaseSettings):
     jwt_secret: str = "unsafe-development-secret-change-me"
     jwt_issuer: str = "agency-os"
     dev_auth_enabled: bool = True
+    mock_runtime_enabled: bool = False
     cors_origins: str = "http://localhost:3000"
     db_connect_timeout_seconds: int = Field(default=5, ge=1, le=60)
     db_pool_timeout_seconds: int = Field(default=5, ge=1, le=300)
@@ -29,5 +31,16 @@ class Settings(BaseSettings):
     worker_maintenance_batch_size: int = Field(
         default=100, ge=1, le=1000
     )
+    @model_validator(mode="after")
+    def validate_outbox_retry_settings(self):
+        if self.outbox_max_retry_seconds < self.outbox_base_retry_seconds:
+            raise ValueError(
+                "OUTBOX_MAX_RETRY_SECONDS must be greater than or equal "
+                "to OUTBOX_BASE_RETRY_SECONDS"
+            )
+        return self
+    outbox_lease_seconds: int = Field(default=120, ge=15, le=3600)
+    outbox_base_retry_seconds: int = Field(default=15, ge=1, le=3600)
+    outbox_max_retry_seconds: int = Field(default=3600, ge=1, le=86400)
 
 settings = Settings()

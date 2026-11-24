@@ -1,6 +1,6 @@
 import argparse
 from app.db import SessionLocal
-from app.models import Organization, User, Membership, Workspace, Role
+from app.models import Organization, User, Membership, FounderAuthority, Workspace, Role
 
 def main():
     parser = argparse.ArgumentParser()
@@ -19,6 +19,7 @@ def main():
         db.add(org)
         db.flush()
         db.add(Membership(org_id=org.id, user_id=user.id, role=Role.owner))
+        db.add(FounderAuthority(org_id=org.id, user_id=user.id, grant_source="bootstrap"))
         db.add(Workspace(org_id=org.id, name="Main Workspace"))
         db.commit()
         print(f"Created org_id={org.id} user={email}")
