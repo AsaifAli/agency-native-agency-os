@@ -4,14 +4,16 @@
 
 The OS ships a curated, version-pinned library of reusable agent instructions in the open Agent Skills directory format. Skills are operating procedures and specialist knowledge; they are not identities, permissions, tools, workflows, or runtime sessions.
 
-The first curated set adapts useful patterns from Superpowers, Matt Pocock's skills, Everything Claude Code (ECC), Karpathy Guidelines, Ponytail, Anthropic's Agent Skills, and CodeRabbit's skills. The Claude Skills Hub is treated as a discovery index only. See skills/catalog.json for exact source revisions, licenses, intended use, and role recommendations.
+The curated set contains 18 cross-functional skills for planning, engineering, Revenue, Delivery, finance, communication, governance and quality. It adapts useful patterns from Superpowers, Matt Pocock's skills, Everything Claude Code (ECC), Karpathy Guidelines, Ponytail, Anthropic's Agent Skills, and CodeRabbit's skills. The Claude Skills Hub is treated as a discovery index only. See skills/catalog.json for exact source revisions, licenses, intended use, and role recommendations.
 
 ## What is included
 
 - Planning and clarification: grill-before-building.
 - Engineering discipline: test-driven-development, systematic-debugging, karpathy-engineering-discipline, ponytail-minimal-change, research-first-engineering.
 - Independent quality: independent-code-review and release-readiness.
-- Governance and runtime: secure-skill-admission and claude-runtime-engineering.
+- Governance and runtime: secure-skill-admission, risk-and-policy-review and claude-runtime-engineering.
+- Revenue and client work: market-research-briefing, client-discovery-requirements, proposal-sow-drafting, client-communication-drafting, marketing-content-planning and finance-operations-analysis.
+- Delivery: project-delivery-coordination.
 
 These are curated adaptations written for this repository, not wholesale mirrors of upstream skill repositories. Source revisions are pinned in the catalog. Review upstream licenses and notices again before importing any original scripts, hooks, assets, or verbatim skill content.
 
