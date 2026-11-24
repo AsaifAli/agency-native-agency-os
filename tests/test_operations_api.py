@@ -330,9 +330,22 @@ def _create_approved_proposal_for_contract(client):
     db = client.session_factory()
     try:
         proposal = db.query(Proposal).filter_by(id=response.json()["id"]).one()
+        now = datetime.now(timezone.utc)
+        approval = Approval(
+            org_id=client.org_id, workspace_id=client.ws_id,
+            action_type="pricing.change", resource_id=proposal.id,
+            idempotency_key="test-pricing-approved:" + proposal.id,
+            request_payload={"amount_minor": proposal.amount_minor, "currency": proposal.currency},
+            status=ApprovalStatus.approved, requested_by=client.user_id,
+            decided_by=client.user_id, decision_note="Founder approved pricing",
+            decided_at=now, consumed_at=now, consumed_by=client.user_id,
+        )
+        db.add(approval)
+        db.flush()
         proposal.status = "approved"
+        proposal.approval_id = approval.id
         proposal.approved_by = client.user_id
-        proposal.approved_at = datetime.now(timezone.utc)
+        proposal.approved_at = now
         db.commit()
     finally:
         db.close()
