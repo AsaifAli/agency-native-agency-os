@@ -132,6 +132,7 @@ class OpportunityCreate(BaseModel):
 
 class OpportunityStageUpdate(BaseModel):
     stage: str = Field(pattern="^(qualification|discovery|proposal|negotiation|won|lost)$")
+    client_id: str | None = None
 
 
 class OpportunityOut(BaseModel):

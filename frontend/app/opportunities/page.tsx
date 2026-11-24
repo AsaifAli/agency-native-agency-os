@@ -6,6 +6,7 @@ import Notice from "@/components/notice";
 import { api, orgId, type Workspace } from "@/lib/api";
 
 type Lead = { id: string; company_name: string; stage: string };
+type Client = { id: string; name: string };
 type Opportunity = {
   id: string;
   workspace_id: string;
@@ -29,11 +30,14 @@ export default function OpportunitiesPage() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspace, setWorkspace] = useState("");
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [title, setTitle] = useState("");
   const [amount, setAmount] = useState("");
   const [probability, setProbability] = useState("20");
   const [leadId, setLeadId] = useState("");
+  const [clientId, setClientId] = useState("");
+  const [clientDrafts, setClientDrafts] = useState<Record<string,string>>({});
   const [stageDrafts, setStageDrafts] = useState<Record<string,string>>({});
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -61,13 +65,16 @@ export default function OpportunitiesPage() {
     setLoading(true);
     setError("");
     try {
-      const [opps, leadRows] = await Promise.all([
+      const [opps, leadRows, clientRows] = await Promise.all([
         api<Opportunity[]>(`/v1/orgs/${orgId()}/opportunities?workspace_id=${encodeURIComponent(workspace)}`),
         api<Lead[]>(`/v1/orgs/${orgId()}/leads?workspace_id=${encodeURIComponent(workspace)}`),
+        api<Client[]>(`/v1/orgs/${orgId()}/clients?workspace_id=${encodeURIComponent(workspace)}`),
       ]);
       setOpportunities(opps);
       setLeads(leadRows.filter(row => row.stage !== "suppressed" && row.stage !== "unqualified"));
+      setClients(clientRows);
       setStageDrafts(Object.fromEntries(opps.map(row => [row.id, row.stage])));
+      setClientDrafts(Object.fromEntries(opps.map(row => [row.id, row.client_id || ""])));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -93,9 +100,10 @@ export default function OpportunitiesPage() {
           currency: "INR",
           probability: Math.max(0, Math.min(100, Number(probability) || 0)),
           lead_id: leadId || null,
+          client_id: clientId || null,
         }),
       });
-      setTitle(""); setAmount(""); setProbability("20"); setLeadId("");
+      setTitle(""); setAmount(""); setProbability("20"); setLeadId(""); setClientId("");
       await loadData();
     } catch (e) {
       setError((e as Error).message);
@@ -111,7 +119,7 @@ export default function OpportunitiesPage() {
     try {
       await api<Opportunity>(`/v1/orgs/${orgId()}/opportunities/${item.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ stage }),
+        body: JSON.stringify({ stage, client_id: clientDrafts[item.id] || null }),
       });
       await loadData();
     } catch (e) {
@@ -141,6 +149,10 @@ export default function OpportunitiesPage() {
             <option value="">No linked lead</option>
             {leads.map(lead => <option key={lead.id} value={lead.id}>{lead.company_name} · {lead.stage}</option>)}
           </select>
+          <select className="field" value={clientId} onChange={e => setClientId(e.target.value)}>
+            <option value="">No client linked yet</option>
+            {clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}
+          </select>
           <button className="button primary" type="submit" disabled={saving || !workspace}>{saving ? "Saving…" : "Create opportunity"}</button>
         </form>
         <div className="panel-head">
@@ -155,11 +167,16 @@ export default function OpportunitiesPage() {
                 <div style={{minWidth:0,width:"100%"}}>
                   <div className="activity-title">{item.title}</div>
                   <div className="activity-meta">{money(item.amount_minor,item.currency)} · {item.probability}% probability · Created {new Date(item.created_at).toLocaleDateString()}</div>
-                  <div style={{display:"grid",gridTemplateColumns:"minmax(160px,220px) auto",gap:8,marginTop:10}}>
+                  <div className="activity-meta">Client: {clients.find(client => client.id === item.client_id)?.name || "Not linked"} · Lead: {leads.find(lead => lead.id === item.lead_id)?.company_name || "Not linked"}</div>
+                  <div style={{display:"grid",gridTemplateColumns:"minmax(160px,220px) minmax(180px,1fr) auto",gap:8,marginTop:10}}>
                     <select className="field" value={stageDrafts[item.id] || item.stage} onChange={e => setStageDrafts(current => ({...current,[item.id]:e.target.value}))}>
                       {stages.map(stage => <option key={stage} value={stage}>{stage.replace("_"," ")}</option>)}
                     </select>
-                    <button className="button secondary" type="button" onClick={() => void updateStage(item)} disabled={savingId===item.id}>{savingId===item.id ? "Saving…" : "Save stage"}</button>
+                    <select className="field" value={clientDrafts[item.id] ?? item.client_id ?? ""} onChange={e => setClientDrafts(current => ({...current,[item.id]:e.target.value}))}>
+                      <option value="">No client linked</option>
+                      {clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}
+                    </select>
+                    <button className="button secondary" type="button" onClick={() => void updateStage(item)} disabled={savingId===item.id}>{savingId===item.id ? "Saving…" : "Save changes"}</button>
                   </div>
                 </div>
               </div>

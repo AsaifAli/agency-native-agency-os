@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.auth import get_principal, require_membership, require_role, require_founder_authority, Principal
+from app.auth import get_principal, has_founder_authority, require_membership, require_role, require_founder_authority, Principal
 from app.db import get_db
 from app.models import Role
 from app.audit import record_event
@@ -37,7 +37,8 @@ def _scoped_parent(db: Session, model, *, object_id: str, org_id: str, workspace
 
 def _write_access(org_id: str, p: Principal, db: Session, workspace_id: str) -> None:
     role = require_membership(org_id, p, db)
-    require_role(role, WRITERS)
+    if role not in WRITERS and not has_founder_authority(db, org_id, p.user.id):
+        require_role(role, WRITERS)
     _workspace(db, org_id, workspace_id)
 
 
@@ -295,13 +296,19 @@ def update_opportunity_stage(
     if item is None:
         raise HTTPException(404, "Opportunity not found")
     _write_access(org_id, p, db, item.workspace_id)
+    if "client_id" in body.model_fields_set:
+        if body.client_id is not None:
+            _scoped_parent(db, Client, object_id=body.client_id, org_id=org_id,
+                           workspace_id=item.workspace_id, label="Client")
+        item.client_id = body.client_id
     item.stage = body.stage
     if body.stage == "won":
         item.probability = 100
     elif body.stage == "lost":
         item.probability = 0
     _event(db, org_id, p.user.id, "opportunity.stage_changed",
-           "opportunity", item.id, item.workspace_id, {"stage": item.stage})
+           "opportunity", item.id, item.workspace_id,
+           {"stage": item.stage, "client_id": item.client_id})
     db.commit()
     db.refresh(item)
     return item
