@@ -133,6 +133,8 @@ class Project(Base):
     status: Mapped[str] = mapped_column(String(32), default="planned", server_default="planned", nullable=False)
     priority: Mapped[str] = mapped_column(String(16), default="normal", server_default="normal", nullable=False)
     budget_minor: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    contract_value_minor: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    estimated_hours: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="INR", server_default="INR", nullable=False)
     start_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

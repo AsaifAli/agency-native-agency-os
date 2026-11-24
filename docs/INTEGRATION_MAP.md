@@ -2,52 +2,57 @@
 
 ## Decision
 
-Both uploaded repositories are inputs to one private Agency OS. They are not to remain two independently deployed products and they are not to become separate OS modules with competing identity, persistence or orchestration.
+The uploaded Command Center and Evaluation Harness source snapshots are migration inputs to one private Agency OS. They are not independent production products and must not retain competing identity, persistence, authorization or orchestration.
 
-## Command Center → OS execution capabilities
+## Command Center -> OS execution capabilities
 
-| Existing capability | Destination in the OS | Migration treatment |
+| Existing capability | OS destination | Treatment |
 |---|---|---|
-| FastAPI run/control endpoints | OS task and execution APIs | Rebuild around OS task IDs, tenant scope and policy checks |
-| Agent/workflow definitions | Agent Registry + versioned skills | Normalize agent, skill, tool and workflow concepts |
-| RQ workers / Redis | OS worker execution layer | Reuse worker patterns; introduce tenant-scoped job envelopes and sandboxing |
-| LangGraph orchestration | Runtime/agent adapter only where justified | Remove as business workflow owner; n8n owns visual automation |
-| PostgreSQL run/audit persistence | OS database | Migrate schemas; OS remains source of truth |
-| Human approvals | OS approval service | Centralize and enforce in backend before side effects |
-| LLM provider integration | Runtime adapter / gateway | No provider secrets in prompts, logs or source |
-| Streamlit operations UI | Not retained as product UI | Founder dashboard is Next.js |
+| FastAPI run/control endpoints | Task and execution APIs | Rebuild around OS identity, tenant scope and policy |
+| Agent/workflow definitions | Agent Registry, skills and native process definitions | Normalize distinct concepts and version them |
+| RQ/Redis worker patterns | Native durable workers | Reuse patterns only where useful; PostgreSQL owns execution state |
+| LangGraph | Bounded reasoning adapter only where justified | It does not own business process state |
+| PostgreSQL run/audit persistence | OS database | Migrate into canonical tenant-scoped records |
+| Human approvals | OS approval service | Backend-enforced before protected side effects |
+| LLM provider integrations | Runtime/provider adapters | Secrets stay outside prompts, logs and source |
+| Streamlit operations UI | Not retained | Next.js Founder Console is the operator UI |
 
-## Evaluation Harness → OS evaluation service
+## Evaluation Harness -> OS evaluation service
 
-| Existing capability | Destination in the OS | Migration treatment |
+| Existing capability | OS destination | Treatment |
 |---|---|---|
-| AgentRun/trajectory capture | Shared execution event contract | Bind every record to tenant, task, agent and session |
-| Evaluation packs and metrics | Versioned evaluation service | Preserve generic RAG/agent workflow/code evaluation primitives; remove out-of-scope portfolio targets |
-| LLM-as-a-judge | Evaluation judge adapter | Explicit model/runtime policy, cost budget and untrusted-output handling |
-| Golden datasets/baselines | Versioned evaluation datasets | Synthetic/mock-first; client datasets separately classified and authorized |
-| Regression/quality gates | Release and task quality gates | Deterministic gates; no model may override a failed required gate |
-| Prompt/model/config lineage | OS artifact lineage | Persist immutable version references |
-| n8n workflows | OS-managed n8n integration | n8n triggers and integrates; API enforces authorization and approvals |
+| AgentRun/trajectory capture | Execution/session event contract | Tenant, task, agent, session and correlation scoped |
+| Evaluation packs and metrics | Versioned evaluation service | Preserve generic RAG, agent, safety and regression primitives |
+| LLM judge | Evaluation judge adapter | Runtime policy, data eligibility, cost budget and untrusted-output handling |
+| Golden datasets/baselines | Versioned evaluation datasets | Synthetic-first; client datasets separately classified and authorized |
+| Regression/quality gates | Task/release quality gates | Deterministic required gates cannot be overridden by model output |
+| Prompt/model/config lineage | Artifact and execution lineage | Immutable version references |
 
-## n8n boundaries
+## Native automation boundaries
 
-n8n owns event triggers, schedules, external integrations, conditional routing, retries and notifications. The OS owns workflow metadata, authorization, client scope, execution state, approvals and audit. Do not build a competing general-purpose workflow engine in FastAPI.
+No n8n, Activepieces, Temporal or other workflow engine is required initially. The OS owns business state, permissions, approvals, audit and durable execution. Native workers perform controlled jobs. PostgreSQL transactional outbox is the integration boundary.
 
-## Out of scope
+Existing n8n-related source files and workflow JSON exports may remain as legacy migration references only. They are not enabled or required at runtime. External automation may be reconsidered only when measured requirements exceed the tested native design.
 
-The public agency website, EvidenceFlow, QuoteSense, LegacyLens and WebQA Intelligence are separate initiatives. Their adapters, datasets and demo-specific workflows are not included as Agency OS runtime dependencies. OpenClaw is public-site demo-only.
+## Other systems
 
-## Implemented vertical slice — evaluation packs
+- Public agency website: separate application; future secure server-to-server intake API. Not included in this source bundle.
+- EvidenceFlow, QuoteSense, LegacyLens and WebQA Intelligence: separate portfolio/client-demo projects, not OS modules.
+- OpenClaw: not part of the private Agency OS.
+- Telephony: provider-neutral adapter and separate real-time voice/media boundary. Current source only records call intent/history and transcript artifacts; it does not place or receive calls.
 
-The OS API now imports the Harness' generic RAG and agent-workflow packs through a namespaced registry. `POST /v1/orgs/{org_id}/evaluations` evaluates expected/actual payloads, applies weighted metrics and hard gates, persists the run under the OS organization/workspace, and emits an `evaluation.completed` audit event. The dashboard lists active packs and runs a synthetic sample.
+## Current integration evidence
 
-This is the first integration slice, not the complete Harness migration: trajectories, judge calls, regression baselines, model lineage, dataset governance and release-gate wiring remain.
+- Generic RAG and agent-workflow evaluation packs are exposed through the OS API and persist evaluation runs in the OS scope.
+- Telephony record APIs create workspace-scoped call records, transcript records, audit entries and outbox events.
+- These are foundation slices, not completed integrations. Evaluation trajectories, judges, regression baselines, actual provider dispatch, voice runtime, webhook security and outbox dispatch remain unimplemented.
 
-## Migration order
+## Migration principles
 
-1. Establish canonical OS identity, tenant, task, agent, session, approval and audit contracts.
-2. Port Command Center worker/execution behavior behind those contracts; remove hardcoded business workflows.
-3. Port Harness trajectory/evaluation packs behind the OS execution event contract.
-4. Integrate n8n through authenticated, idempotent callbacks.
-5. Add Claude Managed Agents behind a replaceable runtime adapter and enforce data eligibility before dispatch.
-6. Add observability, budgets, lifecycle cleanup, CI gates and production hardening.
+1. OS owns canonical identity, workspace, client, task, agent, session, approval, execution and audit records.
+2. Port useful worker/execution behavior behind OS domain contracts.
+3. Port generic evaluation primitives behind OS event and policy contracts.
+4. Complete outbox dispatch with leases, retries, dead letters and reconciliation.
+5. Implement provider adapters only behind authentication, data protection, authorization and audit.
+6. Preserve the website as a separate future intake client.
+7. Keep legacy snapshots for traceability until each useful primitive is ported and verified; do not run them as duplicate platforms.

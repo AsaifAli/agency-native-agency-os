@@ -277,6 +277,8 @@ def create_project(
                    client_id=body.client_id, opportunity_id=body.opportunity_id,
                    name=body.name, description=body.description,
                    priority=body.priority, budget_minor=body.budget_minor,
+                   contract_value_minor=body.contract_value_minor,
+                   estimated_hours=body.estimated_hours,
                    currency=body.currency, start_date=body.start_date,
                    due_date=body.due_date, owner_user_id=p.user.id)
     db.add(item)

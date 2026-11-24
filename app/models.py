@@ -71,6 +71,23 @@ class Membership(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     role: Mapped[Role] = mapped_column(Enum(Role), default=Role.viewer, nullable=False)
 
+
+class FounderAuthority(Base):
+    """Explicit founder grant, separate from organization membership roles.
+
+    This table is provisioned through the trusted CLI/bootstrap path only; no
+    public API grants or escalates founder authority.
+    """
+    __tablename__ = "founder_authorities"
+    __table_args__ = (UniqueConstraint("org_id", "user_id", name="uq_founder_authority_org_user"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True, nullable=False)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    grant_source: Mapped[str] = mapped_column(String(40), default="bootstrap", nullable=False)
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
 class Workspace(Base):
     __tablename__ = "workspaces"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

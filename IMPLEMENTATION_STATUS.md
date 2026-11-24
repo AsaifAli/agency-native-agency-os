@@ -1,41 +1,55 @@
-# Implementation status
+# Agency OS implementation status — v5 consolidated bundle
 
-## Completed in this work session
+## Source and verification
 
-- Received and inspected both uploaded source archives.
-- Audited source structure, dependencies, documentation, test suites and security hygiene.
-- Created one consolidated Agency OS monorepo workspace.
-- Integrated the Harness RAG and agent-workflow evaluation packs into the OS API through a namespaced evaluation service.
-- Added tenant/workspace-scoped evaluation persistence, API endpoints, audit events and founder-dashboard evaluation UI.
-- Restricted the active evaluation registry to in-scope generic RAG and agent-workflow packs; excluded portfolio-specific evaluation packs from the active registry.
-- Isolated source snapshot test discovery from the OS test suite to prevent legacy `app` package import collisions.
-- Staged cleaned Command Center and Evaluation Harness source snapshots under `integrations/`.
-- Excluded `.env`, `.git`, local databases, secret artifacts, virtual environments and caches from the consolidated repository.
-- Added an integration map, source audit and security baseline.
+- Code baseline: founder-governance v4 snapshot, not a blind merge of the current-clean archive.
+- Added v5 delivery-operations vertical slice and additive migration `d8c5a1f20973`.
+- Full Python test suite in the bundle build environment: **102 passed, 1 skipped**.
+- The skipped test is the existing PostgreSQL worker-concurrency test; it requires `AGENCY_OS_TEST_DATABASE_URL`.
+- `python -m compileall -q app migrations tests`: passed.
+- `alembic heads`: expected single head `d8c5a1f20973` (verify below).
+- Frontend production build not run; frontend dependencies were not installed in the build environment.
+- PostgreSQL migration upgrade, production auth, provider integration, deployment, backup restore, penetration testing and compliance assessment have not been performed.
 
-## Verification evidence
+## Implemented in source
 
-- Original Evaluation Harness source tests: 37 passed before the out-of-scope portfolio-specific files were excluded.
-- Retained generic evaluation subset: 6 passed after cleanup.
-- Command Center source tests: test collection blocked because `redis` is missing in the execution environment.
-- Agency OS foundation tests: 7 passed in the consolidated workspace.
-- No frontend build, PostgreSQL integration test, deployment or security scan has been run.
+- FastAPI modular backend and Next.js Founder Console foundation.
+- Organization/workspace-scoped clients, contacts, leads, opportunities, projects and milestones.
+- Agent/task/approval/audit/evaluation foundations.
+- Explicit Founder Authority separate from organization roles, bootstrap grant and trusted local grant/revoke CLI.
+- Founder-only approval decisions; founder may approve founder-initiated requests.
+- Single-use approval consumption primitive with scope/resource/action matching and active Founder Authority recheck.
+- Central action classification: allowlisted routine actions, founder-approval actions and manual-review default for unknown actions.
+- Durable execution lifecycle primitives and mock runtime.
+- Evaluation API foundation and retained generic Evaluation Harness source snapshot.
+- Workspace-scoped call-session/transcript record APIs and transactional outbox writes. No call provider is enabled.
+- Service playbooks with draft/active/retired status and founder-controlled activation/retirement.
+- Scope-change requests requiring a matching single-use founder approval before project budget, contract value, estimate and due-date deltas are applied.
+- Manual time entries attached to a project and optional task.
+- Project cost records and provisional project financial summary.
+- Read-only exception inbox for pending approvals, blocked tasks and failed/retry-wait executions.
+- Agent execution reliability summary.
+- Founder Console Operations page for exception and execution-reliability visibility.
 
-## Not yet complete
+## Not implemented or not verified
 
-- Canonical schema and migrations for all OS domains.
-- Production OIDC/JWKS, MFA and service identities.
-- PostgreSQL row-level tenant security and authorization test matrix.
-- Agent Registry and versioned skills/tools.
-- Claude Managed Agents runtime adapter and alternative route.
-- Data Protection Gateway and runtime eligibility enforcement.
-- Isolated workers/sandboxes and network egress restrictions.
-- n8n API integration, webhook authentication and idempotent callbacks.
-- Full Harness service port, trajectory capture, LLM-as-a-judge integration and regression/release gates (initial pack execution API is now integrated).
-- Atomic approval enforcement around protected side effects.
-- Budgets, observability, tamper-evident audit and lifecycle cleanup.
-- CI/CD, SAST, SBOM, IaC/container scanning, backups and restore tests.
+- Full outbox dispatcher, safe event claiming, leases, heartbeats, retry policy, dead letters and reconciliation.
+- Supervisor-driven task decomposition, delegation, specialist selection, review and escalation.
+- Actual Claude Managed Agents/Agent SDK runtime.
+- Production OIDC/JWKS/MFA, secure frontend session lifecycle and scoped machine identities.
+- Full API/worker/file/session/cache cross-workspace isolation and PostgreSQL RLS.
+- Complete Data Protection Gateway, runtime eligibility, PII redaction and retention/deletion lifecycle.
+- Full client relationship timeline, proposals/SOWs/contracts, outreach delivery, scheduling, support and handover workflows.
+- Live inbound/outbound telephony, signed webhooks, voice runtime, STT/TTS and recording management.
+- Complete finance ledger, invoicing, payment collection, tax/accounting and FX conversion.
+- Weekly capacity planning, HR timesheets or resource scheduling.
+- Full QA acceptance/rework metrics and production release gates.
+- PostgreSQL migration and concurrency validation in the user's environment.
+- Frontend production build, deployment, monitoring, SBOM, restore drill or security review.
+- Website-to-OS lead intake.
 
-## Status
+## Safety boundary
 
-**Integration workspace assembled; implementation is in progress. Not production-ready.**
+Use synthetic/mock data until authentication, tenant isolation, runtime eligibility, retention, provider authorization and recovery controls are validated. Do not enable real outbound communication, dialing, client transcript ingestion or production side effects based on the presence of an API route or outbox row.
+
+The bundle is a tested development foundation. It is **not yet a fully autonomous or production-ready business OS**.

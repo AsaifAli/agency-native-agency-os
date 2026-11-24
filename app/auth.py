@@ -5,7 +5,7 @@ from fastapi import Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 from app.config import settings
 from app.db import get_db
-from app.models import User, Membership, Role
+from app.models import User, Membership, FounderAuthority, Role
 
 @dataclass
 class Principal:
@@ -59,3 +59,31 @@ def issue_access_token(email: str) -> str:
          "iat": now, "exp": now + timedelta(minutes=30)},
         settings.jwt_secret, algorithm="HS256"
     )
+
+
+def has_founder_authority(db: Session, org_id: str, user_id: str) -> bool:
+    # A grant is effective only while the user is active and remains a member
+    # of the organization. Authority is separate from the membership role.
+    return (
+        db.query(FounderAuthority.id)
+        .join(User, User.id == FounderAuthority.user_id)
+        .join(
+            Membership,
+            (Membership.user_id == FounderAuthority.user_id)
+            & (Membership.org_id == FounderAuthority.org_id),
+        )
+        .filter(
+            FounderAuthority.org_id == org_id,
+            FounderAuthority.user_id == user_id,
+            FounderAuthority.active.is_(True),
+            User.active.is_(True),
+        )
+        .first()
+        is not None
+    )
+
+
+def require_founder_authority(db: Session, org_id: str, user_id: str) -> None:
+    """Require an explicit founder grant; Role.owner is deliberately insufficient."""
+    if not has_founder_authority(db, org_id, user_id):
+        raise HTTPException(403, "Explicit founder authority is required")

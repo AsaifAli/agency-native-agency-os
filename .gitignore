@@ -10,3 +10,6 @@ build/
 # Ignore local environment files; retain safe examples
 .env*
 !.env.example
+node_modules/
+.next/
+frontend/.next/

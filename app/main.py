@@ -13,6 +13,8 @@ from app.auth import (
     get_principal,
     require_membership,
     require_role,
+    require_founder_authority,
+    has_founder_authority,
     Principal,
     issue_access_token,
 )
@@ -443,7 +445,10 @@ def create_approval(
     p: Principal = Depends(get_principal),
 ):
     role = require_membership(org_id, p, db)
-    require_role(role, {Role.owner, Role.admin, Role.operator})
+    if role not in {Role.owner, Role.admin, Role.operator} and not has_founder_authority(
+        db, org_id, p.user.id
+    ):
+        raise HTTPException(403, "Insufficient permission to request approval")
 
     if body.action_type not in MANDATORY_APPROVAL_ACTIONS:
         raise HTTPException(
@@ -514,8 +519,9 @@ def decide_approval(
     db: Session = Depends(get_db),
     p: Principal = Depends(get_principal),
 ):
-    role = require_membership(org_id, p, db)
-    require_role(role, {Role.owner})
+    # Membership proves organization access; founder authority is a separate grant.
+    require_membership(org_id, p, db)
+    require_founder_authority(db, org_id, p.user.id)
 
     if body.decision == ApprovalStatus.pending:
         raise HTTPException(
@@ -539,12 +545,6 @@ def decide_approval(
     if approval.status != ApprovalStatus.pending:
         raise HTTPException(409, "Approval already decided")
 
-    if approval.requested_by == p.user.id:
-        raise HTTPException(
-            403,
-            "Requester cannot approve their own request",
-        )
-
     approval.status = body.decision
     approval.decided_by = p.user.id
     approval.decision_note = body.note
@@ -560,6 +560,7 @@ def decide_approval(
         approval.workspace_id,
         {
             "decision": body.decision.value,
+            "founder_authority": True,
         },
     )
 
@@ -721,3 +722,11 @@ def list_evaluations(
 # Revenue and Delivery API module installed by Agency OS bundle.
 from app.domain_routes import router as revenue_delivery_router
 app.include_router(revenue_delivery_router)
+
+# Telephony record APIs (provider execution remains disabled until configured).
+from app.telephony.routes import router as telephony_router
+app.include_router(telephony_router)
+
+# Lightweight service playbooks, scope control, time and project cost operations.
+from app.operations_routes import router as operations_router
+app.include_router(operations_router)

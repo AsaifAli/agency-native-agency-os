@@ -124,6 +124,8 @@ class ProjectCreate(BaseModel):
     description: str = Field(default="", max_length=20000)
     priority: str = Field(default="normal", pattern="^(low|normal|high|critical)$")
     budget_minor: int = Field(default=0, ge=0)
+    contract_value_minor: int = Field(default=0, ge=0)
+    estimated_hours: int = Field(default=0, ge=0, le=100000)
     currency: str = Field(default="INR", pattern="^[A-Z]{3}$")
     start_date: datetime | None = None
     due_date: datetime | None = None
@@ -144,6 +146,8 @@ class ProjectOut(BaseModel):
     status: str
     priority: str
     budget_minor: int
+    contract_value_minor: int
+    estimated_hours: int
     currency: str
     start_date: datetime | None
     due_date: datetime | None
