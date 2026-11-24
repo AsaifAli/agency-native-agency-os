@@ -50,12 +50,12 @@ def app_client():
 
 def test_founder_initializes_full_chart_idempotently(app_client):
     i=app_client.identity
-    r=app_client.post(f"/v1/orgs/{i['org'].id}/workforce/initialize",json={"workspace_id":i["workspace"].id})
+    r=app_client.post(f"/v1/orgs/{i['org'].id}/workforce/bootstrap",params={"workspace_id":i["workspace"].id})
     assert r.status_code==200, r.text
     assert r.json()["departments"]==16
     assert r.json()["department_heads"]==16
     assert r.json()["specialists"]==16
-    r2=app_client.post(f"/v1/orgs/{i['org'].id}/workforce/initialize",json={"workspace_id":i["workspace"].id})
+    r2=app_client.post(f"/v1/orgs/{i['org'].id}/workforce/bootstrap",params={"workspace_id":i["workspace"].id})
     assert r2.status_code==200, r2.text
     listing=app_client.get(f"/v1/orgs/{i['org'].id}/workforce",params={"workspace_id":i["workspace"].id})
     assert listing.status_code==200
@@ -75,7 +75,7 @@ def test_organization_owner_without_founder_grant_cannot_initialize(app_client):
     i=app_client.identity
     app_client.app.dependency_overrides[get_principal]=lambda:Principal(user=i["operator"])
     # Operator membership is also insufficient; founder grant is separately checked.
-    r=app_client.post(f"/v1/orgs/{i['org'].id}/workforce/initialize",json={"workspace_id":i["workspace"].id})
+    r=app_client.post(f"/v1/orgs/{i['org'].id}/workforce/bootstrap",params={"workspace_id":i["workspace"].id})
     assert r.status_code==403
 
 
