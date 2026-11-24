@@ -13,7 +13,7 @@ from app.models import (
     Role, User, Workspace, Task,
 )
 from app.domain_models import Project, Opportunity, Client
-from app.operations_models import ServicePlaybook, ServiceOffering, Proposal, ContractRecord, ClientOnboarding, OnboardingChecklistItem, InvoiceRecord, PaymentReceipt, ScopeChangeRequest, TimeEntry, ProjectCost
+from app.operations_models import ServicePlaybook, ServiceOffering, Proposal, ContractRecord, ClientOnboarding, OnboardingChecklistItem, InvoiceRecord, PaymentReceipt, ScopeChangeRequest, TimeEntry, ProjectCost, RetainerServicePeriod
 from app.operations_routes import router
 from app.telephony.models import OutboxEvent
 
@@ -1441,3 +1441,83 @@ def test_outbox_health_denies_member_without_founder_authority(client):
     finally:
         client.app.dependency_overrides.pop(get_principal, None)
         db.close()
+
+def test_retainer_period_usage_rollover_and_closed_period_guard(client):
+    org, ws = client.org_id, client.ws_id
+    db = client.session_factory()
+    try:
+        proposal = Proposal(
+            org_id=org, workspace_id=ws, opportunity_id=client.opportunity_id,
+            title="Retainer", service_line="AI Engineering", scope_summary="Managed AI operations",
+            deliverables=[], assumptions=[], exclusions=[], amount_minor=100000,
+            currency="INR", validity_days=30, engagement_type="retainer",
+            billing_frequency="monthly", term_months=2, included_hours_per_period=10,
+            rollover_hours=True, support_response_hours=8, auto_renew=False,
+            status="approved", created_by=client.user_id,
+        )
+        db.add(proposal)
+        db.flush()
+        contract = ContractRecord(
+            org_id=org, workspace_id=ws, client_id=client.client_id, proposal_id=proposal.id,
+            contract_number="RET-001", title="Retainer", amount_minor=200000, currency="INR",
+            terms_snapshot={"engagement_type":"retainer","billing_frequency":"monthly",
+                            "billing_period_count":2,"included_hours_per_period":10,
+                            "rollover_hours":True}, status="executed",
+            signed_reference="test-signed-evidence", signed_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            executed_by=client.user_id, executed_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            created_by=client.user_id,
+        )
+        db.add(contract)
+        db.flush()
+        db.add(ClientOnboarding(
+            org_id=org, workspace_id=ws, client_id=client.client_id,
+            contract_id=contract.id, project_id=client.project_id, status="active",
+            created_by=client.user_id,
+        ))
+        db.commit()
+        contract_id = contract.id
+    finally:
+        db.close()
+
+    period_one = client.post(f"/v1/orgs/{org}/operations/retainer-periods", headers=headers(), json={
+        "workspace_id":ws,"contract_id":contract_id,"project_id":client.project_id,
+        "period_number":1,"starts_at":"2026-01-01T00:00:00+00:00",
+        "ends_at":"2026-02-01T00:00:00+00:00",
+    })
+    assert period_one.status_code == 201, period_one.text
+    period_id = period_one.json()["id"]
+
+    db = client.session_factory()
+    try:
+        db.add(TimeEntry(
+            org_id=org, workspace_id=ws, project_id=client.project_id,
+            user_id=client.user_id, description="Billable retainer work",
+            duration_minutes=12*60, billable=True, hourly_cost_minor=0,
+            started_at=datetime(2026, 1, 15, tzinfo=timezone.utc),
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    closed = client.post(
+        f"/v1/orgs/{org}/operations/retainer-periods/{period_id}/close",
+        headers=headers(),
+    )
+    assert closed.status_code == 200, closed.text
+    assert closed.json()["used_minutes"] == 720
+    assert closed.json()["overage_minutes"] == 120
+
+    period_two = client.post(f"/v1/orgs/{org}/operations/retainer-periods", headers=headers(), json={
+        "workspace_id":ws,"contract_id":contract_id,"project_id":client.project_id,
+        "period_number":2,"starts_at":"2026-02-01T00:00:00+00:00",
+        "ends_at":"2026-03-01T00:00:00+00:00",
+    })
+    assert period_two.status_code == 201, period_two.text
+    assert period_two.json()["rollover_in_hours"] == 0
+
+    late_entry = client.post(f"/v1/orgs/{org}/operations/time-entries", headers=headers(), json={
+        "workspace_id":ws,"project_id":client.project_id,"description":"Late billable entry",
+        "duration_minutes":30,"billable":True,"hourly_cost_minor":0,
+        "started_at":"2026-01-20T00:00:00+00:00",
+    })
+    assert late_entry.status_code == 409
