@@ -58,6 +58,33 @@ class ContactOut(BaseModel):
     created_at: datetime
 
 
+class ContactActivityCreate(BaseModel):
+    workspace_id: str
+    contact_id: str
+    activity_type: str = Field(pattern="^(note|call|email|meeting|task|status_update)$")
+    direction: str = Field(default="none", pattern="^(none|inbound|outbound|internal)$")
+    subject: str = Field(default="", max_length=240)
+    body: str = Field(default="", max_length=4000)
+    outcome: str = Field(default="", max_length=240)
+    source_reference: str = Field(default="", max_length=200)
+    occurred_at: datetime | None = None
+
+
+class ContactActivityOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    workspace_id: str
+    contact_id: str
+    activity_type: str
+    direction: str
+    subject: str
+    body: str
+    outcome: str
+    source_reference: str
+    occurred_at: datetime
+    created_at: datetime
+
+
 class LeadCreate(BaseModel):
     workspace_id: str
     client_id: str | None = None
