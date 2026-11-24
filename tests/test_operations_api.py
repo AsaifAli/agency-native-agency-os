@@ -429,6 +429,39 @@ def test_contract_requires_approved_proposal_and_records_signed_evidence(client)
     assert replay.status_code == 409
 
 
+
+def test_founder_can_reject_contract_execution_and_approval_together(client):
+    proposal_id = _create_approved_proposal_for_contract(client)
+    created = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/contracts",
+        headers=headers(), json={
+            "workspace_id": client.ws_id, "proposal_id": proposal_id,
+            "contract_number": "AG-2026-REJECT", "title": "Rejected Agreement",
+        },
+    )
+    assert created.status_code == 201, created.text
+    contract_id = created.json()["id"]
+    submitted = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/contracts/" + contract_id + "/submit-for-approval",
+        headers=headers(),
+    )
+    assert submitted.status_code == 200, submitted.text
+    approval_id = submitted.json()["approval_id"]
+    rejected = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/contracts/" + contract_id + "/reject",
+        headers=headers(), json={"approval_id": approval_id, "note": "Commercial terms need revision"},
+    )
+    assert rejected.status_code == 200, rejected.text
+    assert rejected.json()["status"] == "rejected"
+    db = client.session_factory()
+    try:
+        approval = db.query(Approval).filter_by(id=approval_id).one()
+        assert approval.status == ApprovalStatus.rejected
+        assert approval.decided_by == client.user_id
+    finally:
+        db.close()
+
+
 def test_contract_rejects_cross_workspace_proposal(client):
     response = client.post(
         "/v1/orgs/" + client.org_id + "/operations/contracts",
