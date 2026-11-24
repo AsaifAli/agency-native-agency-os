@@ -17,6 +17,8 @@ The curated set contains 18 cross-functional skills for planning, engineering, R
 
 These are curated adaptations written for this repository, not wholesale mirrors of upstream skill repositories. Source revisions are pinned in the catalog. Review upstream licenses and notices again before importing any original scripts, hooks, assets, or verbatim skill content.
 
+The 16 department charters and leadership/specialist profiles link to role-relevant skill recommendations. These recommendations guide selection but are not persisted assignments and do not activate any workforce member.
+
 ## Runtime boundary
 
 The catalog is currently read-only and exposes skill metadata and instructions through authenticated organization-scoped GET endpoints. It does not assign skills to workforce members, create provider-side Claude skills, grant tools, start sessions, or enable autonomous execution.
