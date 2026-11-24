@@ -33,7 +33,7 @@
     "karpathy-guidelines": {
       "repository": "https://github.com/nassimna/karpathy-guidelines",
       "revision": "7d28f033043fd7b6ad41fd266f7997da5904a1e1",
-      "license": "MIT",
+      "license": "No root LICENSE file found at the pinned revision; reference-only principles, no source text copied.",
       "use": "Adapted think-before-coding, simplicity-first, surgical-change, and goal-driven execution principles."
     },
     "ponytail": {
@@ -45,7 +45,7 @@
     "anthropic-skills": {
       "repository": "https://github.com/anthropics/skills",
       "revision": "e4bb5d960d87126ff3b3a8af1a104b7db67560ba",
-      "license": "Apache-2.0 for the open-source skill examples; verify per-skill notices before copying any source files.",
+      "license": "No root LICENSE file found at the pinned revision path; packaging/runtime patterns only, no skill source text or assets copied.",
       "use": "Agent Skills packaging and Claude-specific skill/runtime patterns; no document skill code copied."
     },
     "agent-skills-spec": {
@@ -63,7 +63,7 @@
     "claude-skills-index": {
       "repository": "https://claudeskills.info/",
       "revision": "Discovery index; not pinned as executable source.",
-      "license": "Not verified; discovery-only.",
+      "license": "Not verified; discovery-only, no imported content.",
       "use": "Discovery and source-link lookup only. Never import or execute skills directly from the index."
     }
   },
