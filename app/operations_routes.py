@@ -18,8 +18,8 @@ from app.auth import (
 from app.db import get_db
 from app.models import Role, Workspace, Approval, ApprovalStatus, Execution, ExecutionStatus, Task, Agent
 
-from app.domain_models import Project, Opportunity
-from app.operations_models import ServicePlaybook, ServiceOffering, Proposal, ScopeChangeRequest, TimeEntry, ProjectCost
+from app.domain_models import Project, Opportunity, Client
+from app.operations_models import ServicePlaybook, ServiceOffering, Proposal, ContractRecord, ScopeChangeRequest, TimeEntry, ProjectCost
 from app.telephony.models import OutboxEvent
 from app.action_policy import require_approved_action
 from app.audit import record_event
@@ -132,6 +132,46 @@ class ServiceOfferingOut(BaseModel):
     notes: str
     version: int
     status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ContractCreate(BaseModel):
+    workspace_id: str
+    proposal_id: str
+    contract_number: str = Field(pattern="^[A-Za-z0-9][A-Za-z0-9._/-]{1,79}$")
+    title: str = Field(min_length=3, max_length=240)
+
+
+class ContractExecutionEvidence(BaseModel):
+    approval_id: str = Field(min_length=1, max_length=36)
+    signed_reference: str = Field(min_length=3, max_length=240)
+    signed_at: datetime
+
+
+class ContractReject(BaseModel):
+    approval_id: str = Field(min_length=1, max_length=36)
+    note: str = Field(min_length=3, max_length=2000)
+
+
+class ContractOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    workspace_id: str
+    client_id: str
+    proposal_id: str
+    contract_number: str
+    title: str
+    amount_minor: int
+    currency: str
+    terms_snapshot: dict
+    status: str
+    approval_id: str | None
+    signed_reference: str
+    signed_at: datetime | None
+    executed_by: str | None
+    executed_at: datetime | None
+    created_by: str
     created_at: datetime
     updated_at: datetime
 
@@ -391,6 +431,185 @@ def update_playbook_status(
     item.status = body.status
     item.version += 1
     _event(db, org_id, p.user.id, "playbook.status_changed", "service_playbook", item.id, item.workspace_id, {"status": item.status})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.get("/contracts", response_model=list[ContractOut])
+def list_contracts(
+    org_id: str, workspace_id: str = Query(min_length=1), status: str | None = None,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    role = require_membership(org_id, p, db)
+    require_role(role, {Role.owner, Role.admin, Role.operator, Role.reviewer})
+    _workspace(db, org_id, workspace_id)
+    query = db.query(ContractRecord).filter_by(org_id=org_id, workspace_id=workspace_id)
+    if status:
+        if status not in {"draft", "pending_approval", "executed", "rejected", "terminated"}:
+            raise HTTPException(422, "Unsupported contract status")
+        query = query.filter_by(status=status)
+    return query.order_by(ContractRecord.created_at.desc()).limit(250).all()
+
+
+@router.post("/contracts", response_model=ContractOut, status_code=201)
+def create_contract_draft(
+    org_id: str, body: ContractCreate,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    _write(org_id, body.workspace_id, p, db)
+    proposal = db.query(Proposal).filter_by(
+        id=body.proposal_id, org_id=org_id, workspace_id=body.workspace_id,
+    ).first()
+    if proposal is None:
+        raise HTTPException(404, "Proposal not found")
+    if proposal.status != "approved":
+        raise HTTPException(409, "Only founder-approved proposals can enter the contract register")
+    opportunity = db.query(Opportunity).filter_by(
+        id=proposal.opportunity_id, org_id=org_id, workspace_id=body.workspace_id,
+    ).first()
+    if opportunity is None or not opportunity.client_id:
+        raise HTTPException(422, "Link the opportunity to a client before drafting a contract")
+    client = db.query(Client).filter_by(
+        id=opportunity.client_id, org_id=org_id, workspace_id=body.workspace_id,
+    ).first()
+    if client is None:
+        raise HTTPException(404, "Client not found in this workspace")
+    duplicate = db.query(ContractRecord.id).filter_by(
+        org_id=org_id, workspace_id=body.workspace_id, contract_number=body.contract_number.strip(),
+    ).first()
+    if duplicate:
+        raise HTTPException(409, "Contract number already exists in this workspace")
+    snapshot = {
+        "proposal_id": proposal.id,
+        "proposal_title": proposal.title,
+        "service_line": proposal.service_line,
+        "scope_summary": proposal.scope_summary,
+        "deliverables": proposal.deliverables,
+        "assumptions": proposal.assumptions,
+        "exclusions": proposal.exclusions,
+        "amount_minor": proposal.amount_minor,
+        "currency": proposal.currency,
+        "validity_days": proposal.validity_days,
+        "proposal_approved_by": proposal.approved_by,
+        "proposal_approved_at": proposal.approved_at.isoformat() if proposal.approved_at else None,
+    }
+    item = ContractRecord(
+        org_id=org_id, workspace_id=body.workspace_id, client_id=client.id,
+        proposal_id=proposal.id, contract_number=body.contract_number.strip(),
+        title=body.title.strip(), amount_minor=proposal.amount_minor,
+        currency=proposal.currency, terms_snapshot=snapshot, created_by=p.user.id,
+    )
+    db.add(item)
+    db.flush()
+    _event(db, org_id, p.user.id, "commercial.contract_drafted", "contract", item.id,
+           body.workspace_id, {"proposal_id": proposal.id, "client_id": client.id, "contract_number": item.contract_number})
+    _outbox(db, org_id, body.workspace_id, "commercial.contract_drafted", "contract", item.id,
+            {"proposal_id": proposal.id, "client_id": client.id})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.post("/contracts/{contract_id}/submit-for-approval", response_model=ContractOut)
+def submit_contract_for_approval(
+    org_id: str, contract_id: str,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    item = db.query(ContractRecord).filter_by(id=contract_id, org_id=org_id).with_for_update().first()
+    if item is None:
+        raise HTTPException(404, "Contract not found")
+    _write(org_id, item.workspace_id, p, db)
+    if item.status == "pending_approval":
+        return item
+    if item.status != "draft":
+        raise HTTPException(409, "Only draft contracts can be submitted")
+    approval = Approval(
+        org_id=org_id, workspace_id=item.workspace_id, action_type="contract.execute",
+        resource_id=item.id, idempotency_key=f"contract-execute:{item.id}",
+        request_payload={
+            "contract_number": item.contract_number, "title": item.title,
+            "amount_minor": item.amount_minor, "currency": item.currency,
+            "client_id": item.client_id, "proposal_id": item.proposal_id,
+        },
+        requested_by=p.user.id,
+    )
+    db.add(approval)
+    db.flush()
+    item.status = "pending_approval"
+    item.approval_id = approval.id
+    _event(db, org_id, p.user.id, "commercial.contract_submitted", "contract", item.id,
+           item.workspace_id, {"approval_id": approval.id, "action_type": "contract.execute"})
+    _outbox(db, org_id, item.workspace_id, "commercial.contract_submitted", "contract", item.id,
+            {"approval_id": approval.id})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.post("/contracts/{contract_id}/record-execution", response_model=ContractOut)
+def record_contract_execution(
+    org_id: str, contract_id: str, body: ContractExecutionEvidence,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    item = db.query(ContractRecord).filter_by(id=contract_id, org_id=org_id).with_for_update().first()
+    if item is None:
+        raise HTTPException(404, "Contract not found")
+    require_founder_authority(db, org_id, p.user.id)
+    if item.status != "pending_approval" or item.approval_id != body.approval_id:
+        raise HTTPException(409, "Contract is not awaiting this approval")
+    if body.signed_at.tzinfo is None:
+        raise HTTPException(422, "Signed timestamp must include a timezone")
+    if body.signed_at > datetime.now(timezone.utc):
+        raise HTTPException(422, "Signed timestamp cannot be in the future")
+    require_approved_action(
+        db, approval_id=body.approval_id, org_id=org_id,
+        workspace_id=item.workspace_id, action_type="contract.execute",
+        resource_id=item.id, actor_user_id=p.user.id,
+    )
+    item.status = "executed"
+    item.signed_reference = body.signed_reference.strip()
+    item.signed_at = body.signed_at
+    item.executed_by = p.user.id
+    item.executed_at = datetime.now(timezone.utc)
+    _event(db, org_id, p.user.id, "commercial.contract_execution_recorded", "contract", item.id,
+           item.workspace_id, {"approval_id": body.approval_id, "signed_reference": item.signed_reference})
+    _outbox(db, org_id, item.workspace_id, "commercial.contract_execution_recorded", "contract", item.id,
+            {"approval_id": body.approval_id})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.post("/contracts/{contract_id}/reject", response_model=ContractOut)
+def reject_contract(
+    org_id: str, contract_id: str, body: ContractReject,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    item = db.query(ContractRecord).filter_by(id=contract_id, org_id=org_id).with_for_update().first()
+    if item is None:
+        raise HTTPException(404, "Contract not found")
+    require_founder_authority(db, org_id, p.user.id)
+    if item.status != "pending_approval" or item.approval_id != body.approval_id:
+        raise HTTPException(409, "Contract is not awaiting this approval")
+    approval = db.query(Approval).filter_by(
+        id=body.approval_id, org_id=org_id, workspace_id=item.workspace_id,
+        action_type="contract.execute", resource_id=item.id,
+    ).with_for_update().first()
+    if approval is None:
+        raise HTTPException(404, "Contract approval not found")
+    if approval.status == ApprovalStatus.pending:
+        approval.status = ApprovalStatus.rejected
+        approval.decided_by = p.user.id
+        approval.decision_note = body.note
+        approval.decided_at = datetime.now(timezone.utc)
+    elif approval.status != ApprovalStatus.rejected or not approval.decided_by or not has_founder_authority(db, org_id, approval.decided_by):
+        raise HTTPException(409, "Contract approval is no longer rejectable")
+    item.status = "rejected"
+    _event(db, org_id, p.user.id, "commercial.contract_rejected", "contract", item.id,
+           item.workspace_id, {"approval_id": body.approval_id})
+    _outbox(db, org_id, item.workspace_id, "commercial.contract_rejected", "contract", item.id,
+            {"approval_id": body.approval_id})
     db.commit()
     db.refresh(item)
     return item
