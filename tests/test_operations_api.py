@@ -13,7 +13,7 @@ from app.models import (
     Role, User, Workspace, Task,
 )
 from app.domain_models import Project, Opportunity, Client
-from app.operations_models import ServicePlaybook, ServiceOffering, Proposal, ContractRecord, ScopeChangeRequest, TimeEntry, ProjectCost
+from app.operations_models import ServicePlaybook, ServiceOffering, Proposal, ContractRecord, ClientOnboarding, OnboardingChecklistItem, InvoiceRecord, PaymentReceipt, ScopeChangeRequest, TimeEntry, ProjectCost
 from app.operations_routes import router
 from app.telephony.models import OutboxEvent
 
