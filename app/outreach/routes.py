@@ -114,14 +114,14 @@ def _check_rate_limits(db: Session, org_id: str, item: OutboundMessage, sender: 
         OutboundMessage.org_id == org_id,
         OutboundMessage.workspace_id == item.workspace_id,
         OutboundMessage.sender_id == sender.id,
-        OutboundMessage.status.in_(["queued", "sent", "delivered"]),
+        OutboundMessage.queued_at.isnot(None),
         OutboundMessage.queued_at >= now - timedelta(hours=1),
     ).scalar() or 0
     daily = db.query(func.count(OutboundMessage.id)).filter(
         OutboundMessage.org_id == org_id,
         OutboundMessage.workspace_id == item.workspace_id,
         OutboundMessage.sender_id == sender.id,
-        OutboundMessage.status.in_(["queued", "sent", "delivered"]),
+        OutboundMessage.queued_at.isnot(None),
         OutboundMessage.queued_at >= now - timedelta(days=1),
     ).scalar() or 0
     if hourly >= sender.max_per_hour or daily >= sender.max_per_day:
