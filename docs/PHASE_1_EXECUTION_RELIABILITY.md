@@ -48,7 +48,7 @@ Expected head: `e3f1a9c7b2d4`.
 
 ## Verification performed
 
-Latest local validation:
+Previously recorded local validation (not independently reproduced by this commit):
 
 - `python -m pytest -q`: 129 passed, 1 non-blocking deprecation warning.
 - `python -m pytest -q -rs tests/test_worker_postgres.py`: 3 passed, 0 skipped.
@@ -74,8 +74,7 @@ They do not establish production readiness or compliance.
   It does not kill and restart a running worker process.
 - Outbox handlers do not currently renew leases while running.
 - Consumers must implement idempotency using the supplied idempotency key.
-- Operational metrics and alerting for pending age, retry counts, and
-  dead-letter counts are not yet implemented.
+- A founder-only, organization-scoped /outbox-health read endpoint reports status counts, retrying count, oldest pending timestamp and expired leases; alert delivery and metrics export remain unimplemented.
 
 ## Migration rollback policy
 
@@ -102,7 +101,7 @@ rollback procedure.
 4. Review lease duration and recovery behavior for long-running handlers.
 5. Complete the final code review and commit the Phase 1 changes.
 
-The PostgreSQL concurrency tests have not run because no dedicated `agency_os_worker_test` database was provided. No migration has been applied to the user's database, and no production event handlers have been enabled.
+The prior version of this document also stated that PostgreSQL tests had not run, contradicting the validation record above. That stale statement has been removed. The reported local test results are historical claims, not CI evidence from this stabilization branch. No production event handlers are enabled.
 
 ## Operational configuration
 
