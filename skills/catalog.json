@@ -50,9 +50,9 @@
     },
     "agent-skills-spec": {
       "repository": "https://github.com/agentskills/agentskills",
-      "revision": "specification referenced at https://agentskills.io/specification",
+      "revision": "83021e2be457a9b6679148719c1f6074f0ad975e",
       "license": "Apache-2.0 repository code; CC-BY-4.0 documentation",
-      "use": "SKILL.md directory format and progressive-disclosure conventions."
+      "use": "SKILL.md directory format and progressive-disclosure conventions; specification: https://agentskills.io/specification."
     },
     "coderabbit-skills": {
       "repository": "https://github.com/coderabbitai/skills",
