@@ -229,6 +229,10 @@ class InvoiceRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
 
+    @property
+    def outstanding_minor(self) -> int:
+        return self.amount_minor - self.paid_minor
+
 
 class PaymentReceipt(Base):
     """Append-only evidence of funds received; it does not initiate or move money."""
