@@ -657,6 +657,29 @@ def test_contract_rejects_cross_workspace_proposal(client):
     assert response.status_code == 404
 
 
+
+def test_founder_authority_viewer_can_read_commercial_and_delivery_registers(client):
+    db = client.session_factory()
+    try:
+        founder_viewer = User(email="founder-viewer@example.test", display_name="Founder Viewer")
+        db.add(founder_viewer)
+        db.flush()
+        db.add(Membership(org_id=client.org_id, user_id=founder_viewer.id, role=Role.viewer))
+        db.add(FounderAuthority(org_id=client.org_id, user_id=founder_viewer.id, grant_source="test"))
+        db.commit()
+        client.app.dependency_overrides[get_principal] = lambda: Principal(user=founder_viewer)
+    finally:
+        db.close()
+    for path in [
+        "/service-catalog", "/proposals", "/contracts", "/onboardings",
+    ]:
+        response = client.get(
+            "/v1/orgs/" + client.org_id + "/operations" + path,
+            params={"workspace_id": client.ws_id}, headers=headers(),
+        )
+        assert response.status_code == 200, (path, response.text)
+
+
 def test_time_and_cost_roll_up_to_project_financial_summary(client):
     org, ws, project = client.org_id, client.ws_id, client.project_id
     t = client.post(f"/v1/orgs/{org}/operations/time-entries", headers=headers(), json={
