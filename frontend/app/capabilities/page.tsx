@@ -126,11 +126,18 @@ export default function Capabilities() {
         {!loading && !error && !filtered.length ? <div className="empty">No skills match this filter.</div> : null}
         <div className="grid dashboard-grid" style={{ marginTop: 16 }}>
           {filtered.map((skill) => (
-            <button
+            <div
               className="panel"
-              type="button"
+              role="button"
+              tabIndex={0}
               key={skill.name}
               onClick={() => void openSkill(skill.name)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  void openSkill(skill.name);
+                }
+              }}
               aria-pressed={selected?.name === skill.name}
               style={{
                 textAlign: "left",
@@ -148,7 +155,7 @@ export default function Capabilities() {
                 {skill.sources.map((source) => source.id).join(" · ")}
               </div>
               <div className="activity-meta">Disabled · no tool grants</div>
-            </button>
+            </div>
           ))}
         </div>
       </section>
