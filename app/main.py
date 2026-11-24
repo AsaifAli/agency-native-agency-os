@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, or_
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.db import get_db
@@ -28,6 +28,9 @@ from app.models import (
     Role,
     ApprovalStatus,
     EvaluationRun,
+    Execution,
+    ExecutionAttempt,
+    ExecutionStatus,
 )
 from app.schemas import (
     WorkspaceCreate,
@@ -398,6 +401,100 @@ def create_execution_endpoint(
         db.rollback()
         raise
 
+
+
+@app.get(
+    "/v1/orgs/{org_id}/executions",
+    response_model=list[ExecutionOut],
+)
+def list_executions(
+    org_id: str,
+    workspace_id: str,
+    status: str | None = None,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    p: Principal = Depends(get_principal),
+):
+    """List durable executions inside one authorized workspace."""
+    role = require_membership(org_id, p, db)
+    require_role(role, {Role.owner, Role.admin, Role.operator, Role.reviewer})
+    workspace_in_org(db, org_id, workspace_id)
+
+    if not 1 <= limit <= 500:
+        raise HTTPException(422, "limit must be between 1 and 500")
+
+    query = db.query(Execution).filter_by(
+        org_id=org_id,
+        workspace_id=workspace_id,
+    )
+    if status:
+        allowed = {item.value for item in ExecutionStatus}
+        if status not in allowed:
+            raise HTTPException(422, "Unsupported execution status")
+        query = query.filter(Execution.status == ExecutionStatus(status))
+
+    return (
+        query.order_by(Execution.created_at.desc(), Execution.id.desc())
+        .limit(limit)
+        .all()
+    )
+
+
+@app.get(
+    "/v1/orgs/{org_id}/executions/{execution_id}/trace",
+    response_model=list[AuditOut],
+)
+def get_execution_trace(
+    org_id: str,
+    execution_id: str,
+    workspace_id: str,
+    limit: int = 250,
+    db: Session = Depends(get_db),
+    p: Principal = Depends(get_principal),
+):
+    """Return the append-only lifecycle audit events for one scoped execution."""
+    role = require_membership(org_id, p, db)
+    require_role(role, {Role.owner, Role.admin, Role.operator, Role.reviewer})
+    workspace_in_org(db, org_id, workspace_id)
+
+    if not 1 <= limit <= 1000:
+        raise HTTPException(422, "limit must be between 1 and 1000")
+
+    execution = db.query(Execution).filter_by(
+        id=execution_id,
+        org_id=org_id,
+        workspace_id=workspace_id,
+    ).first()
+    if execution is None:
+        raise HTTPException(404, "Execution not found")
+
+    attempt_ids = [
+        row.id for row in db.query(ExecutionAttempt.id).filter_by(
+            execution_id=execution.id
+        ).all()
+    ]
+    event_scope = (
+        (AuditEvent.resource_type == "execution")
+        & (AuditEvent.resource_id == execution.id)
+    )
+    if attempt_ids:
+        event_scope = or_(
+            event_scope,
+            (AuditEvent.resource_type == "execution_attempt")
+            & AuditEvent.resource_id.in_(attempt_ids),
+        )
+
+    return (
+        db.query(AuditEvent)
+        .filter(
+            AuditEvent.org_id == org_id,
+            AuditEvent.workspace_id == workspace_id,
+            event_scope,
+        )
+        .order_by(AuditEvent.created_at.asc(), AuditEvent.id.asc())
+        .limit(limit)
+        .all()
+    )
 
 # ---------------------------------------------------------------------------
 # Approvals

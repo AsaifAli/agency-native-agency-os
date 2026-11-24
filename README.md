@@ -66,6 +66,7 @@ Copy `.env.example` to `.env` and supply local-only values. Never commit `.env`.
 ## Operating model and integrations
 - [Agency organization and workforce blueprint](docs/AGENCY_ORGANIZATION_WORKFORCE_BLUEPRINT.md) — all 16 departments, positions, reporting, responsibilities, KPIs, autonomy and OS mapping.
 - [Reference integration decisions](docs/REFERENCE_INTEGRATION_DECISIONS.md) — ECC, Strix, Claude Skills Hub and CodeRabbit fit and guardrails.
+- [Feature discovery and adoption decisions](docs/FEATURE_DISCOVERY_AND_ADOPTION.md) — additional orchestration, observability, MCP governance and engineering assurance references.
 - [Claude Managed Agents adapter](docs/CLAUDE_MANAGED_AGENTS_ADAPTER.md) — current adapter contract, configuration and caveats.
 - [Implementation status](IMPLEMENTATION_STATUS.md) — implemented, incomplete and unverified capabilities.
 
@@ -76,7 +77,7 @@ The current telephony module records inbound/outbound call intent, status, CRM a
 The OS includes workspace-scoped service playbooks, founder-approved scope changes, project time entries, project cost records, provisional financial summaries, a read-only founder exception inbox and agent execution reliability metrics. See `docs/DELIVERY_OPERATIONS_V5.md`.
 
 ## Verification
-The backend CI at commit `2da5d2e4a94de6b7f3ecf0abdd8684bafb86686b` completed successfully: 140 passed, 0 failed, 1 warning. It validated the Alembic graph, applied migrations to PostgreSQL 16, compiled Python source and ran backend plus PostgreSQL integration tests. This does not validate frontend production build, live providers, deployment, backup restore, penetration testing or compliance. See [the CI run](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45449657043).
+The previous backend CI checkpoint at commit `02fe38a0dccbc888aad46890789846bc52c30adf` completed successfully: 140 passed, 0 failed, 1 warning. New execution history and Founder Console changes are subject to the next CI run. It validated the Alembic graph, applied migrations to PostgreSQL 16, compiled Python source and ran backend plus PostgreSQL integration tests. This does not validate frontend production build, live providers, deployment, backup restore, penetration testing or compliance. See [the CI run](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45449657043).
 
 ## Scope freeze
 The agreed product scope, architecture decisions, domain lifecycles, security gates and definition of done are documented in:

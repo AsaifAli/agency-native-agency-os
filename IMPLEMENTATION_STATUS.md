@@ -1,15 +1,20 @@
 # Agency OS implementation status — stabilization checkpoint
 
-## Verified checkpoint
+## Previous verified checkpoint
 - Working branch: `feature/agency-os-v5-stabilization`.
-- Current verified commit: `2da5d2e4a94de6b7f3ecf0abdd8684bafb86686b`.
-- GitHub Actions run: [45449657043](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45449657043).
-- Backend CI: **140 passed, 0 failed, 1 warning** (Starlette/httpx TestClient deprecation).
-- CI validated the Alembic graph, applied migrations to PostgreSQL 16, compiled Python source and ran backend plus PostgreSQL integration tests.
-- The preceding inspected commit had four failures: a Managed Agents test mock omitted headers expected by its assertions, and a duplicate RuntimeExecutionError class shadowed the shared runtime exception. Both were corrected.
-- This is backend CI evidence only. No frontend production build, live provider session, deployment, backup restore drill, independent penetration test or compliance assessment is claimed.
+- Previous verified commit: `02fe38a0dccbc888aad46890789846bc52c30adf`.
+- Previous GitHub Actions run: [45450018674](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45450018674).
+- Previous backend CI: **140 passed, 0 failed, 1 warning** (Starlette/httpx TestClient deprecation).
+- That CI validated the Alembic graph, applied migrations to PostgreSQL 16, compiled Python source and ran backend plus PostgreSQL integration tests.
+- The execution-history API, trace view, monitoring view and department selector changes described below are new and remain unverified until the current branch CI completes.
+- No frontend production build, live provider session, deployment, backup restore drill, independent penetration test or compliance assessment is claimed.
 
 ## Implemented source capabilities
+- Workspace-scoped, authenticated execution history API with bounded status filtering and result limits.
+- Execution trace API that joins execution and attempt lifecycle audit events after verifying the execution belongs to the requested organization/workspace.
+- Founder Console Processes page for execution history and event timelines; Monitoring page for persisted execution status/retry summaries.
+- Founder dashboard now reads pending approval counts and execution activity from existing APIs.
+- Agent Studio department selector now exposes all 16 departments in the workforce blueprint.
 - FastAPI modular backend and Next.js Founder Console foundation.
 - Organization/workspace-scoped clients, contacts, leads, opportunities, projects and milestones.
 - Agent, task, approval, audit and evaluation foundations.
@@ -28,7 +33,7 @@
 ## Known gaps / not validated
 - No production outbox handlers are registered; external side effects remain disabled.
 - Outbox handler heartbeat and actual worker crash/restart recovery need further validation.
-- Supervisor-driven task decomposition, specialist delegation, review and escalation are not implemented.
+- Supervisor-driven task decomposition, specialist delegation, review and escalation are not implemented; the new trace/history UI is visibility, not orchestration.
 - Managed Agents live provisioning, provider API compatibility against the actual account, actual Agent/Environment tool configuration, webhook/reconciliation for ambiguous session creation and production runtime eligibility are not verified.
 - The pre-created Managed Agent owns its tools/MCP/skills; the current adapter does not prove those are empty. Verify the provider-side Agent configuration before enabling. Keep disabled if not verified.
 - Claude Agent SDK adapter is not implemented.
@@ -42,6 +47,10 @@
 - Complete QA acceptance/rework metrics and production release gates are incomplete.
 - Frontend production build, monitoring/alerting, SBOM, restore drill and security review are not validated.
 - Website-to-OS lead intake remains deferred.
+
+## Additional feature discovery
+- `docs/FEATURE_DISCOVERY_AND_ADOPTION.md` records reviewed patterns from LangGraph, Temporal, Langfuse, Arize Phoenix, ToolHive, Semgrep, OpenHands, Prefect and Sentry. These are research references, not installed integrations.
+- The selected immediate work was execution visibility using existing OS-owned records; no new workflow runtime or external provider was added.
 
 ## Reference integration decisions
 - ECC: selected research-first engineering, skill governance and independent review patterns; no wholesale harness import.
