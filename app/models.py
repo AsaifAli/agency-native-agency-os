@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 from sqlalchemy import (
     String, DateTime, Boolean, ForeignKey, Text, Enum, JSON,
-    UniqueConstraint, Index, CheckConstraint,
+    UniqueConstraint, Index, CheckConstraint, func, true,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db import Base
@@ -84,9 +84,9 @@ class FounderAuthority(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True, nullable=False)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
-    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    grant_source: Mapped[str] = mapped_column(String(40), default="bootstrap", nullable=False)
-    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true(), nullable=False)
+    grant_source: Mapped[str] = mapped_column(String(40), default="bootstrap", server_default="cli_provisioning", nullable=False)
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, server_default=func.now(), nullable=False)
 
 class Workspace(Base):
     __tablename__ = "workspaces"
