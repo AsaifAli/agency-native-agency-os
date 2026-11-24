@@ -171,6 +171,17 @@ def test_agent_research_and_outreach_drafts_are_source_backed_and_never_send(cli
     )
     assert other_workspace_drafts.status_code == 200
     assert other_workspace_drafts.json() == []
+    future_research = client.post(f"/v1/orgs/{org}/lead-research", headers=auth(), json={
+        "workspace_id": ws, "lead_id": lead_id,
+        "summary": "Future-dated research evidence must be rejected by the API.",
+        "fit_score": 50, "confidence_score": 50,
+        "researched_at": "2027-01-01T00:00:00Z",
+        "source_references": [{
+            "label": "Company careers page", "url": "https://example.test/careers",
+            "accessed_at": "2026-11-25T10:00:00Z",
+        }],
+    })
+    assert future_research.status_code == 422
 
     invalid_source = client.post(f"/v1/orgs/{org}/lead-research", headers=auth(), json={
         "workspace_id": ws, "lead_id": lead_id,
