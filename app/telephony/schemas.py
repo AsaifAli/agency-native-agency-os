@@ -9,7 +9,9 @@ class CallCreate(BaseModel):
     lead_id: str | None = None
     contact_id: str | None = None
     purpose: str = Field(default="", max_length=240)
-    recording_consent: str = Field(default="not_requested", pattern="^(not_requested|pending|granted|declined)$")
+    recording_consent: str = Field(default="not_requested", pattern="^not_requested$")
+    call_authorization: str = Field(default="", pattern="^(|founder_initiated|requested_callback)$")
+    call_authorization_reference: str = Field(default="", max_length=240)
 
 
 class CallStatusUpdate(BaseModel):
@@ -19,6 +21,11 @@ class CallStatusUpdate(BaseModel):
     duration_seconds: int | None = Field(default=None, ge=0, le=86400)
     provider: str | None = Field(default=None, max_length=80)
     provider_call_id: str | None = Field(default=None, max_length=200)
+
+
+class CallReject(BaseModel):
+    approval_id: str = Field(min_length=1, max_length=36)
+    note: str = Field(min_length=3, max_length=2000)
 
 
 class TranscriptCreate(BaseModel):
@@ -42,6 +49,10 @@ class CallOut(BaseModel):
     outcome: str
     summary: str
     recording_consent: str
+    call_authorization: str
+    call_authorization_reference: str
+    consent_id: str | None
+    approval_id: str | None
     duration_seconds: int | None
     started_at: datetime | None
     ended_at: datetime | None
