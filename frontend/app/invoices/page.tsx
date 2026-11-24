@@ -27,6 +27,8 @@ export default function InvoicesPage() {
   const [workspace, setWorkspace] = useState("");
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [receipts, setReceipts] = useState<Record<string,Receipt[]>>({});
+  const [expandedReceipts, setExpandedReceipts] = useState<Record<string,boolean>>({});
   const [contractId, setContractId] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [title, setTitle] = useState("");
@@ -141,6 +143,23 @@ export default function InvoicesPage() {
     }
   }
 
+  async function toggleReceipts(item: Invoice) {
+    if (expandedReceipts[item.id]) {
+      setExpandedReceipts(v => ({...v,[item.id]:false}));
+      return;
+    }
+    setBusyId(item.id); setError("");
+    try {
+      const rows = await api<Receipt[]>(`/v1/orgs/${orgId()}/operations/invoices/${item.id}/payments`);
+      setReceipts(v => ({...v,[item.id]:rows}));
+      setExpandedReceipts(v => ({...v,[item.id]:true}));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusyId("");
+    }
+  }
+
   async function recordPayment(item: Invoice) {
     const reference = (paymentRefs[item.id] || "").trim();
     const numericAmount = Number(paymentAmounts[item.id]);
@@ -227,6 +246,12 @@ export default function InvoicesPage() {
                     <button className="button primary" type="button" onClick={() => void recordPayment(item)} disabled={busyId===item.id}>{busyId===item.id ? "Reconciling…" : "Record receipt"}</button>
                   </div>}
                   {item.status === "paid" && <div className="activity-meta">Invoice fully reconciled.</div>}
+                  {(item.status === "issued" || item.status === "partially_paid" || item.status === "paid") && <div style={{marginTop:8}}>
+                    <button className="button secondary" type="button" onClick={() => void toggleReceipts(item)} disabled={busyId===item.id}>{busyId===item.id ? "Loading…" : expandedReceipts[item.id] ? "Hide receipt history" : "View receipt history"}</button>
+                    {expandedReceipts[item.id] && <div className="activity-meta" style={{marginTop:8}}>
+                      {(receipts[item.id] || []).length ? (receipts[item.id] || []).map(receipt => <div key={receipt.id}>{money(receipt.amount_minor,receipt.currency)} · {receipt.payment_method} · {receipt.external_reference} · {new Date(receipt.paid_at).toLocaleString()}</div>) : "No payment receipts recorded."}
+                    </div>}
+                  </div>}
                   {item.approval_id && <div className="activity-meta">Approval ID: {item.approval_id}</div>}
                 </div>
               </div>
