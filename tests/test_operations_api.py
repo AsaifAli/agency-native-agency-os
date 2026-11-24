@@ -882,6 +882,41 @@ def test_invoice_issuance_and_partial_payment_reconciliation(client):
         db.close()
 
 
+
+def test_rejected_invoice_can_be_resubmitted_with_new_approval(client):
+    contract_id = _create_executed_contract(client, "AG-2026-INVOICE-RETRY")
+    created = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/invoices",
+        headers=headers(), json={
+            "workspace_id": client.ws_id, "contract_id": contract_id,
+            "invoice_number": "INV-2026-RETRY", "title": "Retry invoice",
+            "line_items": [{"description": "Milestone", "amount_minor": 100000}],
+            "due_date": "2027-01-15T12:00:00+00:00",
+        },
+    )
+    assert created.status_code == 201, created.text
+    invoice_id = created.json()["id"]
+    first = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/invoices/" + invoice_id + "/submit-for-approval",
+        headers=headers(),
+    )
+    assert first.status_code == 200
+    first_approval = first.json()["approval_id"]
+    rejected = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/invoices/" + invoice_id + "/reject",
+        headers=headers(), json={"approval_id": first_approval, "note": "Revise the milestone description"},
+    )
+    assert rejected.status_code == 200, rejected.text
+    assert rejected.json()["status"] == "rejected"
+    second = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/invoices/" + invoice_id + "/submit-for-approval",
+        headers=headers(),
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["status"] == "pending_approval"
+    assert second.json()["approval_id"] != first_approval
+
+
 def test_invoice_rejects_cross_workspace_contract_and_duplicate_invoice_number(client):
     missing = client.post(
         "/v1/orgs/" + client.org_id + "/operations/invoices",
