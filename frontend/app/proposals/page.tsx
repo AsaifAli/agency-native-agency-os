@@ -20,6 +20,13 @@ type Proposal = {
   amount_minor: number;
   currency: string;
   validity_days: number;
+  engagement_type: "one_time" | "retainer";
+  billing_frequency: "one_time" | "monthly" | "quarterly" | "annual";
+  term_months: number | null;
+  included_hours_per_period: number | null;
+  rollover_hours: boolean;
+  support_response_hours: number | null;
+  auto_renew: boolean;
   status: string;
   approval_id: string | null;
   approved_by: string | null;
@@ -46,6 +53,13 @@ export default function ProposalsPage() {
   const [exclusions, setExclusions] = useState("");
   const [amount, setAmount] = useState("");
   const [validity, setValidity] = useState("30");
+  const [engagementType, setEngagementType] = useState("one_time");
+  const [billingFrequency, setBillingFrequency] = useState("monthly");
+  const [termMonths, setTermMonths] = useState("6");
+  const [includedHours, setIncludedHours] = useState("40");
+  const [rolloverHours, setRolloverHours] = useState(false);
+  const [supportResponseHours, setSupportResponseHours] = useState("8");
+  const [autoRenew, setAutoRenew] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -110,6 +124,13 @@ export default function ProposalsPage() {
           amount_minor: Math.round(numericAmount * 100),
           currency: selectedOpportunity.currency,
           validity_days: Number(validity),
+          engagement_type: engagementType,
+          billing_frequency: engagementType === "retainer" ? billingFrequency : "one_time",
+          term_months: engagementType === "retainer" ? Number(termMonths) : null,
+          included_hours_per_period: engagementType === "retainer" ? Number(includedHours) : null,
+          rollover_hours: engagementType === "retainer" ? rolloverHours : false,
+          support_response_hours: engagementType === "retainer" ? Number(supportResponseHours) : null,
+          auto_renew: engagementType === "retainer" ? autoRenew : false,
         }),
       });
       setTitle(""); setServiceLine(""); setScope(""); setDeliverables(""); setAssumptions(""); setExclusions(""); setAmount("");
@@ -164,6 +185,19 @@ export default function ProposalsPage() {
           <input className="field" value={serviceLine} onChange={e => setServiceLine(e.target.value)} placeholder="Service line" maxLength={120} required />
           <input className="field" type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder={`Proposed fee (${opportunities.find(item => item.id === opportunityId)?.currency || "currency"})`} min={0} step="0.01" required />
           <input className="field" type="number" value={validity} onChange={e => setValidity(e.target.value)} placeholder="Validity days" min={1} max={180} required />
+          <select className="field" value={engagementType} onChange={e => setEngagementType(e.target.value)}>
+            <option value="one_time">One-time project</option><option value="retainer">Ongoing retainer</option>
+          </select>
+          {engagementType === "retainer" && <>
+            <select className="field" value={billingFrequency} onChange={e => setBillingFrequency(e.target.value)}>
+              <option value="monthly">Monthly billing</option><option value="quarterly">Quarterly billing</option><option value="annual">Annual billing</option>
+            </select>
+            <input className="field" type="number" value={termMonths} onChange={e => setTermMonths(e.target.value)} placeholder="Initial term (months)" min={1} max={60} required />
+            <input className="field" type="number" value={includedHours} onChange={e => setIncludedHours(e.target.value)} placeholder="Included hours per period" min={0} max={10000} required />
+            <input className="field" type="number" value={supportResponseHours} onChange={e => setSupportResponseHours(e.target.value)} placeholder="Response target (hours)" min={1} max={720} required />
+            <label className="field" style={{display:"flex",alignItems:"center",gap:8}}><input type="checkbox" checked={rolloverHours} onChange={e => setRolloverHours(e.target.checked)} /> Allow unused-hour rollover (subject to contract terms)</label>
+            <label className="field" style={{display:"flex",alignItems:"center",gap:8}}><input type="checkbox" checked={autoRenew} onChange={e => setAutoRenew(e.target.checked)} /> Propose auto-renewal (never activated automatically)</label>
+          </>}
           <textarea className="field" value={scope} onChange={e => setScope(e.target.value)} placeholder="Scope summary" maxLength={12000} minLength={10} rows={3} style={{gridColumn:"1 / -1"}} required />
           <textarea className="field" value={deliverables} onChange={e => setDeliverables(e.target.value)} placeholder="Deliverables (one per line)" maxLength={6000} rows={3} />
           <textarea className="field" value={assumptions} onChange={e => setAssumptions(e.target.value)} placeholder="Assumptions (one per line)" maxLength={6000} rows={3} />
@@ -181,7 +215,7 @@ export default function ProposalsPage() {
                 <span className="activity-dot" />
                 <div style={{minWidth:0,width:"100%"}}>
                   <div className="activity-title">{item.title}</div>
-                  <div className="activity-meta">{item.service_line} · {money(item.amount_minor,item.currency)} · {item.validity_days}-day validity · {item.status.replace("_"," ")}</div>
+                  <div className="activity-meta">{item.service_line} · {money(item.amount_minor,item.currency)} · {item.engagement_type === "retainer" ? String(item.billing_frequency) + " retainer · " + String(item.term_months) + " months · " + String(item.included_hours_per_period) + " hours/period" : "one-time project"} · {item.status.replace("_"," ")}</div>
                   <p className="activity-meta" style={{whiteSpace:"pre-wrap"}}>{item.scope_summary}</p>
                   {item.deliverables.length>0 && <div className="activity-meta">Deliverables: {item.deliverables.join(" · ")}</div>}
                   {item.approval_id && <div className="activity-meta">Approval reference: {item.approval_id}</div>}
