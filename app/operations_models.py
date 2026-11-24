@@ -47,7 +47,7 @@ class ServiceOffering(Base):
     """Founder-managed service catalogue entry; not a customer contract or commitment."""
     __tablename__ = "service_offerings"
     __table_args__ = (
-        UniqueConstraint("org_id", "workspace_id", "code", name="uq_service_offering_workspace_code"),
+        UniqueConstraint("org_id", "workspace_id", "code", "version", name="uq_service_offering_workspace_code_version"),
         Index("ix_service_offerings_scope_status", "org_id", "workspace_id", "status"),
         CheckConstraint("status IN ('draft','active','retired')", name="ck_service_offering_status"),
         CheckConstraint("pricing_model IN ('fixed','hourly','retainer','custom')", name="ck_service_offering_pricing_model"),
