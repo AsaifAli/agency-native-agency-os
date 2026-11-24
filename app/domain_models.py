@@ -50,6 +50,8 @@ class Contact(Base):
     __tablename__ = "contacts"
     __table_args__ = (
         Index("ix_contacts_scope_client", "org_id", "workspace_id", "client_id"),
+        CheckConstraint("phone_call_consent_status IN ('unknown','pending','granted','withdrawn')", name="ck_contact_phone_call_consent_status"),
+        CheckConstraint("phone_call_consent_status != 'granted' OR (length(trim(phone_call_consent_source)) > 0 AND phone_call_consent_recorded_at IS NOT NULL)", name="ck_contact_phone_call_consent_evidence"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
