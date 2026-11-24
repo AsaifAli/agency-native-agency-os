@@ -212,6 +212,7 @@ class InvoiceRecord(Base):
     __table_args__ = (
         UniqueConstraint("org_id", "workspace_id", "invoice_number", name="uq_invoice_number_workspace"),
         UniqueConstraint("org_id", "workspace_id", "external_reference", name="uq_invoice_external_reference"),
+        UniqueConstraint("org_id", "workspace_id", "retainer_period_id", name="uq_invoice_retainer_period"),
         Index("ix_invoice_records_scope_status", "org_id", "workspace_id", "status"),
         CheckConstraint("status IN ('draft','pending_approval','issued','partially_paid','paid','rejected','cancelled')", name="ck_invoice_record_status"),
         CheckConstraint("amount_minor > 0 AND paid_minor >= 0 AND paid_minor <= amount_minor", name="ck_invoice_amount_paid_range"),
@@ -223,6 +224,7 @@ class InvoiceRecord(Base):
     client_id: Mapped[str] = mapped_column(ForeignKey("clients.id", ondelete="RESTRICT"), nullable=False, index=True)
     contract_id: Mapped[str] = mapped_column(ForeignKey("contract_records.id", ondelete="RESTRICT"), nullable=False, index=True)
     project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id", ondelete="RESTRICT"), nullable=True, index=True)
+    retainer_period_id: Mapped[str | None] = mapped_column(ForeignKey("retainer_service_periods.id", ondelete="RESTRICT"), nullable=True, index=True)
     invoice_number: Mapped[str] = mapped_column(String(80), nullable=False)
     title: Mapped[str] = mapped_column(String(240), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
