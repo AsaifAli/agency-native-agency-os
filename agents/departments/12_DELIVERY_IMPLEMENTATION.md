@@ -16,7 +16,12 @@ Turn approved requirements into tested, documented and maintainable client deliv
 No release to production or access client environments without authorization and security review.
 
 ## Skills
-Select reviewed skill IDs from [SKILLS.md](../../SKILLS.md). A skill recommendation does not enable a workforce member or grant a tool.
+- [client-discovery-requirements](../../skills/client-discovery-requirements/SKILL.md)
+- [project-delivery-coordination](../../skills/project-delivery-coordination/SKILL.md)
+- [test-driven-development](../../skills/test-driven-development/SKILL.md)
+- [independent-code-review](../../skills/independent-code-review/SKILL.md)
+
+Recommendations only; a skill does not enable a workforce member or grant a tool.
 
 ## Reporting
 Reports through the department supervisor to the Chief of Staff and founder. The actual manager relationship and autonomy level are stored in the OS workforce records.
