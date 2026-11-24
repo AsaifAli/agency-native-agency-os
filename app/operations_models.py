@@ -43,6 +43,38 @@ class ServicePlaybook(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
 
 
+class Proposal(Base):
+    """Internal proposal draft; approval is required before it can be treated as approved pricing."""
+    __tablename__ = "proposals"
+    __table_args__ = (
+        Index("ix_proposals_scope_status", "org_id", "workspace_id", "status"),
+        CheckConstraint("status IN ('draft','pending_approval','approved','rejected','withdrawn')", name="ck_proposal_status"),
+        CheckConstraint("amount_minor >= 0", name="ck_proposal_amount_nonnegative"),
+        CheckConstraint("validity_days >= 1 AND validity_days <= 180", name="ck_proposal_validity_days"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    opportunity_id: Mapped[str] = mapped_column(ForeignKey("opportunities.id", ondelete="RESTRICT"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    service_line: Mapped[str] = mapped_column(String(120), nullable=False)
+    scope_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    deliverables: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    assumptions: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    exclusions: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    amount_minor: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    validity_days: Mapped[int] = mapped_column(Integer, default=30, server_default="30", nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="draft", server_default="draft", nullable=False)
+    approval_id: Mapped[str | None] = mapped_column(ForeignKey("approvals.id"), nullable=True)
+    approved_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
+
+
 class ScopeChangeRequest(Base):
     __tablename__ = "scope_change_requests"
     __table_args__ = (
