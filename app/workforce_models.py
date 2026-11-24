@@ -114,6 +114,34 @@ class Delegation(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
 
 
+class OrchestrationPlan(Base):
+    """Persisted supervisor plan; OS owns the plan and task graph."""
+    __tablename__ = "orchestration_plans"
+    __table_args__ = (
+        CheckConstraint("status IN ('planned','in_progress','awaiting_review','succeeded','failed','cancelled')", name="ck_orchestration_plan_status"),
+        Index("ix_orchestration_plan_scope_status", "org_id", "workspace_id", "status"),
+        Index("ix_orchestration_plan_root_task", "root_task_id"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    root_task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
+    created_by_member_id: Mapped[str] = mapped_column(ForeignKey("workforce_members.id", ondelete="RESTRICT"), nullable=False)
+    objective: Mapped[str] = mapped_column(Text, nullable=False)
+    plan_title: Mapped[str] = mapped_column(String(200), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="planned", server_default="planned", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
+
+
+class OrchestrationPlanDelegation(Base):
+    __tablename__ = "orchestration_plan_delegations"
+    __table_args__ = (UniqueConstraint("plan_id", "ordinal", name="uq_plan_delegation_ordinal"),)
+    plan_id: Mapped[str] = mapped_column(ForeignKey("orchestration_plans.id", ondelete="CASCADE"), primary_key=True)
+    delegation_id: Mapped[str] = mapped_column(ForeignKey("delegations.id", ondelete="CASCADE"), primary_key=True)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
 class WorkforcePosition(Base):
     """Durable role/position catalogue, independent from a person or agent session."""
     __tablename__ = "workforce_positions"

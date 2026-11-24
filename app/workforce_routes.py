@@ -224,10 +224,30 @@ def _task_is_terminal(task: Task | None) -> bool:
     return bool(task and task.status in {"succeeded", "completed", "done"})
 
 
+def _task_ancestors(db: Session, org_id: str, workspace_id: str, task_id: str) -> set[str]:
+    ancestors: set[str] = set()
+    current_id = task_id
+    while True:
+        parent_link = db.query(Delegation).filter_by(
+            child_task_id=current_id, org_id=org_id, workspace_id=workspace_id
+        ).first()
+        if parent_link is None or parent_link.parent_task_id in ancestors:
+            break
+        ancestors.add(parent_link.parent_task_id)
+        current_id = parent_link.parent_task_id
+    return ancestors
+
+
 def _delegation_readiness(db: Session, row: Delegation) -> str:
+    if row.status in {"failed", "cancelled"}:
+        return row.status
+    if row.last_error_code:
+        return "blocked"
     child = db.query(Task).filter_by(
         id=row.child_task_id, org_id=row.org_id, workspace_id=row.workspace_id
     ).first()
+    if row.last_error_code:
+        return "blocked"
     if child is None or child.status in {"failed", "cancelled", "review_changes_requested"}:
         return "failed"
     if _task_is_terminal(child):
@@ -243,7 +263,7 @@ def _delegation_readiness(db: Session, row: Delegation) -> str:
     return "ready"
 
 
-def _refresh_plan(db: Session, plan: OrchestrationPlan) -> dict:
+def _refresh_plan(db: Session, plan: OrchestrationPlan, *, persist: bool = False) -> dict:
     links = db.query(OrchestrationPlanDelegation).filter_by(
         plan_id=plan.id
     ).order_by(OrchestrationPlanDelegation.ordinal.asc()).all()
@@ -259,31 +279,35 @@ def _refresh_plan(db: Session, plan: OrchestrationPlan) -> dict:
         "succeeded", "running", "queued", "cancelled",
     )}
     for row in rows:
+        effective_status = row.status
         if row.status not in {"running", "queued", "cancelled"}:
-            row.status = _delegation_readiness(db, row)
-        counts[row.status] = counts.get(row.status, 0) + 1
+            effective_status = _delegation_readiness(db, row)
+        counts[effective_status] = counts.get(effective_status, 0) + 1
+        if persist and row.status != effective_status:
+            row.status = effective_status
     if counts["failed"]:
-        plan.status = "failed"
+        plan_status = "failed"
     elif counts["awaiting_review"]:
-        plan.status = "awaiting_review"
+        plan_status = "awaiting_review"
     elif counts["ready"] or counts["blocked"] or counts["queued"] or counts["running"]:
-        plan.status = "in_progress"
+        plan_status = "in_progress"
     elif counts["cancelled"] == len(rows) and rows:
-        plan.status = "cancelled"
+        plan_status = "cancelled"
     elif counts["succeeded"] == len(rows) and rows:
-        plan.status = "succeeded"
+        plan_status = "succeeded"
     else:
-        plan.status = "planned"
-    plan.updated_at = datetime.now(timezone.utc)
+        plan_status = "planned"
+    if persist:
+        plan.status = plan_status
+        plan.updated_at = datetime.now(timezone.utc)
     return {
-        "id": plan.id, "objective": plan.objective, "status": plan.status,
+        "id": plan.id, "objective": plan.objective, "status": plan_status,
         "task_count": len(rows), "ready_count": counts["ready"],
         "blocked_count": counts["blocked"],
         "awaiting_review_count": counts["awaiting_review"],
         "failed_count": counts["failed"], "succeeded_count": counts["succeeded"],
         "created_at": plan.created_at, "updated_at": plan.updated_at,
     }
-
 
 def _create_delegation(db: Session, org_id: str, body: DelegationCreate,
                        actor_user_id: str, forced_parent_id: str | None = None) -> Delegation:
@@ -304,6 +328,14 @@ def _create_delegation(db: Session, org_id: str, body: DelegationCreate,
         raise HTTPException(409, "Only active workforce members can delegate work")
     if delegator.autonomy_level < 2:
         raise HTTPException(403, "Delegator autonomy level does not permit task assignment")
+    if delegator.agent_id is not None:
+        manager_agent = db.query(Agent).filter_by(
+            id=delegator.agent_id, org_id=org_id,
+            workspace_id=body.workspace_id,
+        ).first()
+        if manager_agent is None or not manager_agent.enabled:
+            raise HTTPException(409, "Delegating supervisor Agent definition is not enabled")
+    agent = None
     if assignee.agent_id is not None:
         agent = db.query(Agent).filter_by(
             id=assignee.agent_id, org_id=org_id,
@@ -315,8 +347,19 @@ def _create_delegation(db: Session, org_id: str, body: DelegationCreate,
         org_id=org_id, workspace_id=body.workspace_id,
         member_id=assignee.id, enabled=True,
     ).all()
-    if not any(grant.allowed_actions and not (grant.tool_allowlist or []) for grant in grants):
-        raise HTTPException(403, "Assignee has no enabled workforce capability without ungoverned tools")
+    execution_actions = {"task.execute", "research.execute", "report.generate"}
+    eligible_grants = [
+        grant for grant in grants
+        if grant.allowed_actions
+        and bool(set(grant.allowed_actions) & execution_actions)
+        and not (grant.tool_allowlist or [])
+        and (
+            agent is None
+            or agent.data_class.value in (grant.allowed_data_classes or [])
+        )
+    ]
+    if not eligible_grants:
+        raise HTTPException(403, "Assignee has no enabled, data-eligible execution capability without ungoverned tools")
     dependency = None
     if body.dependency_task_id:
         dependency = db.query(Task).filter_by(
@@ -325,8 +368,8 @@ def _create_delegation(db: Session, org_id: str, body: DelegationCreate,
         ).first()
         if dependency is None:
             raise HTTPException(404, "Dependency task not found")
-        if dependency.id == parent_id:
-            raise HTTPException(409, "A task cannot depend on its parent")
+        if dependency.id == parent_id or dependency.id in _task_ancestors(db, org_id, body.workspace_id, parent_id):
+            raise HTTPException(409, "A task cannot depend on itself or an ancestor")
     blocked = bool(dependency and not _task_is_terminal(dependency))
     child = Task(
         org_id=org_id, workspace_id=body.workspace_id,
@@ -364,6 +407,8 @@ def create_delegation(org_id: str, body: DelegationCreate, db: Session = Depends
                       p: Principal = Depends(get_principal)):
     role = require_membership(org_id, p, db)
     require_role(role, WRITERS)
+    if body.depends_on_ordinal is not None:
+        raise HTTPException(422, "depends_on_ordinal is only valid inside an orchestration plan")
     row = _create_delegation(db, org_id, body, p.user.id)
     db.commit()
     db.refresh(row)
@@ -393,6 +438,13 @@ def create_orchestration_plan(org_id: str, body: OrchestrationPlanCreate,
         if agent is None or not agent.enabled:
             raise HTTPException(409, "Supervisor agent definition is not enabled")
 
+    for ordinal, spec in enumerate(body.tasks, start=1):
+        if spec.depends_on_ordinal is not None:
+            if spec.dependency_task_id is not None:
+                raise HTTPException(422, "Use either dependency_task_id or depends_on_ordinal, not both")
+            if spec.depends_on_ordinal >= ordinal:
+                raise HTTPException(422, "Plan dependencies must reference an earlier task ordinal")
+
     root = Task(
         org_id=org_id, workspace_id=body.workspace_id,
         title=body.plan_title, description=body.objective,
@@ -409,19 +461,30 @@ def create_orchestration_plan(org_id: str, body: OrchestrationPlanCreate,
     db.add(plan)
     db.flush()
     try:
+        ordinal_to_task_id: dict[int, str] = {}
         for ordinal, task_body in enumerate(body.tasks, start=1):
             if task_body.workspace_id != body.workspace_id:
                 raise HTTPException(422, "All plan tasks must use the plan workspace")
-            bound = task_body.model_copy(update={
-                "parent_task_id": root.id, "sequence_no": ordinal,
+            dependency_id = task_body.dependency_task_id
+            if task_body.depends_on_ordinal is not None:
+                dependency_id = ordinal_to_task_id.get(task_body.depends_on_ordinal)
+                if dependency_id is None:
+                    raise HTTPException(422, "Plan dependency ordinal was not created")
+            payload = task_body.model_dump(exclude={"depends_on_ordinal"})
+            payload.update({
+                "parent_task_id": root.id,
+                "sequence_no": ordinal,
+                "dependency_task_id": dependency_id,
             })
+            bound = DelegationCreate.model_validate(payload)
             row = _create_delegation(
                 db, org_id, bound, p.user.id, forced_parent_id=root.id
             )
+            ordinal_to_task_id[ordinal] = row.child_task_id
             db.add(OrchestrationPlanDelegation(
                 plan_id=plan.id, delegation_id=row.id, ordinal=ordinal,
             ))
-        summary = _refresh_plan(db, plan)
+        summary = _refresh_plan(db, plan, persist=True)
         record_event(db, org_id, p.user.id,
                      "workforce.orchestration_plan_created",
                      "orchestration_plan", plan.id, body.workspace_id, {
@@ -445,8 +508,7 @@ def list_orchestration_plans(org_id: str, workspace_id: str = Query(min_length=1
     plans = db.query(OrchestrationPlan).filter_by(
         org_id=org_id, workspace_id=workspace_id
     ).order_by(OrchestrationPlan.created_at.desc()).limit(100).all()
-    result = [_refresh_plan(db, plan) for plan in plans]
-    db.commit()
+    result = [_refresh_plan(db, plan, persist=False) for plan in plans]
     return result
 
 
@@ -462,7 +524,7 @@ def get_orchestration_plan(org_id: str, plan_id: str,
     ).first()
     if plan is None:
         raise HTTPException(404, "Orchestration plan not found")
-    summary = _refresh_plan(db, plan)
+    summary = _refresh_plan(db, plan, persist=False)
     links = db.query(OrchestrationPlanDelegation).filter_by(
         plan_id=plan.id
     ).order_by(OrchestrationPlanDelegation.ordinal.asc()).all()
@@ -476,14 +538,19 @@ def get_orchestration_plan(org_id: str, plan_id: str,
             id=row.child_task_id, org_id=org_id,
             workspace_id=workspace_id,
         ).first()
+        effective_status = (
+            row.status if row.status in {"running", "queued", "cancelled"}
+            else _delegation_readiness(db, row)
+        )
         items.append({
             "ordinal": link.ordinal, "delegation_id": row.id,
             "child_task_id": row.child_task_id,
             "title": child.title if child else None,
             "assignee_member_id": row.assigned_to_member_id,
             "dependency_task_id": row.dependency_task_id,
-            "status": row.status, "review_status": row.review_status,
+            "status": effective_status, "review_status": row.review_status,
             "review_required": row.review_required,
+            "last_error_code": row.last_error_code,
         })
     db.commit()
     return {**summary, "root_task_id": plan.root_task_id, "tasks": items}
@@ -502,7 +569,14 @@ def refresh_orchestration_plan(org_id: str, plan_id: str,
     ).with_for_update().first()
     if plan is None:
         raise HTTPException(404, "Orchestration plan not found")
-    summary = _refresh_plan(db, plan)
+    summary = _refresh_plan(db, plan, persist=True)
+    if summary["status"] == "succeeded":
+        root = db.query(Task).filter_by(
+            id=plan.root_task_id, org_id=org_id,
+            workspace_id=workspace_id,
+        ).with_for_update().first()
+        if root:
+            root.status = "succeeded"
     record_event(db, org_id, p.user.id,
                  "workforce.orchestration_plan_refreshed",
                  "orchestration_plan", plan.id, workspace_id,
@@ -517,6 +591,41 @@ def list_delegations(org_id: str, workspace_id: str = Query(min_length=1),
     require_membership(org_id, p, db)
     _workspace(db, org_id, workspace_id)
     return db.query(Delegation).filter_by(org_id=org_id, workspace_id=workspace_id).order_by(Delegation.created_at.desc()).limit(500).all()
+
+
+@router.post("/delegations/{delegation_id}/requeue")
+def requeue_delegation(org_id: str, delegation_id: str,
+                       workspace_id: str = Query(min_length=1),
+                       db: Session = Depends(get_db),
+                       p: Principal = Depends(get_principal)):
+    require_membership(org_id, p, db)
+    require_founder_authority(db, org_id, p.user.id)
+    _workspace(db, org_id, workspace_id)
+    row = db.query(Delegation).filter_by(
+        id=delegation_id, org_id=org_id, workspace_id=workspace_id
+    ).with_for_update().first()
+    if row is None:
+        raise HTTPException(404, "Delegation not found")
+    if row.status != "blocked" or not row.last_error_code:
+        raise HTTPException(409, "Only blocked delegations with a recorded queue error can be requeued")
+    assignee = _member(db, org_id, workspace_id, row.assigned_to_member_id)
+    if assignee.status != "active":
+        raise HTTPException(409, "Assignee must be active before requeue")
+    task = db.query(Task).filter_by(
+        id=row.child_task_id, org_id=org_id, workspace_id=workspace_id
+    ).with_for_update().first()
+    if task is None:
+        raise HTTPException(404, "Delegated task not found")
+    task.status = "queued"
+    row.status = "ready"
+    prior_error = row.last_error_code
+    row.last_error_code = None
+    row.updated_at = datetime.now(timezone.utc)
+    record_event(db, org_id, p.user.id, "workforce.delegation_requeued",
+                 "delegation", row.id, workspace_id,
+                 {"previous_error_code": prior_error})
+    db.commit()
+    return {"id": row.id, "status": row.status}
 
 
 @router.post("/delegations/{delegation_id}/review")
@@ -542,8 +651,8 @@ def review_delegation(org_id: str, delegation_id: str, decision: str,
     ).with_for_update().first()
     if child is None:
         raise HTTPException(404, "Delegated child task not found")
-    if decision == "approved" and not _task_is_terminal(child):
-        raise HTTPException(409, "A child task must be completed before it can be approved")
+    if decision in {"approved", "waived"} and not _task_is_terminal(child):
+        raise HTTPException(409, "A child task must be completed before it can pass review")
     if decision in {"approved", "waived"}:
         row.review_status = decision
         row.status = "succeeded"
@@ -561,7 +670,7 @@ def review_delegation(org_id: str, delegation_id: str, decision: str,
             workspace_id=workspace_id,
         ).with_for_update().first()
         if plan:
-            summary = _refresh_plan(db, plan)
+            summary = _refresh_plan(db, plan, persist=True)
             if summary["succeeded_count"] == summary["task_count"] and summary["task_count"]:
                 root = db.query(Task).filter_by(
                     id=plan.root_task_id, org_id=org_id,

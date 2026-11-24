@@ -21,8 +21,8 @@ The AI workforce supports both engines. Departments, teams, positions, agents, s
 
 - `frontend/` — Next.js Founder Console.
 - `app/` — FastAPI modular monolith and canonical domain services.
-- `app/workforce_*.py` — governed workforce catalogue, member lifecycle, capabilities and delegation.
-- `app/execution_service.py`, `app/worker/`, `app/worker_service.py` — OS-owned execution state, worker claims, attempts, leases, heartbeats and recovery.
+- `app/workforce_*.py` — governed workforce catalogue, member lifecycle, capabilities, orchestration plans and delegation DAGs.
+- `app/execution_service.py`, `app/worker/`, `app/worker_service.py` — OS-owned execution state, worker claims, attempts, leases, heartbeats, recovery and dependency-ready delegation queueing.
 - `app/evaluation/` and `app/evaluation_service.py` — OS-owned deterministic evaluation packs, metrics and quality gates.
 - `app/integrations/` — provider/runtime adapters; the OS retains identity, authorization and business state.
 - `migrations/` — additive Alembic migrations.

@@ -10,7 +10,9 @@ from app.models import (
     ExecutionAttempt,
     ExecutionAttemptStatus,
     ExecutionStatus,
+    Task,
 )
+from app.workforce_models import Delegation, WorkforceMember
 
 
 MAX_ERROR_MESSAGE_LENGTH = 1000
@@ -35,6 +37,38 @@ def _sanitize_error_message(value: str) -> str:
     )
     sanitized = re.sub(r"[\x00-\x1f\x7f]", " ", sanitized)
     return sanitized[:MAX_ERROR_MESSAGE_LENGTH]
+
+
+
+def _sync_task_delegation(db: Session, execution: Execution, state: str,
+                          error_code: str | None = None) -> None:
+    """Synchronize a delegated task's business status with its execution."""
+    task = db.query(Task).filter_by(
+        id=execution.task_id, org_id=execution.org_id,
+        workspace_id=execution.workspace_id,
+    ).first()
+    if task is None:
+        return
+    task.status = state
+    row = db.query(Delegation).filter_by(
+        org_id=execution.org_id, workspace_id=execution.workspace_id,
+        child_task_id=task.id,
+    ).with_for_update().first()
+    if row is None:
+        return
+    row.status = "awaiting_review" if state == "succeeded" and row.review_required else state
+    if state == "succeeded" and not row.review_required and row.review_status == "pending":
+        row.review_status = "waived"
+    if error_code:
+        row.last_error_code = error_code
+    elif state in {"running", "succeeded"}:
+        row.last_error_code = None
+    row.updated_at = datetime.now(timezone.utc)
+    record_event(
+        db, execution.org_id, None, "workforce.delegated_task_state_changed",
+        "delegation", row.id, execution.workspace_id,
+        {"task_id": task.id, "status": row.status, "error_code": error_code},
+    )
 
 
 class WorkerServiceError(Exception):
@@ -224,6 +258,7 @@ def start_execution(
     now = datetime.now(timezone.utc)
 
     execution.status = ExecutionStatus.running
+    _sync_task_delegation(db, execution, "running")
 
     if execution.started_at is None:
         execution.started_at = now
@@ -381,6 +416,7 @@ def complete_execution(
     attempt.heartbeat_at = now
     attempt.error_code = None
     attempt.error_message = None
+    _sync_task_delegation(db, execution, "succeeded")
 
     record_event(
         db,
@@ -476,6 +512,7 @@ def fail_execution(
     )
 
     if retry_scheduled:
+        _sync_task_delegation(db, execution, "queued", error_code)
         delay_seconds = min(
             base_delay_seconds * (2 ** (attempt.attempt_number - 1)),
             max_delay_seconds,
@@ -506,6 +543,7 @@ def fail_execution(
         execution.status = ExecutionStatus.failed
         execution.next_retry_at = None
         execution.finished_at = now
+        _sync_task_delegation(db, execution, "failed", error_code)
 
         record_event(
             db,
@@ -544,6 +582,99 @@ def fail_execution(
     )
 
     return execution, attempt
+
+
+def queue_ready_delegations(db: Session, *, limit: int = 100) -> int:
+    """Create idempotent OS executions for eligible, dependency-ready agent tasks.
+
+    This function only persists execution requests. It never calls a provider;
+    the existing worker claims and executes the resulting durable records.
+    """
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 1000:
+        raise ValueError("limit must be an integer between 1 and 1000")
+
+    from app.execution_service import create_execution, ExecutionServiceError
+
+    candidates = (
+        db.query(Delegation)
+        .filter(Delegation.status.in_(("ready", "blocked")))
+        .filter(Delegation.last_error_code.is_(None))
+        .order_by(Delegation.created_at.asc(), Delegation.id.asc())
+        .with_for_update(skip_locked=True)
+        .limit(limit)
+        .all()
+    )
+    queued = 0
+    for row in candidates:
+        task = db.query(Task).filter_by(
+            id=row.child_task_id, org_id=row.org_id,
+            workspace_id=row.workspace_id,
+        ).with_for_update().first()
+        assignee = db.query(WorkforceMember).filter_by(
+            id=row.assigned_to_member_id, org_id=row.org_id,
+            workspace_id=row.workspace_id,
+        ).first()
+        if task is None or assignee is None:
+            row.status = "failed"
+            row.last_error_code = "DELEGATION_RESOURCE_MISSING"
+            continue
+        if row.dependency_task_id:
+            dependency = db.query(Task).filter_by(
+                id=row.dependency_task_id, org_id=row.org_id,
+                workspace_id=row.workspace_id,
+            ).first()
+            if dependency is None or dependency.status in {"failed", "cancelled"}:
+                task.status = "failed"
+                row.status = "failed"
+                row.last_error_code = "DEPENDENCY_FAILED"
+                record_event(db, row.org_id, None,
+                             "workforce.delegated_task_dependency_failed",
+                             "delegation", row.id, row.workspace_id,
+                             {"dependency_task_id": row.dependency_task_id})
+                continue
+            if dependency.status not in {"succeeded", "completed", "done"}:
+                task.status = "blocked"
+                row.status = "blocked"
+                continue
+        if assignee.status != "active" or assignee.is_founder_reserved:
+            task.status = "blocked"
+            row.status = "blocked"
+            row.last_error_code = "ASSIGNEE_NOT_ACTIVE"
+            continue
+        # Human assignments remain visible in the plan for manual handling.
+        if not assignee.agent_id:
+            # Human-owned tasks enter the manual work queue, not the AI worker queue.
+            row.status = "queued"
+            task.status = "queued"
+            continue
+        try:
+            execution = create_execution(
+                db, org_id=row.org_id, workspace_id=row.workspace_id,
+                task_id=task.id, agent_id=assignee.agent_id,
+                requested_by=task.created_by,
+                idempotency_key=f"delegation:{row.id}",
+            )
+        except ExecutionServiceError as exc:
+            row.status = "blocked"
+            task.status = "blocked"
+            row.last_error_code = type(exc).__name__
+            record_event(db, row.org_id, None,
+                         "workforce.delegated_task_queue_blocked",
+                         "delegation", row.id, row.workspace_id,
+                         {"error_code": row.last_error_code})
+            continue
+        row.status = "queued"
+        task.status = "queued"
+        record_event(db, row.org_id, None,
+                     "workforce.delegated_task_execution_queued",
+                     "delegation", row.id, row.workspace_id,
+                     {"execution_id": execution.id, "task_id": task.id,
+                      "assignee_member_id": assignee.id})
+        queued += 1
+    if candidates:
+        db.flush()
+    return queued
+
 
 def promote_due_retries(
     db: Session,
@@ -747,6 +878,7 @@ def recover_expired_execution_leases(
         )
 
         if retry_scheduled:
+            _sync_task_delegation(db, execution, "queued", error_code)
             delay_seconds = min(
                 base_delay_seconds * (2 ** (attempt.attempt_number - 1)),
                 max_delay_seconds,
@@ -780,6 +912,7 @@ def recover_expired_execution_leases(
             execution.status = ExecutionStatus.failed
             execution.next_retry_at = None
             execution.finished_at = now
+            _sync_task_delegation(db, execution, "failed", error_code)
 
             record_event(
                 db,

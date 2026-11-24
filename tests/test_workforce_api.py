@@ -159,6 +159,8 @@ def test_workforce_delegation_requires_downward_manager_relation_and_enabled_cap
         chief.status = "active"
         head.status = "active"
         head.autonomy_level = 2
+        db.get(Agent, head.agent_id).enabled = True
+        db.get(Agent, head.agent_id).enabled = True
         specialist.status = "active"
         agent = db.get(Agent, specialist.agent_id)
         agent.enabled = True
@@ -203,7 +205,7 @@ def test_workforce_delegation_requires_downward_manager_relation_and_enabled_cap
 
 
 def test_workforce_delegation_rejects_assignee_without_enabled_capability(app_client):
-    from app.models import Task
+    from app.models import Task, Agent
     from app.workforce_models import WorkforceMember
     i = app_client.identity
     app_client.post(
@@ -222,6 +224,7 @@ def test_workforce_delegation_rejects_assignee_without_enabled_capability(app_cl
         ).one()
         head.status = "active"
         head.autonomy_level = 2
+        db.get(Agent, head.agent_id).enabled = True
         specialist.status = "active"
         from app.models import Agent
         agent = db.get(Agent, specialist.agent_id)
@@ -245,7 +248,7 @@ def test_workforce_delegation_rejects_assignee_without_enabled_capability(app_cl
         },
     )
     assert denied.status_code == 403
-    assert "enabled workforce capability" in denied.text
+    assert "enabled, data-eligible execution capability" in denied.text
 
 
 def test_founder_can_enable_capability_activate_execute_and_pause_member(app_client, monkeypatch):
@@ -399,19 +402,27 @@ def test_chief_of_staff_plan_creates_persisted_dependency_graph(app_client):
         chief.status = "active"
         chief.autonomy_level = 2
         db.get(Agent, chief.agent_id).enabled = True
+        group_head = db.query(WorkforceMember).filter_by(
+            org_id=i["org"].id, workspace_id=i["workspace"].id,
+            department_key="technology",
+        ).one()
+        group_head.status = "active"
+        group_head.autonomy_level = 2
+        db.get(Agent, group_head.agent_id).enabled = True
         head = db.query(WorkforceMember).filter_by(
             org_id=i["org"].id, workspace_id=i["workspace"].id,
             department_key="ai_engineering_development_head",
         ).one()
         head.status = "active"
         head.autonomy_level = 2
+        db.get(Agent, head.agent_id).enabled = True
         specialist = db.query(WorkforceMember).filter_by(
             org_id=i["org"].id, workspace_id=i["workspace"].id,
             department_key="ai_engineering_development",
         ).one()
         specialist.status = "active"
         db.get(Agent, specialist.agent_id).enabled = True
-        for member in (head, specialist):
+        for member in (group_head, head, specialist):
             db.add(WorkforceCapability(
                 org_id=i["org"].id, workspace_id=i["workspace"].id,
                 member_id=member.id, capability_key="internal.research",
@@ -419,14 +430,9 @@ def test_chief_of_staff_plan_creates_persisted_dependency_graph(app_client):
                 allowed_actions=["research.execute"], tool_allowlist=[],
                 budget_minor=0, currency="INR", enabled=True,
             ))
-        prerequisite = Task(
-            org_id=i["org"].id, workspace_id=i["workspace"].id,
-            title="Prerequisite", status="queued", created_by=i["user"].id,
-        )
-        db.add(prerequisite)
         db.commit()
-        chief_id, head_id, specialist_id, prerequisite_id = (
-            chief.id, head.id, specialist.id, prerequisite.id
+        chief_id, group_head_id, head_id, specialist_id = (
+            chief.id, group_head.id, head.id, specialist.id
         )
     finally:
         db.close()
@@ -444,7 +450,7 @@ def test_chief_of_staff_plan_creates_persisted_dependency_graph(app_client):
                     "parent_task_id": "server-binds-root",
                     "child_title": "Prepare QA data",
                     "delegated_by_member_id": chief_id,
-                    "assigned_to_member_id": head_id,
+                    "assigned_to_member_id": group_head_id,
                     "review_required": False,
                 },
                 {
@@ -453,7 +459,7 @@ def test_chief_of_staff_plan_creates_persisted_dependency_graph(app_client):
                     "child_title": "Run QA review",
                     "delegated_by_member_id": head_id,
                     "assigned_to_member_id": specialist_id,
-                    "dependency_task_id": prerequisite_id,
+                    "depends_on_ordinal": 1,
                     "review_required": True,
                 },
             ],
@@ -481,8 +487,67 @@ def test_chief_of_staff_plan_creates_persisted_dependency_graph(app_client):
         assert len(rows) == 2
         assert all(row.parent_task_id == plan.root_task_id for row in rows)
         assert sorted(row.sequence_no for row in rows) == [1, 2]
+        chief = db.query(WorkforceMember).filter_by(id=chief_id).one()
+        group_head = db.query(WorkforceMember).filter_by(id=group_head_id).one()
+        head = db.query(WorkforceMember).filter_by(id=head_id).one()
+        specialist = db.query(WorkforceMember).filter_by(id=specialist_id).one()
+        assert group_head.manager_member_id == chief.id
+        assert head.manager_member_id == group_head.id
+        assert specialist.manager_member_id == head.id
     finally:
         db.close()
+
+    cycle = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/plans",
+        json={
+            "workspace_id": i["workspace"].id,
+            "objective": "Reject a cyclic plan dependency",
+            "created_by_member_id": chief_id,
+            "tasks": [
+                {
+                    "workspace_id": i["workspace"].id,
+                    "parent_task_id": "server-binds-root",
+                    "child_title": "Task one",
+                    "delegated_by_member_id": chief_id,
+                    "assigned_to_member_id": group_head_id,
+                    "depends_on_ordinal": 2,
+                },
+                {
+                    "workspace_id": i["workspace"].id,
+                    "parent_task_id": "server-binds-root",
+                    "child_title": "Task two",
+                    "delegated_by_member_id": head_id,
+                    "assigned_to_member_id": specialist_id,
+                },
+            ],
+        },
+    )
+    assert cycle.status_code == 422, cycle.text
+
+    # Review cannot be passed before the delegated work reaches a terminal state.
+    first_delegation_id = details.json()["tasks"][0]["delegation_id"]
+    early_review = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/delegations/{first_delegation_id}/review",
+        params={"workspace_id": i["workspace"].id, "decision": "waived"},
+    )
+    assert early_review.status_code == 409
+
+    db = app_client.factory()
+    try:
+        blocked_row = db.get(Delegation, first_delegation_id)
+        blocked_task = db.get(Task, blocked_row.child_task_id)
+        blocked_row.status = "blocked"
+        blocked_row.last_error_code = "AgentNotEnabled"
+        blocked_task.status = "blocked"
+        db.commit()
+    finally:
+        db.close()
+    requeued = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/delegations/{first_delegation_id}/requeue",
+        params={"workspace_id": i["workspace"].id},
+    )
+    assert requeued.status_code == 200, requeued.text
+    assert requeued.json()["status"] == "ready"
 
 
 def test_non_supervisor_cannot_create_plan(app_client):

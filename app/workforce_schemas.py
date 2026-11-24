@@ -67,6 +67,7 @@ class DelegationCreate(BaseModel):
     delegated_by_member_id: str
     assigned_to_member_id: str
     dependency_task_id: str | None = None
+    depends_on_ordinal: int | None = Field(default=None, ge=1, le=50)
     review_required: bool = True
     sequence_no: int = Field(default=1, ge=1, le=10000)
 
