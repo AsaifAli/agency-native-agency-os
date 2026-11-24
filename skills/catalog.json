@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "catalog_version": "1.0.0",
+  "policy": {
+    "default_enabled": false,
+    "default_allowed_tools": [],
+    "default_allowed_data_classes": ["public", "synthetic"],
+    "execution_mode": "manual_review_only",
+    "note": "Catalog entries are reviewed reusable instructions, not runtime grants. Backend policy remains authoritative."
+  },
+  "sources": {
+    "superpowers": {
+      "repository": "https://github.com/obra/superpowers-skills",
+      "revision": "cdcd624ad3fd8026deb692e565351854569798dd",
+      "license": "MIT",
+      "use": "Adapted planning, test-first implementation, debugging, and skill-writing workflow patterns."
+    },
+    "matt-pocock": {
+      "repository": "https://github.com/mattpocock/skills",
+      "revision": "d65391149dbb5fe76478e76fa8d5122b2aa5a70e",
+      "license": "MIT",
+      "use": "Adapted grilling, TDD, debugging, code review, and composable engineering workflow patterns."
+    },
+    "ecc": {
+      "repository": "https://github.com/affaan-m/ECC",
+      "revision": "4adeee6732a12d1540f49a4d50a38ce8c97f9a53",
+      "license": "MIT",
+      "use": "Adapted research-first, security, and agent-harness governance patterns; no wholesale import."
+    },
+    "karpathy-guidelines": {
+      "repository": "https://github.com/nassimna/karpathy-guidelines",
+      "revision": "7d28f033043fd7b6ad41fd266f7997da5904a1e1",
+      "license": "MIT",
+      "use": "Adapted think-before-coding, simplicity-first, surgical-change, and goal-driven execution principles."
+    },
+    "ponytail": {
+      "repository": "https://github.com/DietrichGebert/ponytail",
+      "revision": "ebd8654c2c627f721eb8f9c0d1bd4090a29f9e10",
+      "license": "MIT",
+      "use": "Adapted minimal-change and YAGNI review principles while retaining mandatory security controls."
+    },
+    "anthropic-skills": {
+      "repository": "https://github.com/anthropics/skills",
+      "revision": "e4bb5d960d87126ff3b3a8af1a104b7db67560ba",
+      "license": "Apache-2.0 for the open-source skill examples; verify per-skill notices before copying any source files.",
+      "use": "Agent Skills packaging and Claude-specific skill/runtime patterns; no document skill code copied."
+    },
+    "agent-skills-spec": {
+      "repository": "https://github.com/agentskills/agentskills",
+      "revision": "specification referenced at https://agentskills.io/specification",
+      "license": "Apache-2.0 repository code; CC-BY-4.0 documentation",
+      "use": "SKILL.md directory format and progressive-disclosure conventions."
+    },
+    "coderabbit-skills": {
+      "repository": "https://github.com/coderabbitai/skills",
+      "revision": "4baf5ada0b20ca2fd014660a84c43ae589ff346e",
+      "license": "MIT for this skills repository; hosted CodeRabbit service terms are separate.",
+      "use": "Optional independent review workflow patterns only. No hosted service connection or credentials configured."
+    },
+    "claude-skills-index": {
+      "repository": "https://claudeskills.info/",
+      "revision": "Discovery index; not pinned as executable source.",
+      "license": "Not verified; discovery-only.",
+      "use": "Discovery and source-link lookup only. Never import or execute skills directly from the index."
+    }
+  },
+  "skills": [
+    {"name":"grill-before-building","path":"grill-before-building/SKILL.md","category":"planning","description":"Clarify outcomes, constraints, domain language, and acceptance criteria before non-trivial work.","sources":["matt-pocock","superpowers"],"recommended_departments":["chief-of-staff","solutions-consulting","ai-engineering"],"review_status":"reviewed","enabled":false,"allowed_data_classes":["public","synthetic"],"allowed_tools":[]},
+    {"name":"test-driven-development","path":"test-driven-development/SKILL.md","category":"engineering","description":"Implement behavior through a focused red-green-refactor loop and regression tests.","sources":["matt-pocock","superpowers"],"recommended_departments":["ai-engineering","automation-integration","quality-assurance-security"],"review_status":"reviewed","enabled":false,"allowed_data_classes":["public","synthetic"],"allowed_tools":[]},
+    {"name":"systematic-debugging","path":"systematic-debugging/SKILL.md","category":"engineering","description":"Diagnose defects through reproduction, competing hypotheses, safe instrumentation, and regression tests.","sources":["matt-pocock"],"recommended_departments":["ai-engineering","infrastructure-it-operations","quality-assurance-security"],"review_status":"reviewed","enabled":false,"allowed_data_classes":["public","synthetic"],"allowed_tools":[]},
+    {"name":"independent-code-review","path":"independent-code-review/SKILL.md","category":"quality","description":"Review diffs independently for specification coverage, correctness, maintainability, security, and operational risk.","sources":["matt-pocock","coderabbit-skills"],"recommended_departments":["quality-assurance-security","ai-engineering"],"review_status":"reviewed","enabled":false,"allowed_data_classes":["public","synthetic"],"allowed_tools":[]},
+    {"name":"karpathy-engineering-discipline","path":"karpathy-engineering-discipline/SKILL.md","category":"engineering","description":"Think before coding, choose simplicity, make surgical changes, and define verifiable goals.","sources":["karpathy-guidelines"],"recommended_departments":["ai-engineering","automation-integration","infrastructure-it-operations"],"review_status":"reviewed","enabled":false,"allowed_data_classes":["public","synthetic"],"allowed_tools":[]},
+    {"name":"ponytail-minimal-change","path":"ponytail-minimal-change/SKILL.md","category":"engineering","description":"Minimize code and complexity while preserving required security and reliability controls.","sources":["ponytail"],"recommended_departments":["ai-engineering","automation-integration","infrastructure-it-operations"],"review_status":"reviewed","enabled":false,"allowed_data_classes":["public","synthetic"],"allowed_tools":[]},
+    {"name":"secure-skill-admission","path":"secure-skill-admission/SKILL.md","category":"governance","description":"Review third-party skills for provenance, licensing, scripts, tool requests, data access, and execution risk.","sources":["ecc","anthropic-skills","agent-skills-spec"],"recommended_departments":["quality-assurance-security","human-resources-people-operations"],"review_status":"reviewed","enabled":false,"allowed_data_classes":["public","synthetic"],"allowed_tools":[]},
+    {"name":"claude-runtime-engineering","path":"claude-runtime-engineering/SKILL.md","category":"runtime","description":"Integrate Claude APIs through current documentation, adapter contracts, and fail-closed runtime eligibility.","sources":["anthropic-skills"],"recommended_departments":["ai-research-innovation","ai-engineering"],"review_status":"reviewed","enabled":false,"allowed_data_classes":["public","synthetic"],"allowed_tools":[]},
+    {"name":"research-first-engineering","path":"research-first-engineering/SKILL.md","category":"research","description":"Research unfamiliar APIs, dependencies, and architecture decisions using primary sources.","sources":["ecc","matt-pocock"],"recommended_departments":["market-research-intelligence","ai-research-innovation","ai-engineering"],"review_status":"reviewed","enabled":false,"allowed_data_classes":["public","synthetic"],"allowed_tools":[]},
+    {"name":"release-readiness","path":"release-readiness/SKILL.md","category":"quality","description":"Verify changes through deterministic checks, independent review, security gates, and founder-controlled release approval.","sources":["superpowers","coderabbit-skills","ecc"],"recommended_departments":["quality-assurance-security","infrastructure-it-operations"],"review_status":"reviewed","enabled":false,"allowed_data_classes":["public","synthetic"],"allowed_tools":[]}
+  ]
+}
