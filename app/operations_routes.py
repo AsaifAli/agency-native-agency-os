@@ -367,7 +367,7 @@ def approve_proposal(
     item = db.query(Proposal).filter_by(id=proposal_id, org_id=org_id).with_for_update().first()
     if item is None:
         raise HTTPException(404, "Proposal not found")
-    require_membership(org_id, p, db)
+    _write(org_id, item.workspace_id, p, db)
     if item.status != "pending_approval" or item.approval_id != body.approval_id:
         raise HTTPException(409, "Proposal is not awaiting this approval")
     require_approved_action(
