@@ -349,19 +349,15 @@ def create_outreach_draft(
                           workspace_id=body.workspace_id, label="Lead")
     if lead.stage in {"suppressed", "unqualified"}:
         raise HTTPException(409, "Suppressed or unqualified leads cannot receive outreach drafts")
-    if body.contact_id:
-        contact = _scoped_parent(db, Contact, object_id=body.contact_id, org_id=org_id,
+    contact_id = body.contact_id or lead.contact_id
+    contact = None
+    if contact_id:
+        contact = _scoped_parent(db, Contact, object_id=contact_id, org_id=org_id,
                                  workspace_id=body.workspace_id, label="Contact")
         if lead.contact_id != contact.id and (not lead.client_id or contact.client_id != lead.client_id):
             raise HTTPException(422, "Outreach contact must be linked to the lead or its client")
-    elif body.channel == "email" and not lead.email:
-        raise HTTPException(422, "Email outreach drafts require a lead email or linked contact")
-    if body.contact_id and body.channel == "email":
-        contact = db.query(Contact).filter_by(
-            id=body.contact_id, org_id=org_id, workspace_id=body.workspace_id,
-        ).first()
-        if not contact.email:
-            raise HTTPException(422, "Selected contact has no email address")
+    if body.channel == "email" and not ((contact.email if contact else "") or lead.email):
+        raise HTTPException(422, "Email outreach drafts require a lead email or linked contact with an email address")
     if body.source_research_ids:
         research = db.query(LeadResearchRecord.id).filter(
             LeadResearchRecord.org_id == org_id,
@@ -373,7 +369,7 @@ def create_outreach_draft(
             raise HTTPException(422, "Every cited research record must belong to this lead and workspace")
     item = OutreachDraft(
         org_id=org_id, workspace_id=body.workspace_id, lead_id=lead.id,
-        contact_id=body.contact_id, channel=body.channel, subject=body.subject.strip(),
+        contact_id=contact_id, channel=body.channel, subject=body.subject.strip(),
         body=body.body, personalization_basis=body.personalization_basis,
         source_research_ids=list(dict.fromkeys(body.source_research_ids)),
         created_by=p.user.id,
