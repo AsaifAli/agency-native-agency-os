@@ -532,10 +532,10 @@ def list_approvals(
     p: Principal = Depends(get_principal),
 ):
     role = require_membership(org_id, p, db)
-    require_role(
-        role,
-        {Role.owner, Role.admin, Role.operator, Role.reviewer},
-    )
+    if role not in {Role.owner, Role.admin, Role.operator, Role.reviewer} and not has_founder_authority(
+        db, org_id, p.user.id
+    ):
+        raise HTTPException(403, "Insufficient permission to view approval requests")
 
     query = db.query(Approval).filter_by(org_id=org_id)
 

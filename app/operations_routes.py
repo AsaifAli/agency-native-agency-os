@@ -18,8 +18,8 @@ from app.auth import (
 from app.db import get_db
 from app.models import Role, Workspace, Approval, ApprovalStatus, Execution, ExecutionStatus, Task, Agent
 
-from app.domain_models import Project
-from app.operations_models import ServicePlaybook, ScopeChangeRequest, TimeEntry, ProjectCost
+from app.domain_models import Project, Opportunity
+from app.operations_models import ServicePlaybook, Proposal, ScopeChangeRequest, TimeEntry, ProjectCost
 from app.telephony.models import OutboxEvent
 from app.action_policy import require_approved_action
 from app.audit import record_event
@@ -88,6 +88,48 @@ class PlaybookOut(BaseModel):
     deliverables: list
     acceptance_criteria: list
     security_checks: list
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProposalCreate(BaseModel):
+    workspace_id: str
+    opportunity_id: str
+    title: str = Field(min_length=3, max_length=240)
+    service_line: str = Field(min_length=2, max_length=120)
+    scope_summary: str = Field(min_length=10, max_length=12000)
+    deliverables: list[str] = Field(default_factory=list, max_length=100)
+    assumptions: list[str] = Field(default_factory=list, max_length=100)
+    exclusions: list[str] = Field(default_factory=list, max_length=100)
+    amount_minor: int = Field(ge=0, le=2_000_000_000)
+    currency: str = Field(pattern="^[A-Z]{3}$")
+    validity_days: int = Field(default=30, ge=1, le=180)
+
+
+class ProposalDecision(BaseModel):
+    approval_id: str = Field(min_length=1, max_length=36)
+    note: str = Field(default="", max_length=2000)
+
+
+class ProposalOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    workspace_id: str
+    opportunity_id: str
+    title: str
+    service_line: str
+    scope_summary: str
+    deliverables: list
+    assumptions: list
+    exclusions: list
+    amount_minor: int
+    currency: str
+    validity_days: int
+    status: str
+    approval_id: str | None
+    approved_by: str | None
+    approved_at: datetime | None
+    created_by: str
     created_at: datetime
     updated_at: datetime
 
@@ -231,6 +273,149 @@ def update_playbook_status(
     item.status = body.status
     item.version += 1
     _event(db, org_id, p.user.id, "playbook.status_changed", "service_playbook", item.id, item.workspace_id, {"status": item.status})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.get("/proposals", response_model=list[ProposalOut])
+def list_proposals(
+    org_id: str, workspace_id: str = Query(min_length=1), opportunity_id: str | None = None,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    role = require_membership(org_id, p, db)
+    require_role(role, {Role.owner, Role.admin, Role.operator, Role.reviewer})
+    _workspace(db, org_id, workspace_id)
+    query = db.query(Proposal).filter_by(org_id=org_id, workspace_id=workspace_id)
+    if opportunity_id:
+        opportunity = db.query(Opportunity).filter_by(
+            id=opportunity_id, org_id=org_id, workspace_id=workspace_id
+        ).first()
+        if opportunity is None:
+            raise HTTPException(404, "Opportunity not found")
+        query = query.filter_by(opportunity_id=opportunity_id)
+    return query.order_by(Proposal.created_at.desc()).limit(250).all()
+
+
+@router.post("/proposals", response_model=ProposalOut, status_code=201)
+def create_proposal(
+    org_id: str, body: ProposalCreate,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    _write(org_id, body.workspace_id, p, db)
+    opportunity = db.query(Opportunity).filter_by(
+        id=body.opportunity_id, org_id=org_id, workspace_id=body.workspace_id
+    ).first()
+    if opportunity is None:
+        raise HTTPException(404, "Opportunity not found")
+    if body.currency != opportunity.currency:
+        raise HTTPException(422, "Proposal currency must match the linked opportunity currency")
+    item = Proposal(
+        org_id=org_id, workspace_id=body.workspace_id, opportunity_id=body.opportunity_id,
+        title=body.title, service_line=body.service_line, scope_summary=body.scope_summary,
+        deliverables=body.deliverables, assumptions=body.assumptions,
+        exclusions=body.exclusions, amount_minor=body.amount_minor,
+        currency=body.currency, validity_days=body.validity_days, created_by=p.user.id,
+    )
+    db.add(item)
+    db.flush()
+    _event(db, org_id, p.user.id, "commercial.proposal_drafted", "proposal", item.id,
+           body.workspace_id, {"opportunity_id": item.opportunity_id, "amount_minor": item.amount_minor, "currency": item.currency})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.post("/proposals/{proposal_id}/submit-for-approval", response_model=ProposalOut)
+def submit_proposal_for_approval(
+    org_id: str, proposal_id: str,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    item = db.query(Proposal).filter_by(id=proposal_id, org_id=org_id).with_for_update().first()
+    if item is None:
+        raise HTTPException(404, "Proposal not found")
+    _write(org_id, item.workspace_id, p, db)
+    if item.status == "pending_approval":
+        return item
+    if item.status != "draft":
+        raise HTTPException(409, "Only draft proposals can be submitted for approval")
+    approval = Approval(
+        org_id=org_id, workspace_id=item.workspace_id, action_type="pricing.change",
+        resource_id=item.id, idempotency_key=f"proposal-pricing:{item.id}",
+        request_payload={"proposal_title": item.title, "service_line": item.service_line,
+                         "amount_minor": item.amount_minor, "currency": item.currency},
+        requested_by=p.user.id,
+    )
+    db.add(approval)
+    db.flush()
+    item.status = "pending_approval"
+    item.approval_id = approval.id
+    _event(db, org_id, p.user.id, "commercial.proposal_submitted", "proposal", item.id,
+           item.workspace_id, {"approval_id": approval.id, "action_type": "pricing.change"})
+    _outbox(db, org_id, item.workspace_id, "commercial.proposal_submitted", "proposal", item.id,
+            {"approval_id": approval.id})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.post("/proposals/{proposal_id}/approve", response_model=ProposalOut)
+def approve_proposal(
+    org_id: str, proposal_id: str, body: ProposalDecision,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    item = db.query(Proposal).filter_by(id=proposal_id, org_id=org_id).with_for_update().first()
+    if item is None:
+        raise HTTPException(404, "Proposal not found")
+    _write(org_id, item.workspace_id, p, db)
+    if item.status != "pending_approval" or item.approval_id != body.approval_id:
+        raise HTTPException(409, "Proposal is not awaiting this approval")
+    require_approved_action(
+        db, approval_id=body.approval_id, org_id=org_id,
+        workspace_id=item.workspace_id, action_type="pricing.change",
+        resource_id=item.id, actor_user_id=p.user.id,
+    )
+    item.status = "approved"
+    item.approved_by = p.user.id
+    item.approved_at = datetime.now(timezone.utc)
+    _event(db, org_id, p.user.id, "commercial.proposal_approved", "proposal", item.id,
+           item.workspace_id, {"approval_id": body.approval_id})
+    _outbox(db, org_id, item.workspace_id, "commercial.proposal_approved", "proposal", item.id,
+            {"approval_id": body.approval_id})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.post("/proposals/{proposal_id}/reject", response_model=ProposalOut)
+def reject_proposal(
+    org_id: str, proposal_id: str, body: ProposalDecision,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    item = db.query(Proposal).filter_by(id=proposal_id, org_id=org_id).with_for_update().first()
+    if item is None:
+        raise HTTPException(404, "Proposal not found")
+    require_founder_authority(db, org_id, p.user.id)
+    if item.status != "pending_approval" or item.approval_id != body.approval_id:
+        raise HTTPException(409, "Proposal is not awaiting this approval")
+    approval = db.query(Approval).filter_by(
+        id=body.approval_id, org_id=org_id, workspace_id=item.workspace_id,
+        action_type="pricing.change", resource_id=item.id,
+    ).with_for_update().first()
+    if approval is None:
+        raise HTTPException(404, "Proposal approval not found")
+    if approval.status == ApprovalStatus.pending:
+        approval.status = ApprovalStatus.rejected
+        approval.decided_by = p.user.id
+        approval.decision_note = body.note
+        approval.decided_at = datetime.now(timezone.utc)
+    elif approval.status != ApprovalStatus.rejected or not approval.decided_by or not has_founder_authority(db, org_id, approval.decided_by):
+        raise HTTPException(409, "Proposal approval is no longer rejectable")
+    item.status = "rejected"
+    _event(db, org_id, p.user.id, "commercial.proposal_rejected", "proposal", item.id,
+           item.workspace_id, {"approval_id": approval.id})
+    _outbox(db, org_id, item.workspace_id, "commercial.proposal_rejected", "proposal", item.id,
+            {"approval_id": approval.id})
     db.commit()
     db.refresh(item)
     return item
