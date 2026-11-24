@@ -593,3 +593,79 @@ def test_plan_read_api_rejects_other_workspace(app_client):
         params={"workspace_id": "other-workspace"},
     )
     assert response.status_code == 404
+
+
+def test_supervisor_plan_cannot_delegate_outside_its_reporting_tree(app_client):
+    from app.workforce_models import WorkforceMember, WorkforceCapability
+    from app.models import Agent
+
+    i = app_client.identity
+    boot = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/bootstrap",
+        params={"workspace_id": i["workspace"].id},
+    )
+    assert boot.status_code == 200, boot.text
+    db = app_client.factory()
+    try:
+        technology = db.query(WorkforceMember).filter_by(
+            org_id=i["org"].id, workspace_id=i["workspace"].id,
+            department_key="technology",
+        ).one()
+        growth = db.query(WorkforceMember).filter_by(
+            org_id=i["org"].id, workspace_id=i["workspace"].id,
+            department_key="growth",
+        ).one()
+        marketing_head = db.query(WorkforceMember).filter_by(
+            org_id=i["org"].id, workspace_id=i["workspace"].id,
+            department_key="marketing_brand_head",
+        ).one()
+        for member in (technology, growth, marketing_head):
+            member.status = "active"
+            member.autonomy_level = 2
+            db.get(Agent, member.agent_id).enabled = True
+        db.add(WorkforceCapability(
+            org_id=i["org"].id, workspace_id=i["workspace"].id,
+            member_id=marketing_head.id, capability_key="internal.research",
+            scope="self", allowed_data_classes=["synthetic"],
+            allowed_actions=["research.execute"], tool_allowlist=[],
+            budget_minor=0, currency="INR", enabled=True,
+        ))
+        assert growth.manager_member_id != technology.id
+        assert marketing_head.manager_member_id == growth.id
+        technology_id, growth_id, marketing_head_id = (
+            technology.id, growth.id, marketing_head.id
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    response = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/plans",
+        json={
+            "workspace_id": i["workspace"].id,
+            "objective": "Reject delegation outside this supervisor's authority",
+            "created_by_member_id": technology_id,
+            "tasks": [{
+                "workspace_id": i["workspace"].id,
+                "parent_task_id": "server-owned-root",
+                "child_title": "Marketing research task",
+                "delegated_by_member_id": growth_id,
+                "assigned_to_member_id": marketing_head_id,
+            }],
+        },
+    )
+    assert response.status_code == 403
+    assert "outside the plan creator's reporting tree" in response.text
+
+
+def test_non_founder_cannot_refresh_orchestration_plan(app_client):
+    i = app_client.identity
+    app_client.app.dependency_overrides[get_principal] = (
+        lambda: Principal(user=i["operator"])
+    )
+    response = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/plans/not-a-plan/refresh",
+        params={"workspace_id": i["workspace"].id},
+    )
+    assert response.status_code == 403
+

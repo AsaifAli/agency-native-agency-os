@@ -36,6 +36,34 @@ def _member(db: Session, org_id: str, workspace_id: str, member_id: str):
     return row
 
 
+
+def _member_is_in_reporting_tree(
+    db: Session,
+    org_id: str,
+    workspace_id: str,
+    root_member_id: str,
+    candidate_member_id: str,
+) -> bool:
+    """Return true only when candidate is root or reports beneath root."""
+    if root_member_id == candidate_member_id:
+        return True
+    candidate = _member(db, org_id, workspace_id, candidate_member_id)
+    manager_id = candidate.manager_member_id
+    visited = {candidate.id}
+    while manager_id:
+        if manager_id == root_member_id:
+            return True
+        if manager_id in visited:
+            return False
+        visited.add(manager_id)
+        manager = db.query(WorkforceMember).filter_by(
+            id=manager_id, org_id=org_id, workspace_id=workspace_id,
+        ).first()
+        if manager is None:
+            return False
+        manager_id = manager.manager_member_id
+
+
 @router.get("")
 def list_workforce(org_id: str, workspace_id: str = Query(min_length=1),
                    db: Session = Depends(get_db), p: Principal = Depends(get_principal)):
@@ -465,6 +493,11 @@ def create_orchestration_plan(org_id: str, body: OrchestrationPlanCreate,
         for ordinal, task_body in enumerate(body.tasks, start=1):
             if task_body.workspace_id != body.workspace_id:
                 raise HTTPException(422, "All plan tasks must use the plan workspace")
+            if not _member_is_in_reporting_tree(
+                db, org_id, body.workspace_id, creator.id,
+                task_body.delegated_by_member_id,
+            ):
+                raise HTTPException(403, "Delegating supervisor is outside the plan creator's reporting tree")
             dependency_id = task_body.dependency_task_id
             if task_body.depends_on_ordinal is not None:
                 dependency_id = ordinal_to_task_id.get(task_body.depends_on_ordinal)
@@ -565,6 +598,7 @@ def refresh_orchestration_plan(org_id: str, plan_id: str,
                                db: Session = Depends(get_db),
                                p: Principal = Depends(get_principal)):
     require_membership(org_id, p, db)
+    require_founder_authority(db, org_id, p.user.id)
     _workspace(db, org_id, workspace_id)
     plan = db.query(OrchestrationPlan).filter_by(
         id=plan_id, org_id=org_id,
