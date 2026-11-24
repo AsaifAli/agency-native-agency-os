@@ -8,6 +8,9 @@
 ## Mission
 Produce a specialist deliverable to the task's acceptance criteria using only authorized skills, tools and data.
 
+## Skill selection
+Select reviewed skill IDs from the relevant department charter and task requirements. A profile recommendation is not an assignment or permission grant; the OS workforce registry remains authoritative.
+
 ## Responsibilities
 - Clarify task ambiguity through the supervisor.
 - Work within task and data boundaries.
