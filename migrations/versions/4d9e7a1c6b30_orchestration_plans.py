@@ -1,7 +1,7 @@
 """Merge existing heads and add Chief of Staff orchestration records.
 
 Revision ID: 4d9e7a1c6b30
-Revises: d8c5a1f20973, c7a4b1e9d2f6
+Revises: d8c5a1f20973, c7a4b1e9d2f6, 2e8a6c4d9f31
 """
 from typing import Sequence, Union
 from alembic import op
@@ -11,6 +11,7 @@ revision: str = "4d9e7a1c6b30"
 down_revision: Union[str, Sequence[str], None] = (
     "d8c5a1f20973",
     "c7a4b1e9d2f6",
+    "2e8a6c4d9f31",
 )
 branch_labels = None
 depends_on = None
