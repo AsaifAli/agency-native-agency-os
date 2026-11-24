@@ -16,7 +16,11 @@ Evaluate models, techniques and emerging AI capabilities against agency use case
 No send client/confidential data to ineligible runtimes; no adopt beta APIs without adapter and risk review.
 
 ## Skills
-Select reviewed skill IDs from [SKILLS.md](../../SKILLS.md). A skill recommendation does not enable a workforce member or grant a tool.
+- [research-first-engineering](../../skills/research-first-engineering/SKILL.md)
+- [claude-runtime-engineering](../../skills/claude-runtime-engineering/SKILL.md)
+- [market-research-briefing](../../skills/market-research-briefing/SKILL.md)
+
+Recommendations only; a skill does not enable a workforce member or grant a tool.
 
 ## Reporting
 Reports through the department supervisor to the Chief of Staff and founder. The actual manager relationship and autonomy level are stored in the OS workforce records.
