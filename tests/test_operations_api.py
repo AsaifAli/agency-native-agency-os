@@ -74,7 +74,7 @@ def client():
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_principal] = lambda: Principal(user=user)
     tc = TestClient(app)
-    tc.org_id, tc.ws_id, tc.other_ws_id, tc.user_id, tc.project_id, tc.opportunity_id = org.id, ws.id, other_ws.id, user.id, project.id, opportunity.id
+    tc.org_id, tc.ws_id, tc.other_ws_id, tc.user_id, tc.project_id, tc.opportunity_id, tc.client_id = org.id, ws.id, other_ws.id, user.id, project.id, opportunity.id, client.id
     tc.session_factory = TestingSession
     yield tc
     db.close()
