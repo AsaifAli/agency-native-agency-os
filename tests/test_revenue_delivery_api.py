@@ -160,6 +160,17 @@ def test_agent_research_and_outreach_drafts_are_source_backed_and_never_send(cli
     assert research.status_code == 201, research.text
     research_id = research.json()["id"]
     assert research.json()["source_references"][0]["url"] == "https://example.test/careers"
+    cross_workspace_research = client.get(
+        f"/v1/orgs/{org}/leads/{lead_id}/research?workspace_id={client.other_ws_id}",
+        headers=auth(),
+    )
+    assert cross_workspace_research.status_code == 404
+    other_workspace_drafts = client.get(
+        f"/v1/orgs/{org}/outreach-drafts?workspace_id={client.other_ws_id}",
+        headers=auth(),
+    )
+    assert other_workspace_drafts.status_code == 200
+    assert other_workspace_drafts.json() == []
 
     invalid_source = client.post(f"/v1/orgs/{org}/lead-research", headers=auth(), json={
         "workspace_id": ws, "lead_id": lead_id,
