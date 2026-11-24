@@ -119,6 +119,11 @@ def test_proposal_supports_one_time_and_retainer_engagement_terms(client):
         "term_months": 6, "included_hours_per_period": 40,
     })
     assert invalid.status_code == 422
+    incomplete_period = client.post(f"/v1/orgs/{org}/operations/proposals", headers=headers(), json={
+        **base, "engagement_type": "retainer", "billing_frequency": "quarterly",
+        "term_months": 5, "included_hours_per_period": 40,
+    })
+    assert incomplete_period.status_code == 422
     created = client.post(f"/v1/orgs/{org}/operations/proposals", headers=headers(), json={
         **base, "engagement_type": "retainer", "billing_frequency": "monthly",
         "term_months": 6, "included_hours_per_period": 40,
@@ -409,6 +414,10 @@ def test_contract_snapshots_retainer_commercial_terms(client):
     assert terms["engagement_type"] == "retainer"
     assert terms["billing_frequency"] == "monthly"
     assert terms["term_months"] == 12
+    assert terms["billing_period_count"] == 12
+    assert terms["billing_amount_per_period_minor"] == 1800000
+    assert terms["amount_minor"] == 21600000
+    assert created.json()["amount_minor"] == 21600000
     assert terms["included_hours_per_period"] == 60
     assert terms["rollover_hours"] is True
     assert terms["support_response_hours"] == 4
