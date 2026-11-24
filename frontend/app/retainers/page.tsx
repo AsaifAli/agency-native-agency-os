@@ -8,7 +8,11 @@ import { api, orgId, type Workspace } from "@/lib/api";
 type Contract = { id:string; contract_number:string; title:string; status:string; terms_snapshot:Record<string,unknown>; };
 type Onboarding = { id:string; contract_id:string; project_id:string|null; status:string; project_name:string; };
 type Period = { id:string; contract_id:string; project_id:string; period_number:number; starts_at:string; ends_at:string; included_hours:number; rollover_in_hours:number; used_minutes:number; overage_minutes:number; status:string; closed_at:string|null; };
-const dateValue = (value:string) => value ? new Date(value).toISOString().slice(0,10) : "";
+const dateValue = (value:string) => {
+  if (!value) return "";
+  const date = new Date(value);
+  return [date.getFullYear(),String(date.getMonth()+1).padStart(2,"0"),String(date.getDate()).padStart(2,"0")].join("-");
+};
 
 export default function RetainersPage() {
   const [workspaces,setWorkspaces]=useState<Workspace[]>([]);
@@ -54,7 +58,7 @@ export default function RetainersPage() {
   useEffect(()=>{
     if(!selected) return;
     const last=existing[existing.length-1];
-    if(last){setStartsAt(dateValue(last.ends_at));}
+    if(last){setStartsAt(dateValue(last.ends_at));} else {setStartsAt("");}
   },[onboardingId,periods]);
 
   async function createPeriod(event:FormEvent<HTMLFormElement>){
