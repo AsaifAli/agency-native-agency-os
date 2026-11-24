@@ -1479,6 +1479,13 @@ def test_retainer_period_usage_rollover_and_closed_period_guard(client):
     finally:
         db.close()
 
+    invalid_period = client.post(f"/v1/orgs/{org}/operations/retainer-periods", headers=headers(), json={
+        "workspace_id":ws,"contract_id":contract_id,"project_id":client.project_id,
+        "period_number":1,"starts_at":"2026-01-01T00:00:00+00:00",
+        "ends_at":"2026-01-31T00:00:00+00:00",
+    })
+    assert invalid_period.status_code == 422
+
     period_one = client.post(f"/v1/orgs/{org}/operations/retainer-periods", headers=headers(), json={
         "workspace_id":ws,"contract_id":contract_id,"project_id":client.project_id,
         "period_number":1,"starts_at":"2026-01-01T00:00:00+00:00",
