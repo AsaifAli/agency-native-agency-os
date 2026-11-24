@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import Page from "@/components/page";
 import Notice from "@/components/notice";
@@ -184,6 +185,7 @@ export default function ProposalsPage() {
                   <p className="activity-meta" style={{whiteSpace:"pre-wrap"}}>{item.scope_summary}</p>
                   {item.deliverables.length>0 && <div className="activity-meta">Deliverables: {item.deliverables.join(" · ")}</div>}
                   {item.approval_id && <div className="activity-meta">Approval reference: {item.approval_id}</div>}
+                  {item.status === "pending_approval" && <Link href="/approvals" className="activity-meta">Review this request in the founder approvals queue</Link>}
                   {item.status === "draft" && <button className="button secondary" type="button" onClick={() => void action(item,"submit")} disabled={busyId===item.id}>{busyId===item.id ? "Submitting…" : "Request founder pricing approval"}</button>}
                   {item.status === "pending_approval" && <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                     <button className="button primary" type="button" onClick={() => void action(item,"approve")} disabled={busyId===item.id}>{busyId===item.id ? "Processing…" : "Finalize approved pricing"}</button>
