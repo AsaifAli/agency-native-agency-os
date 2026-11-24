@@ -13,6 +13,7 @@ from app.auth import has_founder_authority
 MANDATORY_APPROVAL_ACTIONS = {
     "contract.execute",
     "delivery.activate",
+    "invoice.issue",
     "pricing.change",
     "payment.issue",
     "external_communication.sensitive",
