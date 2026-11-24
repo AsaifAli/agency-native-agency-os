@@ -236,3 +236,4 @@ def test_workforce_delegation_rejects_assignee_without_enabled_capability(app_cl
         },
     )
     assert denied.status_code == 403
+    assert "enabled workforce capability" in denied.text
