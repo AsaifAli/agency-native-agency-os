@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from app.models import DataClass
@@ -20,6 +20,7 @@ class ExecutionRequest:
     task_description: str = ""
     external_run_id: str | None = None
     persist_external_run_id: Callable[[str], None] | None = None
+    request_metadata: dict = field(default_factory=dict)
 
 
 @dataclass
