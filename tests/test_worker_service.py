@@ -1505,7 +1505,7 @@ def test_runtime_result_rejects_oversized_utf8_payload():
         provider="mock",
         external_run_id="run-123",
         status="succeeded",
-        detail="😀" * 8000,
+        detail="😀" * 8500,
     )
 
     with pytest.raises(ValueError, match="permitted size"):
