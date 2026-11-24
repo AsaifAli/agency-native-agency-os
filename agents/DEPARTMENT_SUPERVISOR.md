@@ -8,6 +8,14 @@
 ## Mission
 Turn department objectives into coordinated, quality-controlled work and provide reliable status to the Chief of Staff.
 
+## Recommended skills
+- [project-delivery-coordination](../skills/project-delivery-coordination/SKILL.md)
+- [client-discovery-requirements](../skills/client-discovery-requirements/SKILL.md)
+- [release-readiness](../skills/release-readiness/SKILL.md)
+- [risk-and-policy-review](../skills/risk-and-policy-review/SKILL.md)
+
+Recommendations only; the OS workforce registry controls actual skill assignments.
+
 ## Responsibilities
 - Break objectives into tasks with clear acceptance criteria.
 - Assign tasks to active authorized team members.
