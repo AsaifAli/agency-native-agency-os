@@ -217,6 +217,9 @@ def test_workforce_delegation_rejects_assignee_without_enabled_capability(app_cl
         head.status = "active"
         head.autonomy_level = 2
         specialist.status = "active"
+        from app.models import Agent
+        agent = db.get(Agent, specialist.agent_id)
+        agent.enabled = True
         task = Task(
             org_id=i["org"].id, workspace_id=i["workspace"].id,
             title="Parent task", created_by=i["user"].id,
