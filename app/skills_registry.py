@@ -76,7 +76,8 @@ def _read_entry(entry: dict[str, Any], sources: dict[str, Any]) -> dict[str, Any
     description_match = _DESCRIPTION_RE.search(header)
     if not name_match or name_match.group("name") != name:
         raise SkillCatalogError(f"Skill frontmatter name does not match catalog: {name}")
-    if not description_match or description_match.group("description") != entry.get("description"):
+    skill_description = (description_match.group("quoted") or description_match.group("plain").strip()) if description_match else None
+    if skill_description != entry.get("description"):
         raise SkillCatalogError(f"Skill frontmatter description does not match catalog: {name}")
 
     source_ids = entry.get("sources")
@@ -90,7 +91,9 @@ def _read_entry(entry: dict[str, Any], sources: dict[str, Any]) -> dict[str, Any
     if entry.get("allowed_tools") != []:
         raise SkillCatalogError(f"Static skill catalog cannot grant tools: {name}")
     data_classes = entry.get("allowed_data_classes")
-    if not isinstance(data_classes, list) or not data_classes or set(data_classes) - {"public", "synthetic"}:
+    if (not isinstance(data_classes, list) or not data_classes
+            or any(not isinstance(value, str) for value in data_classes)
+            or set(data_classes) - {"public", "synthetic"}):
         raise SkillCatalogError(f"Static skills are limited to public/synthetic data: {name}")
 
     digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
@@ -115,10 +118,11 @@ def _read_entry(entry: dict[str, Any], sources: dict[str, Any]) -> dict[str, Any
 def _validated_catalog() -> list[dict[str, Any]]:
     manifest = _load_manifest()
     entries = manifest["skills"]
-    names = [entry.get("name") for entry in entries if isinstance(entry, dict)]
     if any(not isinstance(entry, dict) for entry in entries):
         raise SkillCatalogError("Skill entries must be objects")
     names = [entry.get("name") for entry in entries]
+    if any(not isinstance(name, str) or not _NAME_RE.fullmatch(name) for name in names):
+        raise SkillCatalogError("Skill names are invalid")
     if len(names) != len(set(names)):
         raise SkillCatalogError("Skill names must be unique")
     return [_read_entry(entry, manifest["sources"]) for entry in entries]
