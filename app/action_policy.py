@@ -14,6 +14,7 @@ MANDATORY_APPROVAL_ACTIONS = {
     "contract.execute",
     "delivery.activate",
     "invoice.issue",
+    "telephony.call_outbound",
     "pricing.change",
     "payment.issue",
     "external_communication.sensitive",
