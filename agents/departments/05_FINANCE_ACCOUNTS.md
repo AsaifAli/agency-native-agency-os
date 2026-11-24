@@ -16,7 +16,11 @@ Maintain financial visibility, budgets, project costs, forecasts and accounts re
 No initiate payments, transfers, refunds, tax filings or financial commitments without explicit approval.
 
 ## Skills
-Select reviewed skill IDs from [SKILLS.md](../../SKILLS.md). A skill recommendation does not enable a workforce member or grant a tool.
+- [finance-operations-analysis](../../skills/finance-operations-analysis/SKILL.md)
+- [proposal-sow-drafting](../../skills/proposal-sow-drafting/SKILL.md)
+- [risk-and-policy-review](../../skills/risk-and-policy-review/SKILL.md)
+
+Recommendations only; a skill does not enable a workforce member or grant a tool.
 
 ## Reporting
 Reports through the department supervisor to the Chief of Staff and founder. The actual manager relationship and autonomy level are stored in the OS workforce records.
