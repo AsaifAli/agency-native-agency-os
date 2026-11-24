@@ -293,11 +293,12 @@ def create_service_offering(
     if body.pricing_model == "fixed" and body.indicative_price_minor is None:
         raise HTTPException(422, "Fixed-price offerings require an indicative price")
     code = body.code.lower().strip()
-    existing = db.query(ServiceOffering.id).filter_by(
+    latest = db.query(ServiceOffering).filter_by(
         org_id=org_id, workspace_id=body.workspace_id, code=code,
-    ).first()
-    if existing:
-        raise HTTPException(409, "Service offering code already exists in this workspace")
+    ).order_by(ServiceOffering.version.desc()).first()
+    if latest and latest.status != "retired":
+        raise HTTPException(409, "Retire the current service offering before creating a new revision")
+    next_version = latest.version + 1 if latest else 1
     item = ServiceOffering(
         org_id=org_id, workspace_id=body.workspace_id, code=code,
         name=body.name.strip(), service_line=body.service_line.strip(),
@@ -306,7 +307,7 @@ def create_service_offering(
         typical_duration_days=body.typical_duration_days,
         target_outcomes=body.target_outcomes, deliverables=body.deliverables,
         required_inputs=body.required_inputs, exclusions=body.exclusions,
-        notes=body.notes, created_by=p.user.id,
+        notes=body.notes, version=next_version, created_by=p.user.id,
     )
     db.add(item)
     db.flush()
@@ -332,7 +333,6 @@ def update_service_offering_status(
     if item.status == body.status:
         return item
     item.status = body.status
-    item.version += 1
     _event(db, org_id, p.user.id, "commercial.service_offering_status_changed", "service_offering", item.id,
            item.workspace_id, {"status": item.status, "version": item.version})
     _outbox(db, org_id, item.workspace_id, "commercial.service_offering_status_changed", "service_offering", item.id,
