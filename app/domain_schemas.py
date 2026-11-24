@@ -35,6 +35,9 @@ class ContactCreate(BaseModel):
     job_title: str = Field(default="", max_length=160)
     source: str = Field(default="", max_length=120)
     consent_status: str = Field(default="unknown", pattern="^(unknown|pending|granted|withdrawn)$")
+    phone_call_consent_status: str = Field(default="unknown", pattern="^(unknown|pending|granted|withdrawn)$")
+    phone_call_consent_source: str = Field(default="", max_length=200)
+    phone_call_consent_recorded_at: datetime | None = None
 
 
 class ContactOut(BaseModel):
@@ -49,6 +52,9 @@ class ContactOut(BaseModel):
     job_title: str
     source: str
     consent_status: str
+    phone_call_consent_status: str
+    phone_call_consent_source: str
+    phone_call_consent_recorded_at: datetime | None
     created_at: datetime
 
 
