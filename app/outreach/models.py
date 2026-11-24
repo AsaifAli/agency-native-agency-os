@@ -97,7 +97,7 @@ class OutboundMessage(Base):
         Index("ix_outbound_messages_sender_queued", "org_id", "workspace_id", "sender_id", "queued_at"),
         Index("ix_outbound_messages_contact", "org_id", "workspace_id", "contact_id", "created_at"),
         CheckConstraint("channel IN ('email')", name="ck_outbound_message_channel"),
-        CheckConstraint("status IN ('draft','pending_approval','queued','sent','delivered','replied','opted_out','bounced','failed','cancelled','suppressed')", name="ck_outbound_message_status"),
+        CheckConstraint("status IN ('draft','pending_approval','rejected','queued','sent','delivered','replied','opted_out','bounced','failed','cancelled','suppressed')", name="ck_outbound_message_status"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
