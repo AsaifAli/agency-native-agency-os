@@ -84,6 +84,6 @@ Never commit `.env`. Use separate dev, staging and production configuration. Rev
 
 ## Verification boundary
 
-The native-source cleanup commit (`80b989ae611b08d9a9c37925195517417ba79b05`) passed backend CI: **162 passed, 1 warning** (run [45471143658](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45471143658)). CI validated migrations against PostgreSQL 16, Python compilation and the backend/PostgreSQL integration suite. The frontend production build, live Claude sessions, website deployment, backup restore, penetration testing and regulatory compliance remain unverified.
+The native-source cleanup commit (`80b989ae611b08d9a9c37925195517417ba79b05`) passed backend CI: **162 passed, 1 warning** (run [45471143658](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45471143658)). The Chief of Staff orchestration foundation commit (`a3f3784e8fb5a75efb8212c0de0002b7a741cec5`) passed backend CI: **168 passed, 1 warning** (run [45477077236](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45477077236)). Both runs validated PostgreSQL 16 migrations and Python compilation; the latter also exercised the new orchestration and delegated-execution tests. The frontend production build, live Claude sessions, website deployment, backup restore, penetration testing and regulatory compliance remain unverified.
 
 This repository is a substantial development foundation, **not a production-ready or fully autonomous agency OS**. See `IMPLEMENTATION_STATUS.md` for the remaining work and evidence boundaries.
