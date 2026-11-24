@@ -119,6 +119,76 @@ class LeadOut(BaseModel):
     created_at: datetime
 
 
+class LeadResearchSource(BaseModel):
+    label: str = Field(min_length=2, max_length=240)
+    url: str = Field(min_length=8, max_length=2000)
+    accessed_at: datetime
+    published_at: datetime | None = None
+
+
+class LeadResearchCreate(BaseModel):
+    workspace_id: str
+    lead_id: str
+    summary: str = Field(min_length=20, max_length=12000)
+    fit_score: int = Field(ge=0, le=100)
+    confidence_score: int = Field(ge=0, le=100)
+    buying_signals: list[str] = Field(default_factory=list, max_length=50)
+    risks: list[str] = Field(default_factory=list, max_length=50)
+    source_references: list[LeadResearchSource] = Field(min_length=1, max_length=30)
+    researched_at: datetime | None = None
+
+
+class LeadResearchOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    workspace_id: str
+    lead_id: str
+    summary: str
+    fit_score: int
+    confidence_score: int
+    buying_signals: list
+    risks: list
+    source_references: list
+    researched_at: datetime
+    created_by: str
+    created_at: datetime
+
+
+class OutreachDraftCreate(BaseModel):
+    workspace_id: str
+    lead_id: str
+    contact_id: str | None = None
+    channel: str = Field(pattern="^(email|linkedin|call_script)$")
+    subject: str = Field(default="", max_length=240)
+    body: str = Field(min_length=20, max_length=12000)
+    personalization_basis: str = Field(default="", max_length=6000)
+    source_research_ids: list[str] = Field(default_factory=list, max_length=30)
+
+
+class OutreachDraftReview(BaseModel):
+    decision: str = Field(pattern="^(approve_draft|reject)$")
+    note: str = Field(default="", max_length=2000)
+
+
+class OutreachDraftOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    workspace_id: str
+    lead_id: str
+    contact_id: str | None
+    channel: str
+    subject: str
+    body: str
+    personalization_basis: str
+    source_research_ids: list
+    status: str
+    reviewed_by: str | None
+    reviewed_at: datetime | None
+    review_note: str
+    created_by: str
+    created_at: datetime
+
+
 class OpportunityCreate(BaseModel):
     workspace_id: str
     client_id: str | None = None
