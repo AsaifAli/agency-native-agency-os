@@ -45,6 +45,15 @@ class Settings(BaseSettings):
     claude_managed_poll_interval_seconds: float = Field(default=2.0, ge=0.2, le=30)
     anthropic_request_timeout_seconds: float = Field(default=20.0, ge=1, le=120)
 
+    # Optional signed server-to-server intake from the public agency website.
+    # Disabled until a dedicated secret and fixed org/workspace mapping are configured.
+    website_lead_intake_enabled: bool = False
+    website_lead_intake_secret: str | None = None
+    website_lead_intake_key_id: str = ""
+    website_lead_intake_org_id: str = ""
+    website_lead_intake_workspace_id: str = ""
+    website_lead_intake_clock_skew_seconds: int = Field(default=300, ge=30, le=900)
+
     @model_validator(mode="after")
     def validate_retry_settings(self):
         if self.outbox_max_retry_seconds < self.outbox_base_retry_seconds:

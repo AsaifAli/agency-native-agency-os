@@ -71,6 +71,7 @@ class Lead(Base):
     __tablename__ = "leads"
     __table_args__ = (
         Index("ix_leads_scope_stage_created", "org_id", "workspace_id", "stage", "created_at"),
+        UniqueConstraint("org_id", "workspace_id", "source", "external_key", name="uq_lead_external_source_key"),
         CheckConstraint("score >= 0 AND score <= 100", name="ck_lead_score_range"),
     )
 
@@ -83,6 +84,7 @@ class Lead(Base):
     contact_name: Mapped[str] = mapped_column(String(200), default="", server_default="", nullable=False)
     email: Mapped[str] = mapped_column(String(320), default="", server_default="", nullable=False)
     source: Mapped[str] = mapped_column(String(120), default="", server_default="", nullable=False)
+    external_key: Mapped[str | None] = mapped_column(String(160), nullable=True)
     stage: Mapped[str] = mapped_column(String(32), default="new", server_default="new", nullable=False)
     score: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     qualification_notes: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)

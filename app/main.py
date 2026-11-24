@@ -845,6 +845,10 @@ app.include_router(revenue_delivery_router)
 from app.telephony.routes import router as telephony_router
 app.include_router(telephony_router)
 
+# Website-to-OS signed lead intake.
+from app.website_intake_routes import router as website_intake_router
+app.include_router(website_intake_router)
+
 # Governed workforce hierarchy, capabilities and delegation.
 from app.workforce_routes import router as workforce_router
 app.include_router(workforce_router)
