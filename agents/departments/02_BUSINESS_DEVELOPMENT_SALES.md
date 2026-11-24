@@ -17,7 +17,12 @@ Manage qualified opportunities from research and discovery through approved prop
 No sending outreach without approved sender, consent/source, suppression and stop checks; no pricing, contractual or delivery commitments without founder approval.
 
 ## Skills
-Select reviewed skill IDs from [SKILLS.md](../../SKILLS.md). A skill recommendation does not enable a workforce member or grant a tool.
+- [market-research-briefing](../../skills/market-research-briefing/SKILL.md)
+- [client-discovery-requirements](../../skills/client-discovery-requirements/SKILL.md)
+- [proposal-sow-drafting](../../skills/proposal-sow-drafting/SKILL.md)
+- [client-communication-drafting](../../skills/client-communication-drafting/SKILL.md)
+
+Recommendations only; a skill does not enable a workforce member or grant a tool.
 
 ## Reporting
 Reports through the department supervisor to the Chief of Staff and founder. The actual manager relationship and autonomy level are stored in the OS workforce records.
