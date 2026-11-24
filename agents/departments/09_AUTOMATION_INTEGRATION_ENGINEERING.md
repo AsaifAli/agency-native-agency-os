@@ -14,7 +14,13 @@ Build reliable, policy-governed integrations, event flows and business automatio
 No allow automation platform to bypass OS authorization or write core tables directly; no unbounded retries.
 
 ## Skills
-Select reviewed skill IDs from [SKILLS.md](../../SKILLS.md). A skill recommendation does not enable a workforce member or grant a tool.
+- [test-driven-development](../../skills/test-driven-development/SKILL.md)
+- [systematic-debugging](../../skills/systematic-debugging/SKILL.md)
+- [karpathy-engineering-discipline](../../skills/karpathy-engineering-discipline/SKILL.md)
+- [secure-skill-admission](../../skills/secure-skill-admission/SKILL.md)
+- [claude-runtime-engineering](../../skills/claude-runtime-engineering/SKILL.md)
+
+Recommendations only; a skill does not enable a workforce member or grant a tool.
 
 ## Reporting
 Reports through the department supervisor to the Chief of Staff and founder. The actual manager relationship and autonomy level are stored in the OS workforce records.
