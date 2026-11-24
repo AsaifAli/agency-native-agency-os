@@ -113,7 +113,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.CheckConstraint("channel IN ('email')", name="ck_outbound_message_channel"),
-        sa.CheckConstraint("status IN ('draft','pending_approval','queued','sent','delivered','replied','opted_out','bounced','failed','cancelled','suppressed')", name="ck_outbound_message_status"),
+        sa.CheckConstraint("status IN ('draft','pending_approval','rejected','queued','sent','delivered','replied','opted_out','bounced','failed','cancelled','suppressed')", name="ck_outbound_message_status"),
     )
     op.create_index("ix_outbound_messages_scope_status", "outbound_messages", ["org_id", "workspace_id", "status"])
     op.create_index("ix_outbound_messages_sender_queued", "outbound_messages", ["org_id", "workspace_id", "sender_id", "queued_at"])
