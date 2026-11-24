@@ -137,6 +137,46 @@ def test_revenue_delivery_vertical_slice_and_audit(client):
     assert r.json()["status"] == "completed"
 
 
+def test_contact_activity_timeline_is_scoped_and_append_only(client):
+    org, ws = client.org_id, client.ws_id
+    created = client.post(f"/v1/orgs/{org}/contacts", headers=auth(), json={
+        "workspace_id": ws, "first_name": "Asha", "email": "asha-activity@example.test",
+    })
+    assert created.status_code == 201, created.text
+    contact_id = created.json()["id"]
+
+    activity = client.post(f"/v1/orgs/{org}/contact-activities", headers=auth(), json={
+        "workspace_id": ws, "contact_id": contact_id,
+        "activity_type": "call", "direction": "inbound",
+        "subject": "Discovery call", "body": "Prospect asked about workflow automation.",
+        "outcome": "Founder follow-up requested",
+    })
+    assert activity.status_code == 201, activity.text
+    activity_id = activity.json()["id"]
+
+    timeline = client.get(
+        f"/v1/orgs/{org}/contacts/{contact_id}/activities",
+        headers=auth(), params={"workspace_id": ws},
+    )
+    assert timeline.status_code == 200, timeline.text
+    assert [row["id"] for row in timeline.json()] == [activity_id]
+    assert timeline.json()[0]["direction"] == "inbound"
+
+    # A contact from this workspace cannot be read through another workspace scope.
+    foreign_scope = client.get(
+        f"/v1/orgs/{org}/contacts/{contact_id}/activities",
+        headers=auth(), params={"workspace_id": client.other_ws_id},
+    )
+    assert foreign_scope.status_code == 404
+
+    # There is deliberately no update/delete endpoint for historical interactions.
+    changed = client.patch(
+        f"/v1/orgs/{org}/contact-activities/{activity_id}",
+        headers=auth(), json={"body": "rewritten history"},
+    )
+    assert changed.status_code == 405
+
+
 def test_cross_workspace_parent_reference_is_rejected(client):
     org, ws, other_ws = client.org_id, client.ws_id, client.other_ws_id
     # A real client in another organization/workspace must not be attachable.
