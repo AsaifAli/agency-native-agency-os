@@ -484,6 +484,9 @@ def create_orchestration_plan(org_id: str, body: OrchestrationPlanCreate,
             db.add(OrchestrationPlanDelegation(
                 plan_id=plan.id, delegation_id=row.id, ordinal=ordinal,
             ))
+        # Session factories intentionally disable autoflush; persist the complete
+        # plan-to-delegation graph before computing its summary.
+        db.flush()
         summary = _refresh_plan(db, plan, persist=True)
         record_event(db, org_id, p.user.id,
                      "workforce.orchestration_plan_created",
