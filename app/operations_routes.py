@@ -699,6 +699,8 @@ def record_invoice_issued(
         raise HTTPException(409, "Invoice is not awaiting this approval")
     if body.issued_at.tzinfo is None or body.issued_at > datetime.now(timezone.utc):
         raise HTTPException(422, "Invoice issue timestamp must be timezone-aware and cannot be in the future")
+    if len(body.external_reference.strip()) < 3:
+        raise HTTPException(422, "External invoice reference must be non-empty")
     duplicate_reference = db.query(InvoiceRecord.id).filter(
         InvoiceRecord.org_id == org_id,
         InvoiceRecord.workspace_id == item.workspace_id,
@@ -789,6 +791,8 @@ def record_payment_receipt(
     if body.amount_minor > item.amount_minor - item.paid_minor:
         raise HTTPException(422, "Payment exceeds the invoice outstanding balance")
     reference = body.external_reference.strip()
+    if len(reference) < 3 or len(body.source.strip()) < 2:
+        raise HTTPException(422, "Payment reference and source must be non-empty")
     duplicate = db.query(PaymentReceipt.id).filter_by(
         org_id=org_id, workspace_id=item.workspace_id, external_reference=reference,
     ).first()
