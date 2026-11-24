@@ -125,6 +125,7 @@ def create_delegation(org_id: str, body: DelegationCreate, db: Session = Depends
                      dependency_task_id=dependency.id if dependency else None,
                      review_required=body.review_required, review_status="pending")
     db.add(row)
+    db.flush()
     record_event(db, org_id, p.user.id, "workforce.task_delegated", "delegation", row.id,
                  body.workspace_id, {"parent_task_id":parent.id,"child_task_id":child.id,
                                      "delegated_by_member_id":delegator.id,"assigned_to_member_id":assignee.id})
