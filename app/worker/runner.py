@@ -14,6 +14,7 @@ from app.outbox_service import dispatch_outbox_batch, reconcile_outbox_events
 from app.worker_service import (
     promote_due_retries,
     recover_expired_execution_leases,
+    queue_ready_delegations,
 )
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ ExecutionProcessor = Callable[..., str | None]
 def _run_maintenance(
     session_factory: SessionFactory,
     batch_size: int,
-) -> tuple[int, int]:
+) -> tuple[int, int, int]:
     """Run retry promotion and lease recovery in separate transactions."""
 
     with session_factory() as db:
@@ -40,9 +41,13 @@ def _run_maintenance(
             db,
             limit=batch_size,
         )
+        queued_delegations = queue_ready_delegations(
+            db,
+            limit=batch_size,
+        )
         db.commit()
 
-    return promoted_count, recovered_count
+    return promoted_count, recovered_count, queued_delegations
 
 
 def _run_outbox_maintenance(
@@ -139,17 +144,18 @@ def run_worker(
         now = clock()
 
         if now >= next_maintenance_at:
-            promoted, recovered = _run_maintenance(
+            promoted, recovered, queued_delegations = _run_maintenance(
                 session_factory=session_factory,
                 batch_size=maintenance_batch_size,
             )
 
-            if promoted or recovered:
+            if promoted or recovered or queued_delegations:
                 logger.info(
                     "Worker maintenance completed: "
-                    "promoted=%s recovered=%s",
+                    "promoted=%s recovered=%s delegated_queued=%s",
                     promoted,
                     recovered,
+                    queued_delegations,
                 )
 
             published, retried, dead_lettered, requeued = _run_outbox_maintenance(

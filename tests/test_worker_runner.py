@@ -46,6 +46,7 @@ def test_run_maintenance_commits_separate_transactions(monkeypatch):
 
     promote = Mock(return_value=2)
     recover = Mock(return_value=3)
+    queue = Mock(return_value=4)
 
     monkeypatch.setattr(runner, "promote_due_retries", promote)
     monkeypatch.setattr(
@@ -53,18 +54,20 @@ def test_run_maintenance_commits_separate_transactions(monkeypatch):
         "recover_expired_execution_leases",
         recover,
     )
+    monkeypatch.setattr(runner, "queue_ready_delegations", queue)
 
-    promoted, recovered = runner._run_maintenance(
+    promoted, recovered, queued = runner._run_maintenance(
         session_factory=session_factory,
         batch_size=25,
     )
 
-    assert (promoted, recovered) == (2, 3)
+    assert (promoted, recovered, queued) == (2, 3, 4)
     assert len(sessions) == 2
     assert all(session.committed for session in sessions)
     assert all(session.closed for session in sessions)
     promote.assert_called_once_with(sessions[0], limit=25)
     recover.assert_called_once_with(sessions[1], limit=25)
+    queue.assert_called_once_with(sessions[1], limit=25)
 
 
 def test_run_worker_runs_startup_maintenance_and_waits_when_idle(
@@ -79,6 +82,7 @@ def test_run_worker_runs_startup_maintenance_and_waits_when_idle(
 
     promote = Mock(return_value=0)
     recover = Mock(return_value=0)
+    queue = Mock(return_value=0)
 
     monkeypatch.setattr(runner, "promote_due_retries", promote)
     monkeypatch.setattr(
@@ -86,6 +90,7 @@ def test_run_worker_runs_startup_maintenance_and_waits_when_idle(
         "recover_expired_execution_leases",
         recover,
     )
+    monkeypatch.setattr(runner, "queue_ready_delegations", queue)
     monkeypatch.setattr(
         runner,
         "reconcile_outbox_events",
@@ -130,6 +135,7 @@ def test_run_worker_propagates_processor_failure(monkeypatch):
         "recover_expired_execution_leases",
         Mock(return_value=0),
     )
+    monkeypatch.setattr(runner, "queue_ready_delegations", Mock(return_value=0))
     monkeypatch.setattr(
         runner,
         "reconcile_outbox_events",

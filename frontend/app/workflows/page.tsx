@@ -6,6 +6,33 @@ import { api, orgId, Workspace, Execution, AuditEvent } from "@/lib/api";
 
 const statusClass = (status: string) => ["succeeded", "failed", "cancelled"].includes(status) ? status : "pending";
 
+type WorkforceMember = {
+  id: string; manager_member_id: string | null; agent_id: string | null;
+  member_type: string; name: string; title: string; department_key: string;
+  status: string; is_founder_reserved: boolean;
+};
+type WorkforceCapability = {
+  member_id: string; enabled: boolean; allowed_actions: string[];
+  allowed_data_classes: string[]; tool_allowlist: string[];
+};
+type Workforce = { members: WorkforceMember[]; capabilities: WorkforceCapability[] };
+type PlanSummary = {
+  id: string; objective: string; status: string; task_count: number;
+  ready_count: number; blocked_count: number; awaiting_review_count: number;
+  failed_count: number; succeeded_count: number; created_at: string; updated_at: string;
+};
+type PlanTask = {
+  ordinal: number; delegation_id: string; child_task_id: string; title: string | null;
+  assignee_member_id: string; dependency_task_id: string | null; status: string;
+  review_status: string; review_required: boolean; last_error_code: string | null;
+};
+type PlanDetail = PlanSummary & { root_task_id: string; tasks: PlanTask[] };
+type DraftTask = {
+  id: number; title: string; description: string; managerId: string;
+  assigneeId: string; dependsOnOrdinal: number | null; reviewRequired: boolean;
+};
+const executionActions = new Set(["task.execute", "research.execute", "report.generate"]);
+
 export default function Workflows() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspace, setWorkspace] = useState("");
@@ -15,21 +42,178 @@ export default function Workflows() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const [workforce, setWorkforce] = useState<Workforce>({ members: [], capabilities: [] });
+  const [plans, setPlans] = useState<PlanSummary[]>([]);
+  const [selectedPlanId, setSelectedPlanId] = useState("");
+  const [planDetail, setPlanDetail] = useState<PlanDetail | null>(null);
+  const [objective, setObjective] = useState("");
+  const [planTitle, setPlanTitle] = useState("Agency work plan");
+  const [draftTasks, setDraftTasks] = useState<DraftTask[]>([]);
+  const [nextDraftId, setNextDraftId] = useState(1);
+  const [creatingPlan, setCreatingPlan] = useState(false);
+
   async function load(workspaceId = workspace) {
     setError("");
     setLoading(true);
     try {
-      const rows = await api<Execution[]>(`/v1/orgs/${orgId()}/executions?workspace_id=${encodeURIComponent(workspaceId)}&limit=200`);
+      const [rows, workforceRows, planRows] = await Promise.all([
+        api<Execution[]>(`/v1/orgs/${orgId()}/executions?workspace_id=${encodeURIComponent(workspaceId)}&limit=200`),
+        api<Workforce>(`/v1/orgs/${orgId()}/workforce?workspace_id=${encodeURIComponent(workspaceId)}`),
+        api<PlanSummary[]>(`/v1/orgs/${orgId()}/workforce/plans?workspace_id=${encodeURIComponent(workspaceId)}`),
+      ]);
       setExecutions(rows);
+      setWorkforce(workforceRows);
+      setPlans(planRows);
       if (selected && !rows.some((row) => row.id === selected.id)) {
         setSelected(null);
         setTrace([]);
+      }
+      const preferred = planRows.some((plan) => plan.id === selectedPlanId)
+        ? selectedPlanId : (planRows[0]?.id || "");
+      setSelectedPlanId(preferred);
+      if (preferred) {
+        setPlanDetail(await api<PlanDetail>(
+          `/v1/orgs/${orgId()}/workforce/plans/${preferred}?workspace_id=${encodeURIComponent(workspaceId)}`,
+        ));
+      } else {
+        setPlanDetail(null);
+      }
+      const chief = workforceRows.members.find((member) => member.department_key === "office_chief_of_staff");
+      if (chief && draftTasks.length === 0) {
+        setDraftTasks([{
+          id: 1, title: "", description: "", managerId: chief.id,
+          assigneeId: "", dependsOnOrdinal: null, reviewRequired: true,
+        }]);
+        setNextDraftId(2);
       }
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setLoading(false);
     }
+  }
+
+
+  const chief = workforce.members.find((member) => member.department_key === "office_chief_of_staff");
+  const activeMembers = workforce.members.filter((member) =>
+    member.status === "active" && !member.is_founder_reserved
+  );
+  const eligibleMemberIds = new Set(
+    workforce.capabilities.filter((grant) =>
+      grant.enabled
+      && grant.allowed_actions.some((action) => executionActions.has(action))
+      && grant.tool_allowlist.length === 0
+      && grant.allowed_data_classes.some((kind) => kind === "synthetic" || kind === "public")
+    ).map((grant) => grant.member_id)
+  );
+
+  function eligibleReports(managerId: string) {
+    return workforce.members.filter((member) =>
+      member.manager_member_id === managerId
+      && member.status === "active"
+      && !member.is_founder_reserved
+      && eligibleMemberIds.has(member.id)
+    );
+  }
+
+  function makeDraftTask(id: number, managerId: string): DraftTask {
+    return {
+      id, title: "", description: "", managerId,
+      assigneeId: eligibleReports(managerId)[0]?.id || "",
+      dependsOnOrdinal: null, reviewRequired: true,
+    };
+  }
+
+  function updateDraftTask(id: number, patch: Partial<DraftTask>) {
+    setDraftTasks((current) => current.map((task) => {
+      if (task.id !== id) return task;
+      const next = { ...task, ...patch };
+      if (patch.managerId) next.assigneeId = eligibleReports(patch.managerId)[0]?.id || "";
+      return next;
+    }));
+  }
+
+  function addDraftTask() {
+    const previous = draftTasks[draftTasks.length - 1];
+    const managerId = previous?.assigneeId || chief?.id || "";
+    setDraftTasks((current) => [...current, makeDraftTask(nextDraftId, managerId)]);
+    setNextDraftId((value) => value + 1);
+  }
+
+  async function createPlan() {
+    if (!workspace || !chief || !objective.trim() || draftTasks.length === 0) return;
+    setCreatingPlan(true);
+    setError("");
+    try {
+      const result = await api<PlanSummary & { root_task_id: string }>(
+        `/v1/orgs/${orgId()}/workforce/plans`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            workspace_id: workspace,
+            objective: objective.trim(),
+            created_by_member_id: chief.id,
+            plan_title: planTitle.trim() || "Agency work plan",
+            tasks: draftTasks.map((task) => ({
+              workspace_id: workspace,
+              parent_task_id: "server-owned-root",
+              child_title: task.title.trim(),
+              child_description: task.description,
+              delegated_by_member_id: task.managerId,
+              assigned_to_member_id: task.assigneeId,
+              depends_on_ordinal: task.dependsOnOrdinal,
+              review_required: task.reviewRequired,
+            })),
+          }),
+        },
+      );
+      setObjective("");
+      setPlanTitle("Agency work plan");
+      setDraftTasks([makeDraftTask(1, chief.id)]);
+      setNextDraftId(2);
+      await load(workspace);
+      setSelectedPlanId(result.id);
+      setPlanDetail(await api<PlanDetail>(
+        `/v1/orgs/${orgId()}/workforce/plans/${result.id}?workspace_id=${encodeURIComponent(workspace)}`,
+      ));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setCreatingPlan(false);
+    }
+  }
+
+  async function refreshPlan() {
+    if (!workspace || !selectedPlanId) return;
+    try {
+      await api(
+        `/v1/orgs/${orgId()}/workforce/plans/${selectedPlanId}/refresh?workspace_id=${encodeURIComponent(workspace)}`,
+        { method: "POST" },
+      );
+      await load(workspace);
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  async function reviewDelegation(delegationId: string) {
+    if (!workspace || !selectedPlanId) return;
+    try {
+      await api(
+        `/v1/orgs/${orgId()}/workforce/delegations/${delegationId}/review?workspace_id=${encodeURIComponent(workspace)}&decision=approved`,
+        { method: "POST" },
+      );
+      await load(workspace);
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  async function requeueDelegation(delegationId: string) {
+    if (!workspace || !selectedPlanId) return;
+    try {
+      await api(
+        `/v1/orgs/${orgId()}/workforce/delegations/${delegationId}/requeue?workspace_id=${encodeURIComponent(workspace)}`,
+        { method: "POST" },
+      );
+      await load(workspace);
+    } catch (e) { setError((e as Error).message); }
   }
 
   async function showTrace(item: Execution) {
@@ -58,8 +242,146 @@ export default function Workflows() {
   }, []);
 
   return (
-    <Page eyebrow="AUTOMATION" title="Processes" description="Inspect durable Agency OS executions, attempts and lifecycle events. Business state and authorization remain owned by the OS.">
-      <div className="notice">Read-only operational view. Workers execute only registered runtime capabilities; no external side-effect handlers are enabled by default.</div>
+    <Page eyebrow="AUTOMATION & COORDINATION" title="Workflows & Chief of Staff" description="Founder-authorized plans, dependency scheduling, execution traces and review gates. The Agency OS retains business state and authorization.">
+      <div className="notice">Plan creation, requeue and founder review are authenticated OS actions. Execution traces remain read-only; external side-effect handlers are not enabled by default.</div>
+
+      <section className="panel" style={{ marginTop: 16 }}>
+        <div className="panel-head">
+          <div className="panel-title">Chief of Staff planning</div>
+          <span className="panel-note">{chief?.status || "Chief of Staff not provisioned"}</span>
+        </div>
+        <div className="notice">
+          Founder-authorized structured planning. The current version persists the plan, validates reporting lines and schedules eligible Agent work; Claude does not yet autonomously generate the task decomposition.
+        </div>
+        <div className="form-grid" style={{ marginTop: 12 }}>
+          <label>Workspace
+            <select className="field" value={workspace} onChange={(e) => { setWorkspace(e.target.value); void load(e.target.value); }}>
+              {workspaces.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
+            </select>
+          </label>
+          <label>Plan title
+            <input className="field" value={planTitle} onChange={(e) => setPlanTitle(e.target.value)} maxLength={200} />
+          </label>
+          <label className="wide">Founder objective
+            <textarea className="field" rows={3} value={objective} onChange={(e) => setObjective(e.target.value)} placeholder="Describe the outcome, constraints and acceptance criteria…" maxLength={2000} />
+          </label>
+        </div>
+        <div className="panel-head" style={{ marginTop: 18 }}>
+          <div className="panel-title">Delegated work packages</div>
+          <span className="panel-note">{draftTasks.length} tasks · dependencies must point to earlier steps</span>
+        </div>
+        {draftTasks.map((task, index) => {
+          const reports = eligibleReports(task.managerId);
+          const managers = activeMembers.filter((member) => member.member_type === "supervisor" || member.department_key.endsWith("_head"));
+          return (
+            <div className="panel" key={task.id} style={{ marginTop: 10 }}>
+              <div className="panel-head">
+                <div className="panel-title">Step {index + 1}</div>
+                {draftTasks.length > 1 && <button className="button secondary" onClick={() => setDraftTasks((rows) => rows.filter((row) => row.id !== task.id))}>Remove</button>}
+              </div>
+              <div className="form-grid">
+                <label className="wide">Task title
+                  <input className="field" value={task.title} onChange={(e) => updateDraftTask(task.id, { title: e.target.value })} maxLength={300} />
+                </label>
+                <label className="wide">Task instructions
+                  <textarea className="field" rows={2} value={task.description} onChange={(e) => updateDraftTask(task.id, { description: e.target.value })} maxLength={12000} />
+                </label>
+                <label>Delegated by
+                  <select className="field" value={task.managerId} onChange={(e) => updateDraftTask(task.id, { managerId: e.target.value })}>
+                    <option value="">Choose a supervisor</option>
+                    {managers.map((member) => <option key={member.id} value={member.id}>{member.title}</option>)}
+                  </select>
+                </label>
+                <label>Assign to direct report
+                  <select className="field" value={task.assigneeId} onChange={(e) => updateDraftTask(task.id, { assigneeId: e.target.value })}>
+                    <option value="">Choose an active, capable direct report</option>
+                    {reports.map((member) => <option key={member.id} value={member.id}>{member.title} · {member.department_key}</option>)}
+                  </select>
+                </label>
+                <label>Depends on
+                  <select className="field" value={task.dependsOnOrdinal ?? ""} onChange={(e) => updateDraftTask(task.id, { dependsOnOrdinal: e.target.value ? Number(e.target.value) : null })}>
+                    <option value="">No prerequisite</option>
+                    {draftTasks.slice(0, index).map((previous, priorIndex) => <option key={previous.id} value={priorIndex + 1}>Step {priorIndex + 1} · {previous.title || "Untitled task"}</option>)}
+                  </select>
+                </label>
+                <label className="check-row">
+                  <input type="checkbox" checked={task.reviewRequired} onChange={(e) => updateDraftTask(task.id, { reviewRequired: e.target.checked })} />
+                  Founder review required
+                </label>
+              </div>
+            </div>
+          );
+        })}
+        <div className="toolbar" style={{ marginTop: 14 }}>
+          <button className="button secondary" onClick={addDraftTask} disabled={draftTasks.length >= 50}>Add delegated task</button>
+          <button className="button" onClick={createPlan} disabled={!chief || chief.status !== "active" || !objective.trim() || creatingPlan || !draftTasks.length || draftTasks.some((task) => !task.title.trim() || !task.managerId || !task.assigneeId)}>
+            {creatingPlan ? "Creating plan…" : "Create founder-authorized plan"}
+          </button>
+        </div>
+        {chief && chief.status !== "active" && <div className="empty">Activate the Chief of Staff under Founder Authority before creating plans.</div>}
+        {!chief && <div className="empty">Provision the workforce chart before creating a plan.</div>}
+      </section>
+
+      <section className="panel" style={{ marginTop: 16 }}>
+        <div className="panel-head"><div className="panel-title">Orchestration plans</div><span className="panel-note">{plans.length} plans</span></div>
+        <div className="toolbar">
+          <select className="field" value={selectedPlanId} onChange={async (e) => {
+            const next = e.target.value;
+            setSelectedPlanId(next);
+            if (next && workspace) {
+              try {
+                setPlanDetail(await api<PlanDetail>("/v1/orgs/" + orgId() + "/workforce/plans/" + next + "?workspace_id=" + encodeURIComponent(workspace)));
+              } catch (err) { setError((err as Error).message); }
+            } else setPlanDetail(null);
+          }}>
+            <option value="">Select a plan</option>
+            {plans.map((plan) => <option key={plan.id} value={plan.id}>{plan.objective.slice(0, 70)} · {plan.status}</option>)}
+          </select>
+          <button className="button secondary" onClick={() => void load(workspace)} disabled={!workspace || loading}>Refresh all</button>
+          <button className="button secondary" onClick={refreshPlan} disabled={!selectedPlanId}>Reconcile plan state</button>
+        </div>
+        {planDetail && (
+          <>
+            <div className="grid stats" style={{ marginTop: 14 }}>
+              <div className="panel"><div className="panel-note">Tasks</div><div className="stat-value">{planDetail.task_count}</div></div>
+              <div className="panel"><div className="panel-note">Ready</div><div className="stat-value">{planDetail.ready_count}</div></div>
+              <div className="panel"><div className="panel-note">Blocked</div><div className="stat-value">{planDetail.blocked_count}</div></div>
+              <div className="panel"><div className="panel-note">Awaiting review</div><div className="stat-value">{planDetail.awaiting_review_count}</div></div>
+              <div className="panel"><div className="panel-note">Failed / complete</div><div className="stat-value">{planDetail.failed_count} / {planDetail.succeeded_count}</div></div>
+            </div>
+            <div className="activity-meta" style={{ marginTop: 10 }}>{planDetail.objective}</div>
+            <div className="table-wrap" style={{ marginTop: 12 }}>
+              <table className="data-table">
+                <thead><tr><th>Step</th><th>Work package</th><th>Assignee</th><th>Dependency</th><th>Status</th><th>Founder control</th></tr></thead>
+                <tbody>
+                  {planDetail.tasks.map((task) => {
+                    const member = workforce.members.find((row) => row.id === task.assignee_member_id);
+                    const dependency = planDetail.tasks.find((row) => row.child_task_id === task.dependency_task_id);
+                    return (
+                      <tr key={task.delegation_id}>
+                        <td>{task.ordinal}</td>
+                        <td>{task.title || task.child_task_id.slice(0, 12)}<div className="activity-meta">Task {task.child_task_id.slice(0, 10)}</div></td>
+                        <td>{member?.title || task.assignee_member_id.slice(0, 10)}</td>
+                        <td>{dependency ? "Step " + dependency.ordinal : "None"}</td>
+                        <td><span className={"status " + statusClass(task.status)}>{task.status}</span>{task.last_error_code && <div className="activity-meta">{task.last_error_code}</div>}</td>
+                        <td>
+                          {task.status === "awaiting_review" && task.review_required
+                            ? <button className="button secondary" onClick={() => void reviewDelegation(task.delegation_id)}>Approve result</button> : null}
+                          {task.status === "blocked" && task.last_error_code
+                            ? <button className="button secondary" onClick={() => void requeueDelegation(task.delegation_id)}>Requeue</button> : null}
+                          {task.status === "blocked" && !task.last_error_code ? "Waiting for dependency" : null}
+                          {task.status === "succeeded" ? "Complete" : null}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+        {!planDetail && <div className="empty">No plan selected. Create a founder-authorized plan or select an existing plan.</div>}
+      </section>
       <section className="panel">
         <div className="panel-head"><div className="panel-title">Execution history</div><span className="panel-note">{executions.length} records</span></div>
         <div className="form-grid">

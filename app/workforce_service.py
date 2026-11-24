@@ -160,7 +160,7 @@ def initialize_workforce(db: Session, *, org_id: str, workspace_id: str) -> dict
         )
         group_heads[group_key] = _member(
             db, org_id=org_id, workspace_id=workspace_id, unit_id=group_unit.id,
-            manager_id=founder.id, member_type="supervisor", name=lead_title,
+            manager_id=chief.id, member_type="supervisor", name=lead_title,
             title=lead_title, department_key=group_key,
             responsibilities=[f"Coordinate {group_name} group", "Review department priorities",
                               "Escalate risk and resource conflicts to Founder"],

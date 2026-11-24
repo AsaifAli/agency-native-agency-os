@@ -91,9 +91,11 @@ class Delegation(Base):
     __table_args__ = (
         CheckConstraint("parent_task_id <> child_task_id", name="ck_delegation_non_self"),
         CheckConstraint("review_status IN ('pending','approved','changes_requested','waived')", name="ck_delegation_review_status"),
+        CheckConstraint("status IN ('blocked','ready','queued','running','awaiting_review','succeeded','failed','cancelled')", name="ck_delegation_status"),
         UniqueConstraint("parent_task_id", "child_task_id", name="uq_delegation_parent_child"),
         Index("ix_delegation_scope_parent", "org_id", "workspace_id", "parent_task_id"),
         Index("ix_delegation_scope_assignee", "org_id", "workspace_id", "assigned_to_member_id"),
+        Index("ix_delegation_scope_status", "org_id", "workspace_id", "status"),
     )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
     org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
@@ -105,7 +107,39 @@ class Delegation(Base):
     dependency_task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"))
     review_required: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
     review_status: Mapped[str] = mapped_column(String(24), default="pending", server_default="pending", nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="ready", server_default="ready", nullable=False)
+    sequence_no: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
+    last_error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
+
+
+class OrchestrationPlan(Base):
+    """Persisted supervisor plan; OS owns the plan and task graph."""
+    __tablename__ = "orchestration_plans"
+    __table_args__ = (
+        CheckConstraint("status IN ('planned','in_progress','awaiting_review','succeeded','failed','cancelled')", name="ck_orchestration_plan_status"),
+        Index("ix_orchestration_plan_scope_status", "org_id", "workspace_id", "status"),
+        Index("ix_orchestration_plan_root_task", "root_task_id"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    root_task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
+    created_by_member_id: Mapped[str] = mapped_column(ForeignKey("workforce_members.id", ondelete="RESTRICT"), nullable=False)
+    objective: Mapped[str] = mapped_column(Text, nullable=False)
+    plan_title: Mapped[str] = mapped_column(String(200), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="planned", server_default="planned", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
+
+
+class OrchestrationPlanDelegation(Base):
+    __tablename__ = "orchestration_plan_delegations"
+    __table_args__ = (UniqueConstraint("plan_id", "ordinal", name="uq_plan_delegation_ordinal"),)
+    plan_id: Mapped[str] = mapped_column(ForeignKey("orchestration_plans.id", ondelete="CASCADE"), primary_key=True)
+    delegation_id: Mapped[str] = mapped_column(ForeignKey("delegations.id", ondelete="CASCADE"), primary_key=True)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class WorkforcePosition(Base):

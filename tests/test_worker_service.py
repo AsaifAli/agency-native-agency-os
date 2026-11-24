@@ -32,6 +32,7 @@ from app.worker_service import (
     promote_due_retries,
     recover_expired_execution_leases,
     start_execution,
+    queue_ready_delegations,
 )
 
 import time
@@ -1538,3 +1539,181 @@ def test_fail_execution_redacts_and_bounds_error_message(worker_context):
     assert "[REDACTED]" in failed_execution.error_message
     assert "\n" not in failed_execution.error_message
     assert failed_execution.error_message == failed_attempt.error_message
+
+
+def test_queue_ready_delegation_creates_idempotent_execution(worker_context):
+    from app.workforce_models import WorkforceMember, WorkforceCapability, Delegation
+
+    ctx = worker_context
+    db = ctx["db"]
+    agent = db.get(Agent, ctx["agent_id"])
+    parent = db.query(Task).filter_by(id=ctx["task_id"]).one()
+    member = WorkforceMember(
+        org_id=ctx["org_id"], workspace_id=ctx["workspace_id"],
+        agent_id=agent.id, member_type="agent", name="Delegated Specialist",
+        title="Delegated Specialist", department_key="engineering",
+        autonomy_level=2, status="active",
+    )
+    db.add(member)
+    db.flush()
+    db.add(WorkforceCapability(
+        org_id=ctx["org_id"], workspace_id=ctx["workspace_id"],
+        member_id=member.id, capability_key="research.internal",
+        scope="self", allowed_data_classes=["synthetic"],
+        allowed_actions=["research.execute"], tool_allowlist=[],
+        budget_minor=0, currency="INR", enabled=True,
+    ))
+    child = Task(
+        org_id=ctx["org_id"], workspace_id=ctx["workspace_id"],
+        title="Delegated work", description="Synthetic",
+        status="queued", created_by=ctx["user_id"],
+    )
+    db.add(child)
+    db.flush()
+    row = Delegation(
+        org_id=ctx["org_id"], workspace_id=ctx["workspace_id"],
+        parent_task_id=parent.id, child_task_id=child.id,
+        delegated_by_member_id=member.id, assigned_to_member_id=member.id,
+        review_required=True, review_status="pending", status="ready",
+    )
+    db.add(row)
+    db.commit()
+
+    queued = queue_ready_delegations(db, limit=10)
+    db.commit()
+    assert queued == 1
+    db.refresh(row)
+    assert row.status == "queued"
+    execution = db.query(Execution).filter_by(task_id=child.id).one()
+    assert execution.status == ExecutionStatus.queued
+    assert execution.idempotency_key == f"delegation:{row.id}"
+
+    queued_again = queue_ready_delegations(db, limit=10)
+    db.commit()
+    assert queued_again == 0
+    assert db.query(Execution).filter_by(task_id=child.id).count() == 1
+
+
+def test_dependency_blocked_delegation_queues_after_prerequisite_succeeds(worker_context):
+    from app.workforce_models import WorkforceMember, WorkforceCapability, Delegation
+
+    ctx = worker_context
+    db = ctx["db"]
+    agent = db.get(Agent, ctx["agent_id"])
+    parent = db.query(Task).filter_by(id=ctx["task_id"]).one()
+    prerequisite = Task(
+        org_id=ctx["org_id"], workspace_id=ctx["workspace_id"],
+        title="Prerequisite", status="queued", created_by=ctx["user_id"],
+    )
+    db.add(prerequisite)
+    db.flush()
+    member = WorkforceMember(
+        org_id=ctx["org_id"], workspace_id=ctx["workspace_id"],
+        agent_id=agent.id, member_type="agent", name="Dependent Specialist",
+        title="Dependent Specialist", department_key="engineering",
+        autonomy_level=2, status="active",
+    )
+    db.add(member)
+    db.flush()
+    db.add(WorkforceCapability(
+        org_id=ctx["org_id"], workspace_id=ctx["workspace_id"],
+        member_id=member.id, capability_key="research.internal",
+        scope="self", allowed_data_classes=["synthetic"],
+        allowed_actions=["research.execute"], tool_allowlist=[],
+        budget_minor=0, currency="INR", enabled=True,
+    ))
+    child = Task(
+        org_id=ctx["org_id"], workspace_id=ctx["workspace_id"],
+        title="Dependent work", status="blocked", created_by=ctx["user_id"],
+    )
+    db.add(child)
+    db.flush()
+    row = Delegation(
+        org_id=ctx["org_id"], workspace_id=ctx["workspace_id"],
+        parent_task_id=parent.id, child_task_id=child.id,
+        delegated_by_member_id=member.id, assigned_to_member_id=member.id,
+        dependency_task_id=prerequisite.id, review_required=False,
+        review_status="pending", status="blocked",
+    )
+    db.add(row)
+    db.commit()
+
+    assert queue_ready_delegations(db, limit=10) == 0
+    db.commit()
+    assert db.query(Execution).filter_by(task_id=child.id).count() == 0
+
+    prerequisite.status = "succeeded"
+    db.commit()
+    assert queue_ready_delegations(db, limit=10) == 1
+    db.commit()
+    db.refresh(row)
+    assert row.status == "queued"
+    assert db.query(Execution).filter_by(task_id=child.id).one().status == ExecutionStatus.queued
+
+
+def test_delegated_task_state_tracks_execution_and_review_gate(worker_context):
+    from app.workforce_models import WorkforceMember, WorkforceCapability, Delegation
+
+    ctx = worker_context
+    db = ctx["db"]
+    agent = db.get(Agent, ctx["agent_id"])
+    parent = db.query(Task).filter_by(id=ctx["task_id"]).one()
+    member = WorkforceMember(
+        org_id=ctx["org_id"], workspace_id=ctx["workspace_id"],
+        agent_id=agent.id, member_type="agent", name="Lifecycle Specialist",
+        title="Lifecycle Specialist", department_key="engineering",
+        autonomy_level=2, status="active",
+    )
+    db.add(member)
+    db.flush()
+    db.add(WorkforceCapability(
+        org_id=ctx["org_id"], workspace_id=ctx["workspace_id"],
+        member_id=member.id, capability_key="research.internal",
+        scope="self", allowed_data_classes=["synthetic"],
+        allowed_actions=["research.execute"], tool_allowlist=[],
+        budget_minor=0, currency="INR", enabled=True,
+    ))
+    child = Task(
+        org_id=ctx["org_id"], workspace_id=ctx["workspace_id"],
+        title="Lifecycle work", status="queued", created_by=ctx["user_id"],
+    )
+    db.add(child)
+    db.flush()
+    row = Delegation(
+        org_id=ctx["org_id"], workspace_id=ctx["workspace_id"],
+        parent_task_id=parent.id, child_task_id=child.id,
+        delegated_by_member_id=member.id, assigned_to_member_id=member.id,
+        review_required=True, review_status="pending", status="queued",
+    )
+    db.add(row)
+    db.flush()
+    execution = create_execution(
+        db, org_id=ctx["org_id"], workspace_id=ctx["workspace_id"],
+        task_id=child.id, agent_id=agent.id, requested_by=ctx["user_id"],
+        idempotency_key=f"delegation:{row.id}",
+    )
+    db.commit()
+    claimed = claim_next_execution(db, worker_id="delegation-lifecycle", lease_seconds=30)
+    assert claimed is not None
+    _, attempt = claimed
+    db.commit()
+    start_execution(
+        db, execution_id=execution.id, attempt_id=attempt.id,
+        worker_id="delegation-lifecycle", lease_seconds=30,
+    )
+    db.commit()
+    db.refresh(child)
+    db.refresh(row)
+    assert child.status == "running"
+    assert row.status == "running"
+
+    complete_execution(
+        db, execution_id=execution.id, attempt_id=attempt.id,
+        worker_id="delegation-lifecycle",
+        result={"provider": "mock", "detail": "synthetic result"},
+    )
+    db.commit()
+    db.refresh(child)
+    db.refresh(row)
+    assert child.status == "succeeded"
+    assert row.status == "awaiting_review"
