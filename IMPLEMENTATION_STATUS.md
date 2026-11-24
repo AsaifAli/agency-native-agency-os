@@ -1,18 +1,17 @@
 # Agency OS implementation status — stabilization checkpoint
 
-## Verified checkpoint before native-source cleanup
-- Working branch: `feature/agency-os-v5-stabilization`.
-- Verified pre-cleanup commit: `60b26b66c32a6f59cbe3c23a0d4a4a4058a76862`.
-- GitHub Actions run: [45467757664](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45467757664) — backend workflow completed successfully.
-- The workflow validates the Alembic graph, applies migrations to PostgreSQL 16, compiles Python source and runs backend plus PostgreSQL integration tests.
-- CI coverage includes workforce activation/capability enforcement, delegation guards, Managed Agents safety and signed/idempotent website lead intake.
-- The native evaluation-source move and snapshot cleanup require a fresh CI run; they are not covered by this pre-cleanup result.
+## Verified cleanup checkpoint
+- Branch: `feature/agency-os-native-runtime-cleanup`.
+- Commit: `80b989ae611b08d9a9c37925195517417ba79b05`.
+- GitHub Actions run: [45471143658](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45471143658) — **162 passed, 1 warning**.
+- CI validated the Alembic graph, applied migrations to PostgreSQL 16, compiled Python source and ran backend plus PostgreSQL integration tests after the evaluation move and snapshot cleanup.
+- The warning is the Starlette/httpx TestClient deprecation; no test failures were reported.
 - Frontend production build, live Claude provider session, website deployment, backup restore drill, independent penetration test and compliance assessment are not claimed.
 
 ## Implemented source capabilities
 - Governed workforce schema for offices, functional groups, departments, teams, human/agent/supervisor/sub-agent members, 121 durable position records, capability grants and task delegation lineage; backend migrations and tests passed.
 - Founder-only, idempotent bootstrap for the Office of the CEO, five functional groups, 16 departments, 31 teams, 5 group heads, 16 department heads, 16 department specialist definitions, Chief of Staff, Executive Assistant and the full 121-position catalogue. Workforce profiles remain inactive until the founder explicitly enables an eligible capability and activates a member.
-- Workspace-scoped workforce APIs and founder-only bootstrap, capability enablement, member activation and pause. Capability enablement checks autonomous action policy, public/synthetic data eligibility, configured runtime and absence of ungoverned tool grants. Delegation API enforces downward direct-manager relationships, active members, enabled agent definitions, enabled capability grants and founder exclusion. Backend CI passed on the pre-cleanup checkpoint.
+- Workspace-scoped workforce APIs and founder-only bootstrap, capability enablement, member activation and pause. Capability enablement checks autonomous action policy, public/synthetic data eligibility, configured runtime and absence of ungoverned tool grants. Delegation API enforces downward direct-manager relationships, active members, enabled agent definitions, enabled capability grants and founder exclusion. The cleanup commit passed backend CI (162 passed, 1 warning).
 - Signed public website lead intake endpoint (disabled by default): fixed server-side org/workspace mapping, HMAC-SHA256 timestamp validation, body/schema bounds, constant-time signature/key checks, source idempotency, CRM Contact/Lead creation, audit and transactional outbox event in one transaction. No outreach or execution is triggered.
 - Workspace-scoped, authenticated execution history API with bounded status filtering and result limits.
 - Execution trace API that joins execution and attempt lifecycle audit events after verifying the execution belongs to the requested organization/workspace.

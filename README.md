@@ -84,6 +84,6 @@ Never commit `.env`. Use separate dev, staging and production configuration. Rev
 
 ## Verification boundary
 
-The latest pre-cleanup branch head (`60b26b66c32a6f59cbe3c23a0d4a4a4058a76862`) passed the backend CI workflow (run [45467757664](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45467757664)). That run does not validate the cleanup commit, frontend production build, live Claude sessions, website deployment, backup restore, penetration testing or regulatory compliance. The cleanup commit must pass CI before it is merged.
+The native-source cleanup commit (`80b989ae611b08d9a9c37925195517417ba79b05`) passed backend CI: **162 passed, 1 warning** (run [45471143658](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45471143658)). CI validated migrations against PostgreSQL 16, Python compilation and the backend/PostgreSQL integration suite. The frontend production build, live Claude sessions, website deployment, backup restore, penetration testing and regulatory compliance remain unverified.
 
 This repository is a substantial development foundation, **not a production-ready or fully autonomous agency OS**. See `IMPLEMENTATION_STATUS.md` for the remaining work and evidence boundaries.
