@@ -19,7 +19,7 @@ from app.db import get_db
 from app.models import Role, Workspace, Approval, ApprovalStatus, Execution, ExecutionStatus, Task, Agent
 
 from app.domain_models import Project, Opportunity, Client
-from app.operations_models import ServicePlaybook, ServiceOffering, Proposal, ContractRecord, ScopeChangeRequest, TimeEntry, ProjectCost
+from app.operations_models import ServicePlaybook, ServiceOffering, Proposal, ContractRecord, ClientOnboarding, OnboardingChecklistItem, ScopeChangeRequest, TimeEntry, ProjectCost
 from app.telephony.models import OutboxEvent
 from app.action_policy import require_approved_action
 from app.audit import record_event
@@ -134,6 +134,58 @@ class ServiceOfferingOut(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+
+
+class OnboardingCreate(BaseModel):
+    workspace_id: str
+    contract_id: str
+
+
+class OnboardingItemUpdate(BaseModel):
+    status: str = Field(pattern="^(open|completed|waived)$")
+    note: str = Field(default="", max_length=2000)
+
+
+class OnboardingActivationPlan(BaseModel):
+    project_name: str = Field(min_length=3, max_length=240)
+    budget_minor: int = Field(ge=0, le=2_000_000_000)
+    estimated_hours: int = Field(ge=0, le=100000)
+    due_date: datetime | None = None
+
+
+class OnboardingOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    workspace_id: str
+    client_id: str
+    contract_id: str
+    project_id: str | None
+    status: str
+    approval_id: str | None
+    project_name: str
+    budget_minor: int
+    estimated_hours: int
+    due_date: datetime | None
+    activated_by: str | None
+    activated_at: datetime | None
+    created_by: str
+    created_at: datetime
+
+
+class OnboardingItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    onboarding_id: str
+    code: str
+    title: str
+    description: str
+    required: bool
+    status: str
+    completion_note: str
+    completed_by: str | None
+    completed_at: datetime | None
+    waived_by: str | None
+    waived_at: datetime | None
 
 
 class ContractCreate(BaseModel):
@@ -432,6 +484,236 @@ def update_playbook_status(
     item.status = body.status
     item.version += 1
     _event(db, org_id, p.user.id, "playbook.status_changed", "service_playbook", item.id, item.workspace_id, {"status": item.status})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.get("/onboardings", response_model=list[OnboardingOut])
+def list_onboardings(
+    org_id: str, workspace_id: str = Query(min_length=1),
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    role = require_membership(org_id, p, db)
+    require_role(role, {Role.owner, Role.admin, Role.operator, Role.reviewer})
+    _workspace(db, org_id, workspace_id)
+    return (db.query(ClientOnboarding)
+            .filter_by(org_id=org_id, workspace_id=workspace_id)
+            .order_by(ClientOnboarding.created_at.desc()).limit(250).all())
+
+
+@router.post("/onboardings", response_model=OnboardingOut, status_code=201)
+def create_onboarding(
+    org_id: str, body: OnboardingCreate,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    _write(org_id, body.workspace_id, p, db)
+    contract = db.query(ContractRecord).filter_by(
+        id=body.contract_id, org_id=org_id, workspace_id=body.workspace_id,
+    ).first()
+    if contract is None:
+        raise HTTPException(404, "Contract not found")
+    if contract.status != "executed":
+        raise HTTPException(409, "Client onboarding requires a recorded executed contract")
+    existing = db.query(ClientOnboarding.id).filter_by(
+        org_id=org_id, workspace_id=body.workspace_id, contract_id=contract.id,
+    ).first()
+    if existing:
+        raise HTTPException(409, "Onboarding already exists for this contract")
+    item = ClientOnboarding(
+        org_id=org_id, workspace_id=body.workspace_id, client_id=contract.client_id,
+        contract_id=contract.id, created_by=p.user.id,
+    )
+    db.add(item)
+    db.flush()
+    checklist = [
+        ("client_contacts", "Confirm client contacts and escalation path", "Record the primary sponsor, day-to-day contact and escalation route."),
+        ("discovery_acceptance", "Confirm requirements and acceptance criteria", "Ensure discovery notes, scope boundaries and measurable acceptance criteria are agreed."),
+        ("security_privacy", "Review data classification and security requirements", "Document data classes, workspace boundaries, access controls, retention and applicable client policies."),
+        ("access_prerequisites", "Confirm access and delivery prerequisites", "Confirm required source-system access and approved secret-sharing route; never store credentials in checklist notes."),
+        ("delivery_plan", "Agree delivery plan and change control", "Confirm delivery milestones, owners, dependencies, risks and the approved change-request process."),
+        ("kickoff", "Schedule client kickoff", "Record the kickoff date, participants, agenda and communication cadence."),
+    ]
+    for code, title, description in checklist:
+        db.add(OnboardingChecklistItem(
+            org_id=org_id, workspace_id=body.workspace_id, onboarding_id=item.id,
+            code=code, title=title, description=description, required=True,
+        ))
+    _event(db, org_id, p.user.id, "delivery.onboarding_created", "client_onboarding", item.id,
+           body.workspace_id, {"contract_id": contract.id, "client_id": contract.client_id})
+    _outbox(db, org_id, body.workspace_id, "delivery.onboarding_created", "client_onboarding", item.id,
+            {"contract_id": contract.id, "client_id": contract.client_id})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.get("/onboardings/{onboarding_id}/checklist", response_model=list[OnboardingItemOut])
+def list_onboarding_checklist(
+    org_id: str, onboarding_id: str,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    require_membership(org_id, p, db)
+    item = db.query(ClientOnboarding).filter_by(id=onboarding_id, org_id=org_id).first()
+    if item is None:
+        raise HTTPException(404, "Onboarding not found")
+    _workspace(db, org_id, item.workspace_id)
+    return (db.query(OnboardingChecklistItem)
+            .filter_by(org_id=org_id, workspace_id=item.workspace_id, onboarding_id=item.id)
+            .order_by(OnboardingChecklistItem.created_at.asc()).all())
+
+
+@router.patch("/onboardings/{onboarding_id}/checklist/{checklist_item_id}", response_model=OnboardingItemOut)
+def update_onboarding_checklist_item(
+    org_id: str, onboarding_id: str, checklist_item_id: str, body: OnboardingItemUpdate,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    onboarding = db.query(ClientOnboarding).filter_by(id=onboarding_id, org_id=org_id).with_for_update().first()
+    if onboarding is None:
+        raise HTTPException(404, "Onboarding not found")
+    _write(org_id, onboarding.workspace_id, p, db)
+    if onboarding.status != "preparing":
+        raise HTTPException(409, "Checklist is locked after onboarding leaves preparation")
+    item = db.query(OnboardingChecklistItem).filter_by(
+        id=checklist_item_id, org_id=org_id, workspace_id=onboarding.workspace_id,
+        onboarding_id=onboarding.id,
+    ).with_for_update().first()
+    if item is None:
+        raise HTTPException(404, "Checklist item not found")
+    if body.status == "waived":
+        require_founder_authority(db, org_id, p.user.id)
+        if len(body.note.strip()) < 3:
+            raise HTTPException(422, "Founder waiver requires a reason")
+        item.status = "waived"
+        item.waived_by = p.user.id
+        item.waived_at = datetime.now(timezone.utc)
+        item.completed_by = None
+        item.completed_at = None
+        item.completion_note = body.note.strip()
+    elif body.status == "completed":
+        if len(body.note.strip()) < 3:
+            raise HTTPException(422, "Checklist completion requires an evidence note")
+        item.status = "completed"
+        item.completed_by = p.user.id
+        item.completed_at = datetime.now(timezone.utc)
+        item.waived_by = None
+        item.waived_at = None
+        item.completion_note = body.note.strip()
+    else:
+        item.status = "open"
+        item.completed_by = None
+        item.completed_at = None
+        item.waived_by = None
+        item.waived_at = None
+        item.completion_note = body.note.strip()
+    _event(db, org_id, p.user.id, "delivery.onboarding_checklist_updated", "onboarding_checklist_item", item.id,
+           onboarding.workspace_id, {"status": item.status, "required": item.required})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.post("/onboardings/{onboarding_id}/submit-for-activation", response_model=OnboardingOut)
+def submit_onboarding_for_activation(
+    org_id: str, onboarding_id: str, body: OnboardingActivationPlan,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    item = db.query(ClientOnboarding).filter_by(id=onboarding_id, org_id=org_id).with_for_update().first()
+    if item is None:
+        raise HTTPException(404, "Onboarding not found")
+    _write(org_id, item.workspace_id, p, db)
+    if item.status != "preparing":
+        raise HTTPException(409, "Only preparing onboarding can be submitted")
+    open_required = db.query(OnboardingChecklistItem.id).filter_by(
+        org_id=org_id, workspace_id=item.workspace_id, onboarding_id=item.id,
+        required=True, status="open",
+    ).first()
+    if open_required:
+        raise HTTPException(409, "Complete or explicitly waive all required checklist items before submission")
+    contract = db.query(ContractRecord).filter_by(
+        id=item.contract_id, org_id=org_id, workspace_id=item.workspace_id, status="executed",
+    ).first()
+    if contract is None:
+        raise HTTPException(409, "Executed contract evidence is required")
+    if body.due_date and body.due_date.tzinfo is None:
+        raise HTTPException(422, "Project due date must include a timezone")
+    approval = Approval(
+        org_id=org_id, workspace_id=item.workspace_id, action_type="delivery.activate",
+        resource_id=item.id, idempotency_key=f"delivery-activate:{item.id}",
+        request_payload={
+            "contract_id": contract.id, "client_id": item.client_id,
+            "project_name": body.project_name, "budget_minor": body.budget_minor,
+            "estimated_hours": body.estimated_hours,
+            "due_date": body.due_date.isoformat() if body.due_date else None,
+        },
+        requested_by=p.user.id,
+    )
+    db.add(approval)
+    db.flush()
+    item.status = "pending_approval"
+    item.approval_id = approval.id
+    item.activation_plan = {
+        "project_name": body.project_name, "budget_minor": body.budget_minor,
+        "estimated_hours": body.estimated_hours,
+        "due_date": body.due_date.isoformat() if body.due_date else None,
+    }
+    item.project_name = body.project_name
+    item.budget_minor = body.budget_minor
+    item.estimated_hours = body.estimated_hours
+    item.due_date = body.due_date
+    _event(db, org_id, p.user.id, "delivery.onboarding_submitted", "client_onboarding", item.id,
+           item.workspace_id, {"approval_id": approval.id, "action_type": "delivery.activate"})
+    _outbox(db, org_id, item.workspace_id, "delivery.onboarding_submitted", "client_onboarding", item.id,
+            {"approval_id": approval.id})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.post("/onboardings/{onboarding_id}/activate", response_model=OnboardingOut)
+def activate_onboarding(
+    org_id: str, onboarding_id: str,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    item = db.query(ClientOnboarding).filter_by(id=onboarding_id, org_id=org_id).with_for_update().first()
+    if item is None:
+        raise HTTPException(404, "Onboarding not found")
+    _write(org_id, item.workspace_id, p, db)
+    if item.status != "pending_approval" or not item.approval_id:
+        raise HTTPException(409, "Onboarding is not awaiting delivery activation approval")
+    contract = db.query(ContractRecord).filter_by(
+        id=item.contract_id, org_id=org_id, workspace_id=item.workspace_id, status="executed",
+    ).first()
+    if contract is None:
+        raise HTTPException(409, "Executed contract is no longer available")
+    require_approved_action(
+        db, approval_id=item.approval_id, org_id=org_id,
+        workspace_id=item.workspace_id, action_type="delivery.activate",
+        resource_id=item.id, actor_user_id=p.user.id,
+    )
+    proposal = db.query(Proposal).filter_by(
+        id=contract.proposal_id, org_id=org_id, workspace_id=item.workspace_id,
+    ).first()
+    if proposal is None:
+        raise HTTPException(409, "Contract proposal snapshot source is unavailable")
+    project = Project(
+        org_id=org_id, workspace_id=item.workspace_id, client_id=item.client_id,
+        opportunity_id=proposal.opportunity_id, name=item.project_name,
+        description=contract.terms_snapshot.get("scope_summary", ""),
+        status="planned", priority="normal", budget_minor=item.budget_minor,
+        contract_value_minor=contract.amount_minor, estimated_hours=item.estimated_hours,
+        currency=contract.currency, due_date=item.due_date, owner_user_id=p.user.id,
+    )
+    db.add(project)
+    db.flush()
+    item.project_id = project.id
+    item.status = "active"
+    item.activated_by = p.user.id
+    item.activated_at = datetime.now(timezone.utc)
+    _event(db, org_id, p.user.id, "delivery.onboarding_activated", "client_onboarding", item.id,
+           item.workspace_id, {"project_id": project.id, "contract_id": contract.id})
+    _outbox(db, org_id, item.workspace_id, "delivery.onboarding_activated", "client_onboarding", item.id,
+            {"project_id": project.id, "contract_id": contract.id})
     db.commit()
     db.refresh(item)
     return item
