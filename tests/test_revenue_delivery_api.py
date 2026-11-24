@@ -90,6 +90,12 @@ def test_revenue_delivery_vertical_slice_and_audit(client):
     contact_id = r.json()["id"]
     assert r.json()["email"] == "asha@example.test"
 
+    duplicate = client.post(f"/v1/orgs/{org}/contacts", headers=auth(), json={
+        "workspace_id": ws, "client_id": client_id,
+        "first_name": "Asha Duplicate", "email": "  asha@EXAMPLE.test ",
+    })
+    assert duplicate.status_code == 409
+
     r = client.post(f"/v1/orgs/{org}/leads", headers=auth(), json={
         "workspace_id": ws, "client_id": client_id, "contact_id": contact_id,
         "company_name": "Acme Industries", "score": 82, "source": "referral"
