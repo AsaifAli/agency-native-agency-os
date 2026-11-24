@@ -199,6 +199,13 @@ def test_opportunity_can_be_linked_to_workspace_client_only(client):
     assert linked.status_code == 200, linked.text
     assert linked.json()["client_id"] == local_client.json()["id"]
 
+    unlinked = client.patch(
+        f"/v1/orgs/{org}/opportunities/{opportunity.json()['id']}",
+        headers=auth(), json={"stage": "proposal", "client_id": None},
+    )
+    assert unlinked.status_code == 200, unlinked.text
+    assert unlinked.json()["client_id"] is None
+
     foreign = client.patch(
         f"/v1/orgs/{org}/opportunities/{opportunity.json()['id']}",
         headers=auth(), json={"stage": "proposal", "client_id": client.foreign_client_id},
