@@ -12,7 +12,7 @@ from app.models import (
     ExecutionStatus,
     Task,
 )
-from app.workforce_models import Delegation, WorkforceMember
+from app.workforce_models import Delegation, WorkforceMember, OrchestrationPlanDraft
 
 
 MAX_ERROR_MESSAGE_LENGTH = 1000
@@ -38,6 +38,72 @@ def _sanitize_error_message(value: str) -> str:
     sanitized = re.sub(r"[\x00-\x1f\x7f]", " ", sanitized)
     return sanitized[:MAX_ERROR_MESSAGE_LENGTH]
 
+
+
+def _sync_plan_draft_execution(
+    db: Session,
+    execution: Execution,
+    state: str,
+    error_code: str | None = None,
+) -> None:
+    """Keep a durable Chief of Staff draft in step with its OS execution."""
+    draft = db.query(OrchestrationPlanDraft).filter_by(
+        id=(execution.request_metadata or {}).get("plan_draft_id"),
+        org_id=execution.org_id,
+        workspace_id=execution.workspace_id,
+        execution_id=execution.id,
+    ).with_for_update().one_or_none()
+    if draft is None:
+        return
+
+    task = db.query(Task).filter_by(
+        id=draft.task_id, org_id=draft.org_id,
+        workspace_id=draft.workspace_id,
+    ).with_for_update().one_or_none()
+
+    if state == "succeeded":
+        from app.workforce_planning import PlanDraftOutputError, validate_plan_draft_output
+        try:
+            detail = (execution.result or {}).get("detail", "")
+            draft.suggested_plan = validate_plan_draft_output(detail)
+        except PlanDraftOutputError:
+            draft.status = "invalid_output"
+            draft.error_code = "PLAN_DRAFT_OUTPUT_INVALID"
+            if task:
+                task.status = "failed"
+        else:
+            draft.status = "ready_for_review"
+            draft.error_code = None
+            if task:
+                task.status = "awaiting_review"
+    elif state == "running":
+        draft.status = "running"
+        draft.error_code = None
+        if task:
+            task.status = "running"
+    elif state == "queued":
+        draft.status = "queued"
+        draft.error_code = error_code
+        if task:
+            task.status = "queued"
+    elif state == "failed":
+        draft.status = "failed"
+        draft.error_code = error_code or "PLAN_DRAFT_EXECUTION_FAILED"
+        if task:
+            task.status = "failed"
+    elif state == "cancelled":
+        draft.status = "cancelled"
+        draft.error_code = error_code
+        if task:
+            task.status = "cancelled"
+
+    draft.updated_at = datetime.now(timezone.utc)
+    record_event(
+        db, execution.org_id, None, "workforce.plan_draft_state_changed",
+        "orchestration_plan_draft", draft.id, execution.workspace_id,
+        {"status": draft.status, "execution_id": execution.id,
+         "error_code": draft.error_code},
+    )
 
 
 def _sync_task_delegation(db: Session, execution: Execution, state: str,
@@ -264,6 +330,7 @@ def start_execution(
         execution.started_at = now
 
     execution.last_attempt_at = now
+    _sync_plan_draft_execution(db, execution, "running")
 
     attempt.status = ExecutionAttemptStatus.running
     attempt.started_at = now
@@ -417,6 +484,7 @@ def complete_execution(
     attempt.error_code = None
     attempt.error_message = None
     _sync_task_delegation(db, execution, "succeeded")
+    _sync_plan_draft_execution(db, execution, "succeeded")
 
     record_event(
         db,
@@ -513,6 +581,7 @@ def fail_execution(
 
     if retry_scheduled:
         _sync_task_delegation(db, execution, "queued", error_code)
+        _sync_plan_draft_execution(db, execution, "queued", error_code)
         delay_seconds = min(
             base_delay_seconds * (2 ** (attempt.attempt_number - 1)),
             max_delay_seconds,
@@ -544,6 +613,7 @@ def fail_execution(
         execution.next_retry_at = None
         execution.finished_at = now
         _sync_task_delegation(db, execution, "failed", error_code)
+        _sync_plan_draft_execution(db, execution, "failed", error_code)
 
         record_event(
             db,
@@ -879,6 +949,7 @@ def recover_expired_execution_leases(
 
         if retry_scheduled:
             _sync_task_delegation(db, execution, "queued", error_code)
+            _sync_plan_draft_execution(db, execution, "queued", error_code)
             delay_seconds = min(
                 base_delay_seconds * (2 ** (attempt.attempt_number - 1)),
                 max_delay_seconds,
@@ -913,6 +984,7 @@ def recover_expired_execution_leases(
             execution.next_retry_at = None
             execution.finished_at = now
             _sync_task_delegation(db, execution, "failed", error_code)
+            _sync_plan_draft_execution(db, execution, "failed", error_code)
 
             record_event(
                 db,

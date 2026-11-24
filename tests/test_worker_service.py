@@ -1420,7 +1420,7 @@ def test_processor_does_not_persist_after_heartbeat_infrastructure_failure(
             provider="mock",
             external_run_id=None,
             status="succeeded",
-            detail="d" * 1001,
+            detail="d" * 16001,
         ),
         ExecutionResult(
             provider="",
@@ -1505,7 +1505,7 @@ def test_runtime_result_rejects_oversized_utf8_payload():
         provider="mock",
         external_run_id="run-123",
         status="succeeded",
-        detail="😀" * 1000,
+        detail="😀" * 8500,
     )
 
     with pytest.raises(ValueError, match="permitted size"):
@@ -1717,3 +1717,130 @@ def test_delegated_task_state_tracks_execution_and_review_gate(worker_context):
     db.refresh(row)
     assert child.status == "succeeded"
     assert row.status == "awaiting_review"
+
+def _create_plan_draft_worker_context(ctx, detail_label="valid"):
+    import json
+    from app.models import Task
+    from app.workforce_models import OrchestrationPlanDraft, WorkforceMember
+    from app.workforce_service import initialize_workforce
+
+    db = ctx["db"]
+    initialize_workforce(
+        db, org_id=ctx["org_id"], workspace_id=ctx["workspace_id"]
+    )
+    chief = db.query(WorkforceMember).filter_by(
+        org_id=ctx["org_id"], workspace_id=ctx["workspace_id"],
+        department_key="office_chief_of_staff",
+    ).one()
+    task = db.get(Task, ctx["task_id"])
+    execution = create_worker_execution(ctx)
+    detail = (
+        json.dumps({
+            "schema_version": 1,
+            "summary": "A bounded synthetic implementation plan",
+            "tasks": [{
+                "title": "Prepare a synthetic review",
+                "description": "Prepare a bounded implementation and validation outline.",
+                "department_key": "quality_assurance_security",
+                "depends_on_ordinal": None,
+                "acceptance_criteria": ["The review has explicit pass criteria."],
+                "review_required": True,
+            }],
+            "risks": [],
+            "founder_decisions": [],
+        })
+        if detail_label == "valid" else "not a JSON plan"
+    )
+    draft = OrchestrationPlanDraft(
+        org_id=ctx["org_id"], workspace_id=ctx["workspace_id"],
+        task_id=task.id, execution_id=execution.id,
+        requested_by_user_id=ctx["user_id"], created_by_member_id=chief.id,
+        idempotency_key=f"draft-{uuid.uuid4().hex}",
+        objective="Prepare a synthetic quality review plan",
+        plan_title="Synthetic quality plan",
+        status="queued", suggested_plan={},
+    )
+    db.add(draft)
+    db.flush()
+    execution.request_metadata = {
+        "purpose": "workforce.plan_draft",
+        "plan_draft_id": draft.id,
+        "schema_version": 1,
+    }
+    db.commit()
+    return execution, draft
+
+
+def _complete_worker_execution(ctx, execution):
+    db = ctx["db"]
+    claimed = claim_next_execution(
+        db, worker_id="plan-draft-test-worker", lease_seconds=30,
+    )
+    assert claimed is not None
+    claimed_execution, attempt = claimed
+    assert claimed_execution.id == execution.id
+    db.commit()
+    start_execution(
+        db, execution_id=execution.id, attempt_id=attempt.id,
+        worker_id="plan-draft-test-worker", lease_seconds=30,
+    )
+    db.commit()
+    complete_execution(
+        db, execution_id=execution.id, attempt_id=attempt.id,
+        worker_id="plan-draft-test-worker",
+        result={
+            "provider": "mock",
+            "external_run_id": "synthetic-plan-draft",
+            "status": "succeeded",
+            "detail": ctx["plan_detail"],
+        },
+    )
+    db.commit()
+
+
+def test_plan_draft_execution_becomes_founder_reviewable(worker_context):
+    from app.workforce_models import OrchestrationPlanDraft
+    from app.models import Task
+
+    ctx = worker_context
+    execution, draft = _create_plan_draft_worker_context(ctx)
+    import json
+    ctx["plan_detail"] = json.dumps({
+        "schema_version": 1,
+        "summary": "A bounded synthetic implementation plan",
+        "tasks": [{
+            "title": "Prepare a synthetic review",
+            "description": "Prepare a bounded implementation and validation outline.",
+            "department_key": "quality_assurance_security",
+            "depends_on_ordinal": None,
+            "acceptance_criteria": ["The review has explicit pass criteria."],
+            "review_required": True,
+        }],
+        "risks": [],
+        "founder_decisions": [],
+    })
+    _complete_worker_execution(ctx, execution)
+    ctx["db"].refresh(draft)
+    ctx["db"].expire_all()
+    saved = ctx["db"].get(OrchestrationPlanDraft, draft.id)
+    task = ctx["db"].get(Task, draft.task_id)
+    assert saved.status == "ready_for_review"
+    assert saved.suggested_plan["tasks"][0]["department_key"] == "quality_assurance_security"
+    assert task.status == "awaiting_review"
+
+
+def test_invalid_plan_draft_output_is_never_reviewable(worker_context):
+    from app.workforce_models import OrchestrationPlanDraft
+    from app.models import Task
+
+    ctx = worker_context
+    execution, draft = _create_plan_draft_worker_context(ctx, detail_label="invalid")
+    ctx["plan_detail"] = "This is not JSON."
+    _complete_worker_execution(ctx, execution)
+    ctx["db"].expire_all()
+    saved = ctx["db"].get(OrchestrationPlanDraft, draft.id)
+    task = ctx["db"].get(Task, draft.task_id)
+    assert saved.status == "invalid_output"
+    assert saved.error_code == "PLAN_DRAFT_OUTPUT_INVALID"
+    assert task.status == "failed"
+

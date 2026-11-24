@@ -142,6 +142,64 @@ class OrchestrationPlanDelegation(Base):
     ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
+class OrchestrationPlanDraft(Base):
+    """Durable Claude-generated proposal awaiting explicit founder review."""
+    __tablename__ = "orchestration_plan_drafts"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('queued','running','ready_for_review','invalid_output','failed','approved','rejected','cancelled')",
+            name="ck_orchestration_plan_draft_status",
+        ),
+        UniqueConstraint("org_id", "workspace_id", "idempotency_key",
+                         name="uq_orchestration_plan_draft_idempotency"),
+        UniqueConstraint("execution_id", name="uq_orchestration_plan_draft_execution"),
+        Index("ix_orchestration_plan_draft_scope_status",
+              "org_id", "workspace_id", "status"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False
+    )
+    execution_id: Mapped[str] = mapped_column(
+        ForeignKey("executions.id", ondelete="CASCADE"), nullable=False
+    )
+    requested_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_by_member_id: Mapped[str] = mapped_column(
+        ForeignKey("workforce_members.id", ondelete="RESTRICT"), nullable=False
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    objective: Mapped[str] = mapped_column(Text, nullable=False)
+    plan_title: Mapped[str] = mapped_column(String(200), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(24), default="queued", server_default="queued", nullable=False
+    )
+    suggested_plan: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    approved_plan_id: Mapped[str | None] = mapped_column(
+        ForeignKey("orchestration_plans.id", ondelete="SET NULL"), nullable=True
+    )
+    reviewed_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
+    )
+
+
 class WorkforcePosition(Base):
     """Durable role/position catalogue, independent from a person or agent session."""
     __tablename__ = "workforce_positions"
