@@ -19,7 +19,7 @@ from app.telephony.models import OutboxEvent
 from app.outreach.models import OutboundSender, CommunicationConsent, CommunicationBlock, OutboundMessage, OutboundMessageEvent
 from app.outreach.schemas import (
     SenderCreate, SenderStatusUpdate, ConsentCreate, MessageCreate, StopEventCreate,
-    BlockRelease, SenderOut, ConsentOut, BlockOut, MessageOut, MessageEventOut,
+    BlockRelease, MessageReject, SenderOut, ConsentOut, BlockOut, MessageOut, MessageEventOut,
 )
 
 router = APIRouter(prefix="/v1/orgs/{org_id}/outreach", tags=["outreach"])
@@ -362,8 +362,8 @@ def submit_message_for_approval(
     if item is None:
         raise HTTPException(404, "Outbound message not found")
     _write(org_id, item.workspace_id, p, db)
-    if item.status != "draft":
-        raise HTTPException(409, "Only draft messages can be submitted")
+    if item.status not in {"draft", "rejected"}:
+        raise HTTPException(409, "Only draft or rejected messages can be submitted")
     sender = db.query(OutboundSender).filter_by(
         id=item.sender_id, org_id=org_id, workspace_id=item.workspace_id,
     ).first()
@@ -396,6 +396,39 @@ def submit_message_for_approval(
            item.workspace_id, {"approval_id": approval.id, "consent_id": consent.id})
     _outbox(db, org_id, item.workspace_id, "outreach.message_submitted", "outbound_message", item.id,
             {"approval_id": approval.id}, key_suffix=approval.id)
+    db.commit()
+    db.refresh(item)
+    return item
+
+ 
+@router.post("/messages/{message_id}/reject", response_model=MessageOut)
+def reject_message(
+    org_id: str, message_id: str, body: MessageReject,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    item = db.query(OutboundMessage).filter_by(id=message_id, org_id=org_id).with_for_update().first()
+    if item is None:
+        raise HTTPException(404, "Outbound message not found")
+    require_founder_authority(db, org_id, p.user.id)
+    if item.status != "pending_approval" or item.approval_id != body.approval_id:
+        raise HTTPException(409, "Outbound message is not awaiting this approval")
+    approval = db.query(Approval).filter_by(
+        id=body.approval_id, org_id=org_id, workspace_id=item.workspace_id,
+        action_type="external_communication.sensitive", resource_id=item.id,
+    ).with_for_update().first()
+    if approval is None:
+        raise HTTPException(404, "Outbound message approval not found")
+    if approval.status == ApprovalStatus.pending:
+        approval.status = ApprovalStatus.rejected
+        approval.decided_by = p.user.id
+        approval.decision_note = body.note
+        approval.decided_at = datetime.now(timezone.utc)
+    elif approval.status != ApprovalStatus.rejected or not approval.decided_by or not has_founder_authority(db, org_id, approval.decided_by):
+        raise HTTPException(409, "Outbound message approval is no longer rejectable")
+    item.status = "rejected"
+    item.stop_reason = "founder_rejected"
+    _event(db, org_id, p.user.id, "outreach.message_rejected", "outbound_message", item.id,
+           item.workspace_id, {"approval_id": approval.id, "note": body.note})
     db.commit()
     db.refresh(item)
     return item
