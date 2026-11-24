@@ -178,7 +178,8 @@ def initialize_workforce(db: Session, *, org_id: str, workspace_id: str) -> dict
             name=name, unit_type="department", department_key=key, description=description,
         )
         department_units[key] = unit
-        for team_key, (team_name, _) in DEPARTMENT_TEAMS[key].items():
+        _, _, department_teams = DEPARTMENT_TEAMS[key]
+        for team_key, (team_name, _) in department_teams.items():
             team_units[(key, team_key)] = _unit(
                 db, org_id=org_id, workspace_id=workspace_id, parent_id=unit.id,
                 name=team_name, unit_type="team", department_key=key,
