@@ -4,9 +4,9 @@
 
 - Active implementation baseline: `feature/agency-os-v5-autonomous-business-os` at commit `d30957e5`.
 - This stabilization branch is based on that exact v5 commit; it is not based on the older `main` branch.
-- The v5 bundle manifest reports **102 passed, 1 skipped** in its build environment.
-- `docs/PHASE_1_EXECUTION_RELIABILITY.md` separately records **129 passed** and 3 PostgreSQL integration tests passed, but its prior text also said those PostgreSQL tests had not run. That contradiction has been corrected and the historical result remains unverified by this branch's CI.
-- A reproducible backend CI workflow is being added on this branch. Until its run completes, there is no fresh CI pass claim.
+- The original v5 bundle manifest reported **102 passed, 1 skipped**; the newer reproducible CI result supersedes that historical build-environment count.
+- The previous Phase 1 document contained contradictory historical test claims. The contradiction is corrected; the current 133-test CI run is the verified baseline.
+- GitHub Actions backend CI passed on commit `4e914384bd1eef94c1ffe61b94ea5e284e6da8b0`: **133 passed, 0 skipped, 1 upstream Starlette/httpx deprecation warning**. The workflow validated the Alembic graph, applied all migrations to a disposable PostgreSQL 16 database, compiled Python source and ran the full backend suite including the PostgreSQL concurrency/recovery tests.
 - Frontend production build has not been verified. There is no committed frontend lockfile, so CI does not claim reproducible frontend dependency installation.
 - No production deployment, live provider integration, backup restore drill, penetration test, or compliance assessment is claimed.
 

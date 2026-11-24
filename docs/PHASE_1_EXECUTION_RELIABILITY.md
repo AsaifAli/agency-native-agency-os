@@ -48,16 +48,16 @@ Expected head: `e3f1a9c7b2d4`.
 
 ## Verification performed
 
-Previously recorded local validation (not independently reproduced by this commit):
+Verified GitHub Actions CI run on stabilization commit `4e914384bd1eef94c1ffe61b94ea5e284e6da8b0`:
 
-- `python -m pytest -q`: 129 passed, 1 non-blocking deprecation warning.
-- `python -m pytest -q -rs tests/test_worker_postgres.py`: 3 passed, 0 skipped.
+- `python -m pytest -q -rs`: **133 passed, 0 skipped, 1 upstream Starlette/httpx deprecation warning**.
+- PostgreSQL worker-concurrency, outbox-concurrency and expired-lease/dead-letter recovery tests ran as part of the suite and passed.
 - PostgreSQL execution-worker concurrency test passed.
 - PostgreSQL outbox-worker concurrency test passed.
 - PostgreSQL expired-lease recovery and dead-letter test passed.
 - `git diff --check`: passed.
 - `docker compose run --rm migrate alembic check`: no new upgrade operations detected.
-- Development database Alembic revision: `e3f1a9c7b2d4` (head).
+- Alembic graph had one head and all migrations applied successfully to disposable PostgreSQL 16 CI database.
 
 The PostgreSQL tests use the dedicated `agency_os_worker_test` database.
 The migration was applied to the development database after a backup was
@@ -101,7 +101,7 @@ rollback procedure.
 4. Review lease duration and recovery behavior for long-running handlers.
 5. Complete the final code review and commit the Phase 1 changes.
 
-The prior version of this document also stated that PostgreSQL tests had not run, contradicting the validation record above. That stale statement has been removed. The reported local test results are historical claims, not CI evidence from this stabilization branch. No production event handlers are enabled.
+The prior version of this document also stated that PostgreSQL tests had not run, contradicting the validation record above. That stale statement has been removed. The CI result is reproducible evidence for this commit and its disposable PostgreSQL test database; it does not establish migration safety against the user's existing database or production readiness. No production event handlers are enabled.
 
 ## Operational configuration
 
