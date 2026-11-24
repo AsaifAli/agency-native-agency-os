@@ -9,7 +9,7 @@ const statusClass = (status: string) => ["succeeded", "failed", "cancelled"].inc
 type WorkforceMember = {
   id: string; manager_member_id: string | null; agent_id: string | null;
   member_type: string; name: string; title: string; department_key: string;
-  status: string; is_founder_reserved: boolean;
+  status: string; autonomy_level: number; is_founder_reserved: boolean;
 };
 type WorkforceCapability = {
   member_id: string; enabled: boolean; allowed_actions: string[];
@@ -95,7 +95,7 @@ export default function Workflows() {
     setError("");
     setLoading(true);
     try {
-      const [rows, workforceRows, planRows] = await Promise.all([
+      const [rows, workforceRows, planRows, planDraftRows] = await Promise.all([
         api<Execution[]>(`/v1/orgs/${orgId()}/executions?workspace_id=${encodeURIComponent(workspaceId)}&limit=200`),
         api<Workforce>(`/v1/orgs/${orgId()}/workforce?workspace_id=${encodeURIComponent(workspaceId)}`),
         api<PlanSummary[]>(`/v1/orgs/${orgId()}/workforce/plans?workspace_id=${encodeURIComponent(workspaceId)}`),
