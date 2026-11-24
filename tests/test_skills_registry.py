@@ -53,3 +53,22 @@ def test_invalid_catalog_fails_closed(monkeypatch, tmp_path):
         pass
     else:
         raise AssertionError("Unsupported catalog schema must fail closed")
+
+
+def test_department_charters_reference_known_skills_without_granting_permissions():
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    catalog_names = {skill["name"] for skill in list_skills()}
+    charters = sorted((root / "agents" / "departments").glob("*.md"))
+    charters = [path for path in charters if path.name != "README.md"]
+    assert len(charters) == 16
+
+    for charter in charters:
+        content = charter.read_text(encoding="utf-8")
+        assert "Select reviewed skill IDs from" not in content
+        referenced = set(re.findall(r"\]\(\.\./\.\./skills/([a-z0-9-]+)/SKILL\.md\)", content))
+        assert referenced
+        assert referenced <= catalog_names
+        assert "does not enable a workforce member or grant a tool" in content or "Recommendations only" in content
