@@ -20,8 +20,9 @@ class CallSession(Base):
         Index("ix_call_sessions_scope_created", "org_id", "workspace_id", "created_at"),
         Index("ix_call_sessions_scope_lead", "org_id", "workspace_id", "lead_id"),
         CheckConstraint("direction IN ('inbound','outbound')", name="ck_call_direction"),
-        CheckConstraint("status IN ('planned','queued','ringing','in_progress','completed','failed','cancelled')", name="ck_call_status"),
+        CheckConstraint("status IN ('planned','pending_approval','queued','ringing','in_progress','completed','failed','cancelled')", name="ck_call_status"),
         CheckConstraint("duration_seconds IS NULL OR duration_seconds >= 0", name="ck_call_duration_nonnegative"),
+        CheckConstraint("call_authorization IN ('','founder_initiated','requested_callback')", name="ck_call_authorization"),
         UniqueConstraint("provider", "provider_call_id", name="uq_call_provider_call_id"),
     )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
@@ -38,6 +39,11 @@ class CallSession(Base):
     outcome: Mapped[str] = mapped_column(String(80), nullable=False, default="", server_default="")
     summary: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     recording_consent: Mapped[str] = mapped_column(String(20), nullable=False, default="not_requested", server_default="not_requested")
+    call_authorization: Mapped[str] = mapped_column(String(32), nullable=False, default="", server_default="")
+    call_authorization_reference: Mapped[str] = mapped_column(String(240), nullable=False, default="", server_default="")
+    consent_id: Mapped[str | None] = mapped_column(ForeignKey("communication_consents.id"), nullable=True)
+    consent_snapshot: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    approval_id: Mapped[str | None] = mapped_column(ForeignKey("approvals.id"), nullable=True)
     recording_object_key: Mapped[str | None] = mapped_column(String(500))
     duration_seconds: Mapped[int | None] = mapped_column(Integer)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
