@@ -31,7 +31,8 @@
 - Founder-only outbox health endpoint.
 - Workspace-scoped call/transcript records; no live voice provider or dialing.
 - Delivery playbooks, founder-approved scope changes, time/cost records, provisional project financial summaries, exception inbox and execution reliability views.
-- Target organization model and governance skills are documented in `docs/AGENCY_ORGANIZATION_WORKFORCE_BLUEPRINT.md`, `docs/REFERENCE_INTEGRATION_DECISIONS.md` and `skills/`; this does not mean all positions/skills are provisioned as live agents.
+- Curated Agent Skills catalog contains ten reviewed, source-pinned instruction packs with authenticated read-only catalog/detail APIs, license/provenance metadata, and per-file SHA-256 digests. All entries are disabled, tool-free, and limited to public/synthetic data; the catalog does not yet assign skills to workforce members or load provider-side Claude skills.
+- Target organization model and workforce governance are documented in `docs/AGENCY_ORGANIZATION_WORKFORCE_BLUEPRINT.md` and `docs/REFERENCE_INTEGRATION_DECISIONS.md`; skill availability does not mean every role has a live runtime.
 
 ## Workforce/runtime gaps still open
 - Workforce bootstrap provisions organisational profiles and positions inactive. Founder-only capability enablement and member activation are implemented as explicit, policy-checked operations; this does not automatically provision separate provider Agents or start Claude sessions.
@@ -67,6 +68,7 @@
 - ECC: selected research-first engineering, skill governance and independent review patterns; no wholesale harness import.
 - Strix: optional isolated, authorization-gated QA/Security runner; not installed or executed.
 - Claude Skills Hub: discovery index only; imported skills require provenance, license, static review, sandbox test and pinning.
+- Agent Skills: ten curated adaptations are available through the authenticated read-only skills API; all remain disabled with no tool grants. Provider-side skill injection and per-agent assignment are not implemented.
 - CodeRabbit: optional PR review signal after privacy, retention, subprocessor, pricing and GitHub permission review; not connected and never a replacement for CI/QA/founder approval.
 
 ## Safety boundary
