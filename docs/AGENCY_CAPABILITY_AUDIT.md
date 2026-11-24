@@ -47,7 +47,7 @@ Status meanings:
 | Client success | Status updates, satisfaction, issue escalation, renewals, referrals | Partial foundations only; account-health action classification exists, but grounded health scoring, feedback, support and renewal lifecycle are missing | P1 |
 | Support | Requests, incidents, priority, SLA/response targets, resolution and knowledge articles | Missing as complete workflow | P1 |
 | Finance | Project estimates, budget, time/cost and provisional summaries | Foundation implemented | P0 |
-| Invoicing | Invoice numbers, line items, tax fields, due dates, revisions, status | Internal invoice draft, overbilling guard, founder issue approval and issue-evidence recording implemented; tax fields, document generation and sending remain missing | P0 |
+| Invoicing | Invoice numbers, line items, tax fields, due dates, revisions, status | Internal invoice draft, overbilling guard, founder issue approval and issue-evidence recording implemented; closed retainer periods can create one idempotent recurring invoice draft for the contracted fee; tax fields, document generation and sending remain missing | P0 |
 | Payments | Payment links/provider adapter, webhook verification, reconciliation, refunds | Append-only manual receipt reconciliation with duplicate/overpayment guards implemented; provider webhooks, collection and refunds remain external/missing | P0/P1 |
 | Receivables | Due/overdue tracking, reminders, aging and collection status | Invoice outstanding balances and partial/paid state implemented; aging reports and reminders remain missing | P0 |
 | Expenses and profitability | Expenses, provider usage allocation, project/client margin | Partial | P1 |
