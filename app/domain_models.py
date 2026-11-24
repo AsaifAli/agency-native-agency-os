@@ -72,6 +72,30 @@ class Contact(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 
 
+class ContactActivity(Base):
+    """Append-only CRM interaction history; never triggers external communication."""
+    __tablename__ = "contact_activities"
+    __table_args__ = (
+        Index("ix_contact_activities_scope_contact_time", "org_id", "workspace_id", "contact_id", "occurred_at"),
+        CheckConstraint("activity_type IN ('note','call','email','meeting','task','status_update')", name="ck_contact_activity_type"),
+        CheckConstraint("direction IN ('none','inbound','outbound','internal')", name="ck_contact_activity_direction"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    contact_id: Mapped[str] = mapped_column(ForeignKey("contacts.id", ondelete="CASCADE"), nullable=False, index=True)
+    activity_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    direction: Mapped[str] = mapped_column(String(16), default="none", server_default="none", nullable=False)
+    subject: Mapped[str] = mapped_column(String(240), default="", server_default="", nullable=False)
+    body: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
+    outcome: Mapped[str] = mapped_column(String(240), default="", server_default="", nullable=False)
+    source_reference: Mapped[str] = mapped_column(String(200), default="", server_default="", nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
 class Lead(Base):
     __tablename__ = "leads"
     __table_args__ = (

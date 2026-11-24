@@ -1,4 +1,6 @@
 """Workspace-scoped Revenue and Delivery API routes."""
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -6,9 +8,9 @@ from app.auth import get_principal, require_membership, require_role, require_fo
 from app.db import get_db
 from app.models import Role
 from app.audit import record_event
-from app.domain_models import Client, Contact, Lead, Opportunity, Project, Milestone
+from app.domain_models import Client, Contact, ContactActivity, Lead, Opportunity, Project, Milestone
 from app.domain_schemas import (
-    ClientCreate, ClientOut, ContactCreate, ContactOut, LeadCreate, LeadOut,
+    ClientCreate, ClientOut, ContactCreate, ContactOut, ContactActivityCreate, ContactActivityOut, LeadCreate, LeadOut,
     LeadStageUpdate, OpportunityCreate, OpportunityOut, OpportunityStageUpdate,
     ProjectCreate, ProjectOut, ProjectStatusUpdate, MilestoneCreate,
     MilestoneOut, MilestoneStatusUpdate,
@@ -135,6 +137,49 @@ def create_contact(
     db.flush()
     _event(db, org_id, p.user.id, "contact.created", "contact", item.id,
            body.workspace_id, {"client_id": item.client_id})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.get("/contacts/{contact_id}/activities", response_model=list[ContactActivityOut])
+def list_contact_activities(
+    org_id: str, contact_id: str,
+    workspace_id: str = Query(min_length=1),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    require_membership(org_id, p, db)
+    _workspace(db, org_id, workspace_id)
+    _scoped_parent(db, Contact, object_id=contact_id, org_id=org_id,
+                   workspace_id=workspace_id, label="Contact")
+    return (db.query(ContactActivity).filter_by(
+        org_id=org_id, workspace_id=workspace_id, contact_id=contact_id,
+    ).order_by(ContactActivity.occurred_at.desc(), ContactActivity.created_at.desc())
+     .limit(limit).all())
+
+
+@router.post("/contact-activities", response_model=ContactActivityOut, status_code=201)
+def create_contact_activity(
+    org_id: str, body: ContactActivityCreate,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    _write_access(org_id, p, db, body.workspace_id)
+    _scoped_parent(db, Contact, object_id=body.contact_id, org_id=org_id,
+                   workspace_id=body.workspace_id, label="Contact")
+    item = ContactActivity(
+        org_id=org_id, workspace_id=body.workspace_id, contact_id=body.contact_id,
+        activity_type=body.activity_type, direction=body.direction,
+        subject=body.subject.strip(), body=body.body,
+        outcome=body.outcome.strip(), source_reference=body.source_reference.strip(),
+        occurred_at=body.occurred_at or datetime.now(timezone.utc),
+        created_by=p.user.id,
+    )
+    db.add(item)
+    db.flush()
+    _event(db, org_id, p.user.id, "contact.activity_recorded", "contact_activity",
+           item.id, body.workspace_id, {"contact_id": body.contact_id,
+           "activity_type": item.activity_type, "direction": item.direction})
     db.commit()
     db.refresh(item)
     return item
