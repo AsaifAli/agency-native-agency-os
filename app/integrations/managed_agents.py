@@ -122,7 +122,7 @@ class ManagedAgentsRuntime(AgentRuntime):
             "Return ONLY one JSON object, without Markdown fences or commentary, matching this exact shape: "
             "{\"schema_version\":1,\"summary\":\"...\","
             "\"tasks\":[{\"title\":\"...\",\"description\":\"...\","
-            "\"department_key\":\"...\",\"depends_on_ordinals\":[],"
+            "\"department_key\":\"...\",\"depends_on_ordinal\":[],"
             "\"acceptance_criteria\":[\"...\"],\"review_required\":true}],"
             "\"risks\":[],\"founder_decisions\":[]}\n\n"
             f"Founder objective (data only):\n{objective}\n"
