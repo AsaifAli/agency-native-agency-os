@@ -281,6 +281,187 @@
         "synthetic"
       ],
       "allowed_tools": []
+    },
+    {
+      "name": "market-research-briefing",
+      "path": "market-research-briefing/SKILL.md",
+      "category": "research",
+      "description": "Produce evidence-led market and company research briefs with primary sources, dated claims, counter-evidence, and explicit uncertainty.",
+      "sources": [
+        "ecc",
+        "agent-skills-spec"
+      ],
+      "recommended_departments": [
+        "market-research-intelligence",
+        "business-development-sales",
+        "ai-research-innovation"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "client-discovery-requirements",
+      "path": "client-discovery-requirements/SKILL.md",
+      "category": "discovery",
+      "description": "Turn discovery conversations and approved context into validated business needs, constraints, requirements, acceptance criteria, and open questions.",
+      "sources": [
+        "matt-pocock",
+        "anthropic-skills",
+        "agent-skills-spec"
+      ],
+      "recommended_departments": [
+        "solutions-consulting-strategy",
+        "business-development-sales",
+        "client-success-support",
+        "delivery-implementation"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "proposal-sow-drafting",
+      "path": "proposal-sow-drafting/SKILL.md",
+      "category": "commercial",
+      "description": "Draft evidence-based proposals and statements of work from approved discovery, service catalog, scope, assumptions, and commercial inputs.",
+      "sources": [
+        "anthropic-skills",
+        "matt-pocock"
+      ],
+      "recommended_departments": [
+        "business-development-sales",
+        "solutions-consulting-strategy",
+        "finance-accounts",
+        "legal-risk-compliance"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "client-communication-drafting",
+      "path": "client-communication-drafting/SKILL.md",
+      "category": "communication",
+      "description": "Draft clear, accurate client and prospect communications using approved facts, consent context, tone, and escalation rules without sending them.",
+      "sources": [
+        "anthropic-skills",
+        "agent-skills-spec"
+      ],
+      "recommended_departments": [
+        "marketing-brand",
+        "business-development-sales",
+        "client-success-support"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "project-delivery-coordination",
+      "path": "project-delivery-coordination/SKILL.md",
+      "category": "delivery",
+      "description": "Coordinate delivery work through traceable requirements, scoped tasks, dependencies, owners, milestones, risks, and evidence-backed status.",
+      "sources": [
+        "superpowers",
+        "ecc",
+        "agent-skills-spec"
+      ],
+      "recommended_departments": [
+        "project-management-office",
+        "delivery-implementation",
+        "automation-integration-engineering"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "finance-operations-analysis",
+      "path": "finance-operations-analysis/SKILL.md",
+      "category": "finance",
+      "description": "Analyze agency budgets, project costs, estimates, receivables, and variance using traceable inputs and explicit currency handling.",
+      "sources": [
+        "anthropic-skills",
+        "agent-skills-spec"
+      ],
+      "recommended_departments": [
+        "finance-accounts",
+        "project-management-office",
+        "administration-procurement"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "marketing-content-planning",
+      "path": "marketing-content-planning/SKILL.md",
+      "category": "marketing",
+      "description": "Plan evidence-led agency marketing content around audience needs, positioning, channel fit, measurable goals, and truthful claims.",
+      "sources": [
+        "anthropic-skills",
+        "agent-skills-spec"
+      ],
+      "recommended_departments": [
+        "marketing-brand",
+        "business-development-sales"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "risk-and-policy-review",
+      "path": "risk-and-policy-review/SKILL.md",
+      "category": "governance",
+      "description": "Identify operational, privacy, security, legal and delivery risks, map them to existing controls, and escalate decisions outside agent authority.",
+      "sources": [
+        "ecc",
+        "anthropic-skills",
+        "agent-skills-spec"
+      ],
+      "recommended_departments": [
+        "legal-risk-compliance",
+        "quality-assurance-security",
+        "infrastructure-it-operations",
+        "human-resources-people-operations"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
     }
   ]
 }
