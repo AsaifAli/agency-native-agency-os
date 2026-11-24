@@ -36,7 +36,7 @@ The OS owns organizations, clients, users, agent definitions, tasks, approvals, 
 - Managed Agents is beta and is not ZDR or HIPAA BAA eligible. Use only approved eligible data; the current execution policy is synthetic-first.
 - The Managed Agent referenced by the adapter owns its configured tools, MCP servers, skills and multiagent settings. Before creating a session, the adapter fetches the provider Agent and fails closed if those capabilities are configured. The OS MCP gateway is not implemented yet, so the initial provider Agent must remain tool-free.
 - Contracts, pricing, payments, sensitive external communications, production releases, destructive actions, client-data deletion and security/permission changes require backend-enforced approval.
-- Public agency website and EvidenceFlow, QuoteSense, LegacyLens and WebQA Intelligence remain separate projects. Website intake remains deferred.
+- Public agency website and EvidenceFlow, QuoteSense, LegacyLens and WebQA Intelligence remain separate projects. A signed, idempotent website lead intake endpoint is implemented but disabled by default; website forwarding is staged separately and is not yet deployed.
 - OpenClaw is not part of this private OS.
 - Never put secrets, customer data or production data in source control.
 
@@ -68,6 +68,7 @@ Copy `.env.example` to `.env` and supply local-only values. Never commit `.env`.
 - [Reference integration decisions](docs/REFERENCE_INTEGRATION_DECISIONS.md) — ECC, Strix, Claude Skills Hub and CodeRabbit fit and guardrails.
 - [Feature discovery and adoption decisions](docs/FEATURE_DISCOVERY_AND_ADOPTION.md) — additional orchestration, observability, MCP governance and engineering assurance references.
 - [Claude Managed Agents adapter](docs/CLAUDE_MANAGED_AGENTS_ADAPTER.md) — current adapter contract, configuration and caveats.
+- [Website lead intake](docs/WEBSITE_LEAD_INTAKE.md) — signed, idempotent public website → private Revenue Engine boundary.
 - [Implementation status](IMPLEMENTATION_STATUS.md) — implemented, incomplete and unverified capabilities.
 
 ## Telephony foundation
@@ -77,7 +78,7 @@ The current telephony module records inbound/outbound call intent, status, CRM a
 The OS includes workspace-scoped service playbooks, founder-approved scope changes, project time entries, project cost records, provisional financial summaries, a read-only founder exception inbox and agent execution reliability metrics. See `docs/DELIVERY_OPERATIONS_V5.md`.
 
 ## Verification
-The backend CI at commit `98f506f3fee1bc1c620266e9836b77cfc253f36e` completed successfully: **152 passed, 0 failed, 1 warning**. It validated the migration graph, PostgreSQL 16 migrations, Python compilation and backend/PostgreSQL integration tests, including the full workforce chart and Managed Agents safety checks. The frontend production build was not part of this run. This does not validate live providers, deployment, backup restore, penetration testing or compliance. See [the CI run](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45465471539).
+The backend CI at commit `0f8384ce9a9bfc50babac7f4533bcc089e9cbd65` completed successfully: **156 passed, 0 failed, 1 warning**. It validated the migration graph, PostgreSQL 16 migrations, Python compilation and backend/PostgreSQL integration tests, including workforce, Managed Agents safety and signed website intake. The frontend production build was not part of this run. This does not validate live providers, website deployment, backup restore, penetration testing or compliance. See [the CI run](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45466473903).
 
 ## Scope freeze
 The agreed product scope, architecture decisions, domain lifecycles, security gates and definition of done are documented in:

@@ -2,20 +2,21 @@
 
 ## Verified checkpoint
 - Working branch: `feature/agency-os-v5-stabilization`.
-- Verified commit: `98f506f3fee1bc1c620266e9836b77cfc253f36e`.
-- GitHub Actions run: [45465471539](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45465471539).
-- Backend CI: **152 passed, 0 failed, 1 warning** (Starlette/httpx TestClient deprecation; GitHub Actions also reports a Node 20 action deprecation warning).
+- Verified commit: `0f8384ce9a9bfc50babac7f4533bcc089e9cbd65`.
+- GitHub Actions run: [45466473903](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45466473903).
+- Backend CI: **156 passed, 0 failed, 1 warning** (Starlette/httpx TestClient deprecation; GitHub Actions also reports a Node 20 action deprecation warning).
 - CI validated the Alembic graph, applied migrations to PostgreSQL 16, compiled Python source and ran backend plus PostgreSQL integration tests.
-- CI covers workforce provisioning, all position/team records, manager-chain delegation guards, Claude provider-agent tooling checks and Managed Agents workflow-run completion handling.
-- Frontend production build, live Claude provider session, website-to-OS integration, deployment, backup restore drill, independent penetration test and compliance assessment are not claimed.
+- CI covers workforce provisioning and position/team records, manager-chain delegation guards, Claude provider-agent tooling checks, Managed Agents workflow-run completion and signed/idempotent website lead intake.
+- Frontend production build, live Claude provider session, website deployment, backup restore drill, independent penetration test and compliance assessment are not claimed.
 
 ## Implemented source capabilities
 - Governed workforce schema for offices, functional groups, departments, teams, human/agent/supervisor/sub-agent members, 121 durable position records, capability grants and task delegation lineage; backend migrations and tests passed.
 - Founder-only, idempotent bootstrap for the Office of the CEO, five functional groups, 16 departments, 31 teams, 5 group heads, 16 department heads, 16 department specialist definitions, Chief of Staff, Executive Assistant and the full 121-position catalogue. Agent definitions remain disabled and members planned.
 - Workspace-scoped workforce read API and founder-only bootstrap; founder-only capability configuration remains disabled by default. Delegation API enforces downward direct-manager relationships, active members, enabled agent definitions, enabled capability grants and founder exclusion. Backend tests passed.
+- Signed public website lead intake endpoint (disabled by default): fixed server-side org/workspace mapping, HMAC-SHA256 timestamp validation, body/schema bounds, constant-time signature/key checks, source idempotency, CRM Contact/Lead creation, audit and transactional outbox event in one transaction. No outreach or execution is triggered.
 - Workspace-scoped, authenticated execution history API with bounded status filtering and result limits.
 - Execution trace API that joins execution and attempt lifecycle audit events after verifying the execution belongs to the requested organization/workspace.
-- Founder Console Processes page for execution history and event timelines; Monitoring page for persisted execution status/retry summaries.
+- Founder Console Processes page for execution history and event timelines; Monitoring page for persisted execution status/retry summaries; Workforce page for the org chart, team/position catalogue and member registry.
 - Founder dashboard now reads pending approval counts and execution activity from existing APIs.
 - Agent Studio department selector now exposes all 16 departments in the workforce blueprint.
 - FastAPI modular backend and Next.js Founder Console foundation.
@@ -41,7 +42,7 @@
 - Founder and Executive Office workforce records are chart entries; they are not live human identity accounts.
 
 ## Known gaps / not validated
-- No production outbox handlers are registered; external side effects remain disabled.
+- No production outbox handlers are registered; the website lead event is persisted but does not trigger notifications or automation. External side effects remain disabled.
 - Outbox handler heartbeat and actual worker crash/restart recovery need further validation.
 - Supervisor-driven task decomposition, specialist execution scheduling, review and escalation are not implemented; the new trace/history UI is visibility, not orchestration.
 - Managed Agents live provisioning, provider API compatibility against the actual account, Environment sandbox/egress configuration, webhook/reconciliation for ambiguous session creation and production runtime eligibility are not verified.
@@ -56,7 +57,7 @@
 - Full finance ledger, invoicing, payment collection and tax/accounting are not implemented.
 - Complete QA acceptance/rework metrics and production release gates are incomplete.
 - Frontend production build, monitoring/alerting, SBOM, restore drill and security review are not validated.
-- Website-to-OS lead intake remains deferred.
+- Website-to-OS endpoint is implemented and CI-tested on the stabilization branch. Website forwarding/admin retry code is on the separate website branch `feature/agency-os-lead-intake`; it has not been merged, configured or deployed. The bridge remains disabled until both sides are configured and the synthetic end-to-end test is completed.
 
 ## Additional feature discovery
 - `docs/FEATURE_DISCOVERY_AND_ADOPTION.md` records reviewed patterns from LangGraph, Temporal, Langfuse, Arize Phoenix, ToolHive, Semgrep, OpenHands, Prefect and Sentry. These are research references, not installed integrations.
