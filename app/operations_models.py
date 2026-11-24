@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, JSON,
-    String, Text,
+    String, Text, UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -38,6 +38,41 @@ class ServicePlaybook(Base):
     deliverables: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     acceptance_criteria: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     security_checks: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
+
+
+class ServiceOffering(Base):
+    """Founder-managed service catalogue entry; not a customer contract or commitment."""
+    __tablename__ = "service_offerings"
+    __table_args__ = (
+        UniqueConstraint("org_id", "workspace_id", "code", "version", name="uq_service_offering_workspace_code_version"),
+        Index("ix_service_offerings_scope_status", "org_id", "workspace_id", "status"),
+        CheckConstraint("status IN ('draft','active','retired')", name="ck_service_offering_status"),
+        CheckConstraint("pricing_model IN ('fixed','hourly','retainer','custom')", name="ck_service_offering_pricing_model"),
+        CheckConstraint("indicative_price_minor IS NULL OR indicative_price_minor >= 0", name="ck_service_offering_price_nonnegative"),
+        CheckConstraint("typical_duration_days >= 0 AND typical_duration_days <= 3650", name="ck_service_offering_duration"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(60), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    service_line: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    pricing_model: Mapped[str] = mapped_column(String(24), nullable=False)
+    indicative_price_minor: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    currency: Mapped[str] = mapped_column(String(3), default="INR", server_default="INR", nullable=False)
+    typical_duration_days: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    target_outcomes: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    deliverables: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    required_inputs: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    exclusions: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    notes: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="draft", server_default="draft", nullable=False)
     created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
