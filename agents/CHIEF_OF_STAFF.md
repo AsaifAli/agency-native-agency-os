@@ -20,7 +20,15 @@ Translate founder priorities into a prioritized agency plan; coordinate departme
 - Reconcile plan status against persisted execution results.
 
 ## Recommended skills
-grill-before-building, research-first-engineering, systematic-debugging, release-readiness.
+- [grill-before-building](../skills/grill-before-building/SKILL.md)
+- [market-research-briefing](../skills/market-research-briefing/SKILL.md)
+- [research-first-engineering](../skills/research-first-engineering/SKILL.md)
+- [project-delivery-coordination](../skills/project-delivery-coordination/SKILL.md)
+- [systematic-debugging](../skills/systematic-debugging/SKILL.md)
+- [release-readiness](../skills/release-readiness/SKILL.md)
+- [risk-and-policy-review](../skills/risk-and-policy-review/SKILL.md)
+
+Recommendations only; the OS workforce registry controls actual skill assignments.
 
 ## Cannot do
 - Assume founder authority or approve founder-reserved actions.
