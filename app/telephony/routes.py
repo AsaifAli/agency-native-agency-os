@@ -107,8 +107,9 @@ def update_call(org_id: str, call_id: str, body: CallStatusUpdate,
         if not item.contact_id:
             raise HTTPException(403, "Outbound call requires a linked contact with explicit call consent")
         contact = db.query(Contact).filter_by(id=item.contact_id, org_id=org_id, workspace_id=item.workspace_id).first()
-        if contact is None or contact.consent_status != "granted":
-            raise HTTPException(403, "Outbound call blocked: contact call consent is not granted")
+        if (contact is None or contact.phone_call_consent_status != "granted" or
+                not contact.phone_call_consent_source or contact.phone_call_consent_recorded_at is None):
+            raise HTTPException(403, "Outbound call blocked: channel-specific call consent evidence is missing or withdrawn")
         if item.lead_id:
             lead = db.query(Lead).filter_by(id=item.lead_id, org_id=org_id, workspace_id=item.workspace_id).first()
             if lead is None or lead.stage == "suppressed" or lead.suppression_reason:
