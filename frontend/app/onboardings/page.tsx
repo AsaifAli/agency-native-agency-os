@@ -143,6 +143,22 @@ export default function OnboardingPage() {
     }
   }
 
+  async function rejectActivation(onboarding: Onboarding) {
+    if (!onboarding.approval_id) return;
+    setBusyId(onboarding.id); setError("");
+    try {
+      await api<Onboarding>(`/v1/orgs/${orgId()}/operations/onboardings/${onboarding.id}/reject-activation`, {
+        method: "POST",
+        body: JSON.stringify({ approval_id: onboarding.approval_id, note: "Founder requested onboarding readiness revision" }),
+      });
+      await loadData();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusyId("");
+    }
+  }
+
   async function activate(onboarding: Onboarding) {
     setBusyId(onboarding.id); setError("");
     try {
@@ -208,6 +224,7 @@ export default function OnboardingPage() {
                     {onboarding.status === "pending_approval" && <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:10}}>
                       <Link href="/approvals" className="activity-meta">Review delivery activation in Founder Approvals</Link>
                       <button className="button primary" type="button" onClick={() => void activate(onboarding)} disabled={busyId===onboarding.id}>{busyId===onboarding.id ? "Activating…" : "Activate after approval"}</button>
+                      <button className="button secondary" type="button" onClick={() => void rejectActivation(onboarding)} disabled={busyId===onboarding.id}>Reject / return to preparation</button>
                     </div>}
                     {onboarding.status === "active" && <div className="activity-meta">Delivery project created: {onboarding.project_id}</div>}
                   </div>
