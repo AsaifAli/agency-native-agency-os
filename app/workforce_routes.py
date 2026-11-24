@@ -4,7 +4,10 @@ from sqlalchemy.orm import Session
 
 from app.auth import Principal, get_principal, require_founder_authority, require_membership, require_role
 from app.db import get_db
-from app.models import Role, Workspace, Task
+from app.models import Role, Workspace, Task, Agent
+from app.autonomy_policy import action_disposition, ActionDisposition
+from app.integrations.runtime_registry import is_runtime_available
+from app.policy import assert_managed_agents_eligible
 from app.audit import record_event
 from app.workforce_models import WorkforceUnit, WorkforceMember, WorkforceCapability, WorkforcePosition, Delegation
 from app.workforce_schemas import (
@@ -76,6 +79,142 @@ def add_capability(org_id: str, member_id: str, body: WorkforceCapabilityCreate,
     db.commit()
     db.refresh(row)
     return row
+
+
+@router.post("/{member_id}/capabilities/{capability_id}/enable", response_model=WorkforceCapabilityOut)
+def enable_capability(org_id: str, member_id: str, capability_id: str,
+                      workspace_id: str = Query(min_length=1), db: Session = Depends(get_db),
+                      p: Principal = Depends(get_principal)):
+    require_membership(org_id, p, db)
+    require_founder_authority(db, org_id, p.user.id)
+    _workspace(db, org_id, workspace_id)
+    member = _member(db, org_id, workspace_id, member_id)
+    if member.is_founder_reserved:
+        raise HTTPException(403, "Founder authority is not an agent capability")
+    capability = db.query(WorkforceCapability).filter_by(
+        id=capability_id, org_id=org_id, workspace_id=workspace_id, member_id=member.id
+    ).with_for_update().first()
+    if capability is None:
+        raise HTTPException(404, "Workforce capability not found")
+    if not capability.allowed_actions or any(
+        action_disposition(action) != ActionDisposition.AUTONOMOUS
+        for action in capability.allowed_actions
+    ):
+        raise HTTPException(403, "Capability contains an unknown or approval-required action")
+    if capability.tool_allowlist:
+        raise HTTPException(409, "Tool grants cannot be enabled before the Agency OS MCP gateway exists")
+    if not capability.allowed_data_classes or set(capability.allowed_data_classes) - {"synthetic", "public"}:
+        raise HTTPException(403, "Only synthetic and public data classes are currently eligible")
+    agent = db.query(Agent).filter_by(
+        id=member.agent_id, org_id=org_id, workspace_id=workspace_id
+    ).first() if member.agent_id else None
+    if agent is None:
+        raise HTTPException(409, "Workforce member has no linked Agent definition")
+    if agent.data_class.value not in capability.allowed_data_classes:
+        raise HTTPException(403, "Capability does not cover the Agent data class")
+    if not is_runtime_available(agent.runtime):
+        raise HTTPException(409, "Agent runtime is not configured for this environment")
+    if agent.runtime == "mock" and agent.data_class.value != "synthetic":
+        raise HTTPException(403, "Mock runtime is restricted to synthetic data")
+    if agent.runtime == "claude_managed_agents":
+        try:
+            assert_managed_agents_eligible(agent.data_class, client_authorized=False)
+        except HTTPException as exc:
+            raise HTTPException(403, "Managed Agents is not eligible for this data class") from exc
+    capability.enabled = True
+    record_event(db, org_id, p.user.id, "workforce.capability_enabled", "workforce_capability",
+                 capability.id, workspace_id, {"member_id": member.id, "actions": capability.allowed_actions})
+    db.commit()
+    db.refresh(capability)
+    return capability
+
+
+@router.post("/{member_id}/activate")
+def activate_member(org_id: str, member_id: str,
+                    workspace_id: str = Query(min_length=1), db: Session = Depends(get_db),
+                    p: Principal = Depends(get_principal)):
+    require_membership(org_id, p, db)
+    require_founder_authority(db, org_id, p.user.id)
+    _workspace(db, org_id, workspace_id)
+    member = db.query(WorkforceMember).filter_by(
+        id=member_id, org_id=org_id, workspace_id=workspace_id
+    ).with_for_update().first()
+    if member is None:
+        raise HTTPException(404, "Workforce member not found")
+    if member.is_founder_reserved:
+        raise HTTPException(403, "Founder authority cannot be activated as an agent")
+    if member.status == "retired":
+        raise HTTPException(409, "Retired workforce members cannot be reactivated")
+    if not member.agent_id:
+        raise HTTPException(409, "Workforce member has no linked Agent definition")
+    agent = db.query(Agent).filter_by(
+        id=member.agent_id, org_id=org_id, workspace_id=workspace_id
+    ).with_for_update().first()
+    if agent is None:
+        raise HTTPException(409, "Linked Agent definition is missing")
+    if not is_runtime_available(agent.runtime):
+        raise HTTPException(409, "Agent runtime is not configured for this environment")
+    grants = db.query(WorkforceCapability).filter_by(
+        org_id=org_id, workspace_id=workspace_id, member_id=member.id, enabled=True
+    ).all()
+    execution_actions = {"task.execute", "research.execute", "report.generate"}
+    eligible = [
+        grant for grant in grants
+        if agent.data_class.value in (grant.allowed_data_classes or [])
+        and bool(set(grant.allowed_actions or []) & execution_actions)
+        and not (grant.tool_allowlist or [])
+    ]
+    if not eligible:
+        raise HTTPException(409, "An enabled, data-eligible execution capability is required")
+    if agent.runtime == "mock" and agent.data_class.value != "synthetic":
+        raise HTTPException(403, "Mock runtime is restricted to synthetic data")
+    if agent.runtime == "claude_managed_agents":
+        try:
+            assert_managed_agents_eligible(agent.data_class, client_authorized=False)
+        except HTTPException as exc:
+            raise HTTPException(403, "Managed Agents is not eligible for this data class") from exc
+    member.status = "active"
+    agent.enabled = True
+    db.query(WorkforcePosition).filter_by(
+        org_id=org_id, workspace_id=workspace_id, assigned_member_id=member.id
+    ).update({"status": "active"})
+    record_event(db, org_id, p.user.id, "workforce.member_activated", "workforce_member",
+                 member.id, workspace_id, {"agent_id": agent.id, "runtime": agent.runtime})
+    db.commit()
+    return {"member_id": member.id, "agent_id": agent.id, "status": member.status, "enabled": agent.enabled}
+
+
+@router.post("/{member_id}/pause")
+def pause_member(org_id: str, member_id: str,
+                 workspace_id: str = Query(min_length=1), db: Session = Depends(get_db),
+                 p: Principal = Depends(get_principal)):
+    require_membership(org_id, p, db)
+    require_founder_authority(db, org_id, p.user.id)
+    _workspace(db, org_id, workspace_id)
+    member = db.query(WorkforceMember).filter_by(
+        id=member_id, org_id=org_id, workspace_id=workspace_id
+    ).with_for_update().first()
+    if member is None:
+        raise HTTPException(404, "Workforce member not found")
+    if member.is_founder_reserved:
+        raise HTTPException(403, "Founder authority cannot be paused as an agent")
+    member.status = "paused"
+    if member.agent_id:
+        agent = db.query(Agent).filter_by(
+            id=member.agent_id, org_id=org_id, workspace_id=workspace_id
+        ).with_for_update().first()
+        if agent:
+            agent.enabled = False
+    db.query(WorkforceCapability).filter_by(
+        org_id=org_id, workspace_id=workspace_id, member_id=member.id
+    ).update({"enabled": False})
+    db.query(WorkforcePosition).filter_by(
+        org_id=org_id, workspace_id=workspace_id, assigned_member_id=member.id
+    ).update({"status": "paused"})
+    record_event(db, org_id, p.user.id, "workforce.member_paused", "workforce_member",
+                 member.id, workspace_id, {"agent_id": member.agent_id})
+    db.commit()
+    return {"member_id": member.id, "status": member.status, "agent_enabled": False}
 
 
 @router.post("/delegations", response_model=DelegationOut, status_code=201)

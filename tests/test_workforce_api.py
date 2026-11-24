@@ -246,3 +246,134 @@ def test_workforce_delegation_rejects_assignee_without_enabled_capability(app_cl
     )
     assert denied.status_code == 403
     assert "enabled workforce capability" in denied.text
+
+
+def test_founder_can_enable_capability_activate_execute_and_pause_member(app_client, monkeypatch):
+    from app.config import settings
+    from app.execution_service import create_execution
+    from app.models import Agent, DataClass, Task
+    from app.workforce_models import WorkforceMember, WorkforceCapability
+
+    monkeypatch.setattr(settings, "app_env", "test")
+    monkeypatch.setattr(settings, "mock_runtime_enabled", True)
+    i = app_client.identity
+    boot = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/bootstrap",
+        params={"workspace_id": i["workspace"].id},
+    )
+    assert boot.status_code == 200, boot.text
+
+    db = app_client.factory()
+    try:
+        member = db.query(WorkforceMember).filter_by(
+            org_id=i["org"].id, workspace_id=i["workspace"].id,
+            department_key="ai_engineering_development",
+        ).one()
+        agent = db.get(Agent, member.agent_id)
+        agent.runtime = "mock"
+        agent.data_class = DataClass.synthetic
+        task = Task(
+            org_id=i["org"].id, workspace_id=i["workspace"].id,
+            title="Execute internal research", description="Synthetic-only",
+            created_by=i["user"].id,
+        )
+        db.add(task)
+        db.commit()
+        member_id, agent_id, task_id = member.id, agent.id, task.id
+    finally:
+        db.close()
+
+    created = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/{member_id}/capabilities",
+        params={"workspace_id": i["workspace"].id},
+        json={
+            "capability_key": "research.internal",
+            "scope": "self",
+            "allowed_data_classes": ["synthetic"],
+            "allowed_actions": ["research.execute", "task.execute"],
+            "tool_allowlist": [],
+            "budget_minor": 0,
+            "currency": "INR",
+        },
+    )
+    assert created.status_code == 201, created.text
+    capability_id = created.json()["id"]
+    assert created.json()["enabled"] is False
+
+    enabled = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/{member_id}/capabilities/{capability_id}/enable",
+        params={"workspace_id": i["workspace"].id},
+    )
+    assert enabled.status_code == 200, enabled.text
+    assert enabled.json()["enabled"] is True
+
+    activated = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/{member_id}/activate",
+        params={"workspace_id": i["workspace"].id},
+    )
+    assert activated.status_code == 200, activated.text
+    assert activated.json()["status"] == "active"
+    assert activated.json()["enabled"] is True
+
+    db = app_client.factory()
+    try:
+        execution = create_execution(
+            db, org_id=i["org"].id, workspace_id=i["workspace"].id,
+            task_id=task_id, agent_id=agent_id, requested_by=i["user"].id,
+            idempotency_key="workforce-active-member-execution",
+        )
+        db.commit()
+        assert execution.status.value == "queued"
+    finally:
+        db.close()
+
+    paused = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/{member_id}/pause",
+        params={"workspace_id": i["workspace"].id},
+    )
+    assert paused.status_code == 200, paused.text
+    assert paused.json()["status"] == "paused"
+    db = app_client.factory()
+    try:
+        member = db.query(WorkforceMember).filter_by(id=member_id).one()
+        agent = db.get(Agent, agent_id)
+        grant = db.query(WorkforceCapability).filter_by(id=capability_id).one()
+        assert member.status == "paused"
+        assert agent.enabled is False
+        assert grant.enabled is False
+    finally:
+        db.close()
+
+
+def test_founder_capability_enable_rejects_protected_or_unknown_actions(app_client):
+    from app.workforce_models import WorkforceMember
+    i = app_client.identity
+    app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/bootstrap",
+        params={"workspace_id": i["workspace"].id},
+    )
+    db = app_client.factory()
+    try:
+        member = db.query(WorkforceMember).filter_by(
+            org_id=i["org"].id, workspace_id=i["workspace"].id,
+            department_key="ai_engineering_development",
+        ).one()
+        member_id = member.id
+    finally:
+        db.close()
+    created = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/{member_id}/capabilities",
+        params={"workspace_id": i["workspace"].id},
+        json={
+            "capability_key": "invalid.protected",
+            "allowed_data_classes": ["synthetic"],
+            "allowed_actions": ["production.release"],
+            "tool_allowlist": [],
+        },
+    )
+    assert created.status_code == 201
+    enabled = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/{member_id}/capabilities/{created.json()['id']}/enable",
+        params={"workspace_id": i["workspace"].id},
+    )
+    assert enabled.status_code == 403
