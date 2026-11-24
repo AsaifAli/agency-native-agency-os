@@ -1338,6 +1338,9 @@ def create_proposal(
     else:
         if body.billing_frequency == "one_time" or body.term_months is None or body.included_hours_per_period is None:
             raise HTTPException(422, "Retainers require a recurring billing frequency, fixed term and included hours per period")
+        months_per_period = {"monthly": 1, "quarterly": 3, "annual": 12}[body.billing_frequency]
+        if body.term_months % months_per_period != 0:
+            raise HTTPException(422, "Retainer term must contain complete billing periods")
     item = Proposal(
         org_id=org_id, workspace_id=body.workspace_id, opportunity_id=body.opportunity_id,
         title=body.title, service_line=body.service_line, scope_summary=body.scope_summary,
