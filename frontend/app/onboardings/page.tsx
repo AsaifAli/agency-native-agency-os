@@ -200,7 +200,7 @@ export default function OnboardingPage() {
                     ))}
                     {onboarding.status === "preparing" && <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:8,marginTop:12}}>
                       <input className="field" value={projectNames[onboarding.id] || ""} onChange={e => setProjectNames(v => ({...v,[onboarding.id]:e.target.value}))} placeholder="Delivery project name" maxLength={240} />
-                      <input className="field" type="number" value={budgets[onboarding.id] || ""} onChange={e => setBudgets(v => ({...v,[onboarding.id]:e.target.value}))} placeholder="Internal project budget (INR)" min={0} step="0.01" />
+                      <input className="field" type="number" value={budgets[onboarding.id] || ""} onChange={e => setBudgets(v => ({...v,[onboarding.id]:e.target.value}))} placeholder={`Internal project budget (${contracts.find(item => item.id === onboarding.contract_id)?.currency || "currency"})`} min={0} step="0.01" />
                       <input className="field" type="number" value={hours[onboarding.id] || ""} onChange={e => setHours(v => ({...v,[onboarding.id]:e.target.value}))} placeholder="Estimated hours" min={0} max={100000} />
                       <input className="field" type="datetime-local" value={dueDates[onboarding.id] || ""} onChange={e => setDueDates(v => ({...v,[onboarding.id]:e.target.value}))} />
                       <button className="button primary" type="button" onClick={() => void submitActivation(onboarding)} disabled={busyId===onboarding.id || requiredOpen>0}>{busyId===onboarding.id ? "Submitting…" : "Submit delivery activation"}</button>
