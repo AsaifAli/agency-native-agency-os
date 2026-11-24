@@ -118,6 +118,22 @@ export default function InvoicesPage() {
     }
   }
 
+  async function rejectInvoice(item: Invoice) {
+    if (!item.approval_id) return;
+    setBusyId(item.id); setError("");
+    try {
+      await api<Invoice>(`/v1/orgs/${orgId()}/operations/invoices/${item.id}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ approval_id: item.approval_id, note: "Founder rejected invoice issuance request" }),
+      });
+      await loadData();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusyId("");
+    }
+  }
+
   async function recordIssued(item: Invoice) {
     const reference = (issuedRefs[item.id] || "").trim();
     const issuedAt = issuedDates[item.id];
@@ -230,6 +246,7 @@ export default function InvoicesPage() {
                     <input className="field" type="datetime-local" value={issuedDates[item.id] || ""} onChange={e => setIssuedDates(v => ({...v,[item.id]:e.target.value}))} />
                     <button className="button primary" type="button" onClick={() => void recordIssued(item)} disabled={busyId===item.id}>{busyId===item.id ? "Recording…" : "Record external issuance"}</button>
                     <Link href="/approvals" className="activity-meta">Review invoice issuance in Founder Approvals</Link>
+                    <button className="button secondary" type="button" onClick={() => void rejectInvoice(item)} disabled={busyId===item.id}>Reject invoice draft</button>
                   </div>}
                   {(item.status === "issued" || item.status === "partially_paid") && <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:8,marginTop:12}}>
                     <input className="field" value={paymentRefs[item.id] || ""} onChange={e => setPaymentRefs(v => ({...v,[item.id]:e.target.value}))} placeholder="Bank / provider transaction reference" maxLength={240} />
