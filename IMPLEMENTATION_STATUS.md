@@ -31,7 +31,7 @@
 - Founder-only outbox health endpoint.
 - Workspace-scoped call/transcript records; no live voice provider or dialing.
 - Delivery playbooks, founder-approved scope changes, time/cost records, provisional project financial summaries, exception inbox and execution reliability views.
-- Curated Agent Skills catalog contains ten reviewed, source-pinned instruction packs with authenticated read-only catalog/detail APIs, license/provenance metadata, and per-file SHA-256 digests. All entries are disabled, tool-free, and limited to public/synthetic data; the catalog does not yet assign skills to workforce members or load provider-side Claude skills.
+- Curated Agent Skills catalog contains eighteen reviewed, source-pinned instruction packs with authenticated read-only catalog/detail APIs, license/provenance metadata, and per-file SHA-256 digests. All entries are disabled, tool-free, and limited to public/synthetic data; the catalog does not yet assign skills to workforce members or load provider-side Claude skills.
 - Founder Console Skills & Tools page now browses the catalog, filters by category/search, and displays skill instructions, provenance, and SHA-256 digest through the authenticated API.
 - Skill catalog CI run [45485330332](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45485330332) passed PostgreSQL 16 migration validation, Python compilation, **176 backend tests (1 warning)**, frontend TypeScript checking, and the Next.js production build.
 - Target organization model and workforce governance are documented in `docs/AGENCY_ORGANIZATION_WORKFORCE_BLUEPRINT.md` and `docs/REFERENCE_INTEGRATION_DECISIONS.md`; skill availability does not mean every role has a live runtime.
