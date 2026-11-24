@@ -597,7 +597,7 @@ def create_invoice_draft(
     _write(org_id, body.workspace_id, p, db)
     contract = db.query(ContractRecord).filter_by(
         id=body.contract_id, org_id=org_id, workspace_id=body.workspace_id, status="executed",
-    ).first()
+    ).with_for_update().first()
     if contract is None:
         raise HTTPException(409, "Invoice drafts require an executed contract in this workspace")
     if body.due_date.tzinfo is None:
