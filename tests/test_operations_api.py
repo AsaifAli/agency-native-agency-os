@@ -12,8 +12,8 @@ from app.models import (
     Approval, ApprovalStatus, FounderAuthority, Membership, Organization,
     Role, User, Workspace, Task,
 )
-from app.domain_models import Project
-from app.operations_models import ServicePlaybook, ScopeChangeRequest, TimeEntry, ProjectCost
+from app.domain_models import Project, Opportunity
+from app.operations_models import ServicePlaybook, Proposal, ScopeChangeRequest, TimeEntry, ProjectCost
 from app.operations_routes import router
 from app.telephony.models import OutboxEvent
 
@@ -46,6 +46,12 @@ def client():
         due_date=datetime(2027, 1, 31, tzinfo=timezone.utc),
     )
     db.add(project)
+    db.flush()
+    opportunity = Opportunity(
+        org_id=org.id, workspace_id=ws.id, title="AI workflow engagement",
+        amount_minor=1500000, currency="INR", probability=60, owner_user_id=user.id,
+    )
+    db.add(opportunity)
     db.commit()
 
     app = FastAPI()
@@ -61,7 +67,7 @@ def client():
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_principal] = lambda: Principal(user=user)
     tc = TestClient(app)
-    tc.org_id, tc.ws_id, tc.other_ws_id, tc.user_id, tc.project_id = org.id, ws.id, other_ws.id, user.id, project.id
+    tc.org_id, tc.ws_id, tc.other_ws_id, tc.user_id, tc.project_id, tc.opportunity_id = org.id, ws.id, other_ws.id, user.id, project.id, opportunity.id
     tc.session_factory = TestingSession
     yield tc
     db.close()
@@ -91,6 +97,113 @@ def test_playbook_create_and_founder_activation(client):
     )
     assert activated.status_code == 200, activated.text
     assert activated.json()["version"] == 2
+
+
+def test_proposal_requires_single_use_founder_pricing_approval(client):
+    org, ws, opportunity = client.org_id, client.ws_id, client.opportunity_id
+    created = client.post(f"/v1/orgs/{org}/operations/proposals", headers=headers(), json={
+        "workspace_id": ws, "opportunity_id": opportunity,
+        "title": "AI workflow implementation proposal", "service_line": "AI Engineering",
+        "scope_summary": "Design, implement and evaluate an internal workflow automation system.",
+        "deliverables": ["Workflow API", "Evaluation report"],
+        "assumptions": ["Client provides source access"],
+        "exclusions": ["Third-party subscription fees"],
+        "amount_minor": 1800000, "currency": "INR", "validity_days": 30,
+    })
+    assert created.status_code == 201, created.text
+    proposal_id = created.json()["id"]
+    assert created.json()["status"] == "draft"
+
+    submitted = client.post(
+        f"/v1/orgs/{org}/operations/proposals/{proposal_id}/submit-for-approval",
+        headers=headers(),
+    )
+    assert submitted.status_code == 200, submitted.text
+    approval_id = submitted.json()["approval_id"]
+    assert submitted.json()["status"] == "pending_approval"
+
+    premature = client.post(
+        f"/v1/orgs/{org}/operations/proposals/{proposal_id}/approve",
+        headers=headers(), json={"approval_id": approval_id},
+    )
+    assert premature.status_code == 409
+
+    db = client.session_factory()
+    try:
+        approval = db.query(Approval).filter_by(id=approval_id).one()
+        approval.status = ApprovalStatus.approved
+        approval.decided_by = client.user_id
+        approval.decided_at = datetime.now(timezone.utc)
+        db.commit()
+    finally:
+        db.close()
+
+    approved = client.post(
+        f"/v1/orgs/{org}/operations/proposals/{proposal_id}/approve",
+        headers=headers(), json={"approval_id": approval_id},
+    )
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["status"] == "approved"
+
+    repeated = client.post(
+        f"/v1/orgs/{org}/operations/proposals/{proposal_id}/approve",
+        headers=headers(), json={"approval_id": approval_id},
+    )
+    assert repeated.status_code == 409
+
+    db = client.session_factory()
+    try:
+        approval = db.query(Approval).filter_by(id=approval_id).one()
+        assert approval.consumed_at is not None
+        assert approval.consumed_by == client.user_id
+    finally:
+        db.close()
+
+
+def test_founder_can_reject_proposal_and_approval_together(client):
+    org, ws = client.org_id, client.ws_id
+    created = client.post(f"/v1/orgs/{org}/operations/proposals", headers=headers(), json={
+        "workspace_id": ws, "opportunity_id": client.opportunity_id,
+        "title": "Alternative engagement proposal", "service_line": "AI Engineering",
+        "scope_summary": "A scoped discovery and implementation engagement for internal automation.",
+        "amount_minor": 100000, "currency": "INR",
+    })
+    assert created.status_code == 201, created.text
+    proposal_id = created.json()["id"]
+    submitted = client.post(
+        f"/v1/orgs/{org}/operations/proposals/{proposal_id}/submit-for-approval",
+        headers=headers(),
+    )
+    approval_id = submitted.json()["approval_id"]
+    rejected = client.post(
+        f"/v1/orgs/{org}/operations/proposals/{proposal_id}/reject",
+        headers=headers(), json={"approval_id": approval_id, "note": "Commercial scope needs revision"},
+    )
+    assert rejected.status_code == 200, rejected.text
+    assert rejected.json()["status"] == "rejected"
+    db = client.session_factory()
+    try:
+        approval = db.query(Approval).filter_by(id=approval_id).one()
+        assert approval.status == ApprovalStatus.rejected
+        assert approval.decided_by == client.user_id
+    finally:
+        db.close()
+
+
+def test_proposal_rejects_cross_workspace_opportunity_and_currency(client):
+    org = client.org_id
+    payload = {
+        "workspace_id": client.ws_id, "opportunity_id": "not-an-opportunity",
+        "title": "Invalid proposal", "service_line": "AI Engineering",
+        "scope_summary": "This proposal must not attach to an unknown opportunity.",
+        "amount_minor": 100000, "currency": "INR",
+    }
+    missing = client.post(f"/v1/orgs/{org}/operations/proposals", headers=headers(), json=payload)
+    assert missing.status_code == 404
+    payload["opportunity_id"] = client.opportunity_id
+    payload["currency"] = "USD"
+    mismatch = client.post(f"/v1/orgs/{org}/operations/proposals", headers=headers(), json=payload)
+    assert mismatch.status_code == 422
 
 
 def test_time_and_cost_roll_up_to_project_financial_summary(client):
