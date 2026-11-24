@@ -110,9 +110,17 @@ def create_contact(
     if body.client_id:
         _scoped_parent(db, Client, object_id=body.client_id, org_id=org_id,
                        workspace_id=body.workspace_id, label="Client")
+    normalized_email = body.email.lower().strip()
+    if normalized_email:
+        duplicate = db.query(Contact).filter_by(
+            org_id=org_id, workspace_id=body.workspace_id,
+            email=normalized_email,
+        ).first()
+        if duplicate:
+            raise HTTPException(409, "Potential duplicate contact exists in this workspace; review and link the existing record")
     item = Contact(org_id=org_id, workspace_id=body.workspace_id,
                    client_id=body.client_id, first_name=body.first_name,
-                   last_name=body.last_name, email=body.email.lower().strip(),
+                   last_name=body.last_name, email=normalized_email,
                    phone=body.phone, job_title=body.job_title, source=body.source,
                    consent_status=body.consent_status, created_by=p.user.id)
     db.add(item)
