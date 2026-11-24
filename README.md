@@ -38,7 +38,8 @@ The former Command Center and Evaluation Harness repositories are **not separate
 - Runtime/provider adapters cannot bypass OS policy or write business state independently.
 - Workforce activation and capability enablement are founder-only, opt-in operations. Capabilities default disabled.
 - Tool grants remain disabled until the OS MCP gateway and scoped tool authorization are implemented.
-- Managed Agents is beta and is not eligible for ZDR or HIPAA BAA. The current adapter is opt-in and synthetic-first; live provider setup and production eligibility are not claimed.
+- Managed Agents is beta and is not eligible for ZDR or HIPAA BAA. The current adapter is opt-in, tool-free and synthetic/public-only for plan drafting. Live provider setup and production eligibility are not claimed.
+- Claude plan drafts are persisted as OS executions, schema-validated, and held for explicit founder review and assignment. A model-generated proposal never activates workers by itself.
 - Website lead intake is signed and idempotent, disabled by default, and does not trigger outreach or execution.
 - Do not put secrets, customer data or production data in source control.
 
@@ -84,6 +85,6 @@ Never commit `.env`. Use separate dev, staging and production configuration. Rev
 
 ## Verification boundary
 
-The native-source cleanup commit (`80b989ae611b08d9a9c37925195517417ba79b05`) passed backend CI: **162 passed, 1 warning** (run [45471143658](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45471143658)). The Chief of Staff orchestration foundation commit (`a3f3784e8fb5a75efb8212c0de0002b7a741cec5`) passed backend CI: **168 passed, 1 warning** (run [45477077236](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45477077236)). Both runs validated PostgreSQL 16 migrations and Python compilation; the latter also exercised the new orchestration and delegated-execution tests. The frontend production build, live Claude sessions, website deployment, backup restore, penetration testing and regulatory compliance remain unverified.
+The native-source cleanup commit (80b989ae611b08d9a9c37925195517417ba79b05) passed backend CI: **162 passed, 1 warning** (run [45471143658](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45471143658)). The Chief of Staff orchestration foundation and authorization hardening passed CI on main (PRs #6 and #7). The asynchronous Claude plan-draft foundation on branch feature/claude-chief-of-staff-plan-drafts passed CI: **176 passed, 1 warning** (run [45484628707](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/45484628707)). That run validated Alembic migration upgrade on PostgreSQL 16, Python compilation, backend integration tests, Founder Console TypeScript and Next.js production build. The Claude result lifecycle was tested with synthetic/mock output; no live Anthropic session was invoked.
 
 This repository is a substantial development foundation, **not a production-ready or fully autonomous agency OS**. See `IMPLEMENTATION_STATUS.md` for the remaining work and evidence boundaries.
