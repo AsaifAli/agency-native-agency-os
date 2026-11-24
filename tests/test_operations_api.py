@@ -1461,7 +1461,7 @@ def test_retainer_period_usage_rollover_and_closed_period_guard(client):
             org_id=org, workspace_id=ws, client_id=client.client_id, proposal_id=proposal.id,
             contract_number="RET-001", title="Retainer", amount_minor=200000, currency="INR",
             terms_snapshot={"engagement_type":"retainer","billing_frequency":"monthly",
-                            "billing_period_count":2,"included_hours_per_period":10,
+                            "billing_period_count":2,"billing_amount_per_period_minor":100000,"included_hours_per_period":10,
                             "rollover_hours":True}, status="executed",
             signed_reference="test-signed-evidence", signed_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
             executed_by=client.user_id, executed_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
@@ -1506,6 +1506,23 @@ def test_retainer_period_usage_rollover_and_closed_period_guard(client):
     assert closed.status_code == 200, closed.text
     assert closed.json()["used_minutes"] == 720
     assert closed.json()["overage_minutes"] == 120
+
+    invoice = client.post(
+        f"/v1/orgs/{org}/operations/retainer-periods/{period_id}/invoice-draft",
+        headers=headers(),
+        json={"due_date":"2026-02-08T00:00:00+00:00"},
+    )
+    assert invoice.status_code == 200, invoice.text
+    assert invoice.json()["amount_minor"] == 100000
+    assert invoice.json()["retainer_period_id"] == period_id
+    assert "overage" in invoice.json()["description"].lower()
+    duplicate_invoice = client.post(
+        f"/v1/orgs/{org}/operations/retainer-periods/{period_id}/invoice-draft",
+        headers=headers(),
+        json={"due_date":"2026-02-10T00:00:00+00:00"},
+    )
+    assert duplicate_invoice.status_code == 200, duplicate_invoice.text
+    assert duplicate_invoice.json()["id"] == invoice.json()["id"]
 
     period_two = client.post(f"/v1/orgs/{org}/operations/retainer-periods", headers=headers(), json={
         "workspace_id":ws,"contract_id":contract_id,"project_id":client.project_id,
