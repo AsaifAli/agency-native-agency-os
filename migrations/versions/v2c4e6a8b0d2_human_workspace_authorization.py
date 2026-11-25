@@ -397,7 +397,6 @@ def upgrade() -> None:
                         workspace_id = nullif(current_setting('agency_os.machine_workspace_id', true), '')
                         OR (
                             id = nullif(current_setting('agency_os.machine_identity_lookup_id', true), '')
-                            AND 1 = 1
                         )
                     )
                 )
