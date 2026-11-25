@@ -604,3 +604,191 @@ def test_revenue_research_tool_rejects_duplicate_source_references(security_clie
         json={"session_id": session_id, "input": payload},
     )
     assert response.status_code == 422
+
+
+def test_session_credential_is_hash_only_and_authenticates_one_session(security_client):
+    from app.machine_identity import authenticate_machine_token
+    from app.session_credentials import issue_session_credential, authenticate_session_credential
+    from app.security_models import MachineSessionCredential
+
+    issued, session_id, _headers = _issue_tool_session(security_client)
+    db = security_client.factory()
+    try:
+        principal = authenticate_machine_token("Bearer " + issued["token"], db)
+        credential = issue_session_credential(
+            db, principal, session_id=session_id, ttl_seconds=300
+        )
+        assert credential.token.startswith("aos_ms_")
+        raw_secret = credential.token.split(".", 1)[1]
+        stored = db.get(MachineSessionCredential, credential.credential_id)
+        assert stored is not None
+        assert stored.token_hash != raw_secret
+        assert len(stored.token_hash) == 64
+        assert stored.token_prefix == f"aos_ms_{credential.credential_id}."
+        assert not hasattr(stored, "token")
+
+        context = authenticate_session_credential(
+            db, "Bearer " + credential.token, requests_per_minute=120
+        )
+        assert context.session_id == session_id
+        assert context.machine_identity_id == issued["id"]
+        db.refresh(stored)
+        assert stored.request_count_window == 1
+        assert stored.last_used_at is not None
+    finally:
+        db.close()
+
+
+def test_session_credential_rotation_revokes_previous_token(security_client):
+    from app.machine_identity import authenticate_machine_token
+    from app.session_credentials import issue_session_credential, authenticate_session_credential
+    from app.security_models import MachineSessionCredential
+
+    issued, session_id, _headers = _issue_tool_session(security_client)
+    db = security_client.factory()
+    try:
+        principal = authenticate_machine_token("Bearer " + issued["token"], db)
+        first = issue_session_credential(db, principal, session_id=session_id, ttl_seconds=300)
+        second = issue_session_credential(db, principal, session_id=session_id, ttl_seconds=300)
+        old = db.get(MachineSessionCredential, first.credential_id)
+        current = db.get(MachineSessionCredential, second.credential_id)
+        assert old.revoked_at is not None
+        assert old.revocation_reason == "CREDENTIAL_ROTATED"
+        assert current.revoked_at is None
+        assert second.credential_version == first.credential_version + 1
+        with pytest.raises(HTTPException) as exc:
+            authenticate_session_credential(db, "Bearer " + first.token)
+        assert exc.value.status_code == 401
+        assert authenticate_session_credential(db, "Bearer " + second.token).session_id == session_id
+    finally:
+        db.close()
+
+
+def test_session_credential_rate_limit_is_durable(security_client):
+    from app.machine_identity import authenticate_machine_token
+    from app.session_credentials import issue_session_credential, authenticate_session_credential
+
+    issued, session_id, _headers = _issue_tool_session(security_client)
+    now = datetime.now(timezone.utc)
+    db = security_client.factory()
+    try:
+        principal = authenticate_machine_token("Bearer " + issued["token"], db)
+        credential = issue_session_credential(
+            db, principal, session_id=session_id, ttl_seconds=300, now=now
+        )
+        authenticate_session_credential(
+            db, "Bearer " + credential.token, requests_per_minute=1, now=now
+        )
+        with pytest.raises(HTTPException) as exc:
+            authenticate_session_credential(
+                db,
+                "Bearer " + credential.token,
+                requests_per_minute=1,
+                now=now + timedelta(seconds=1),
+            )
+        assert exc.value.status_code == 429
+    finally:
+        db.close()
+
+
+def test_session_credential_expiry_and_session_closure_revoke_access(security_client):
+    from app.machine_identity import authenticate_machine_token
+    from app.session_credentials import issue_session_credential, authenticate_session_credential, close_agent_session
+    from app.security_models import MachineSessionCredential
+
+    issued, session_id, _headers = _issue_tool_session(security_client)
+    db = security_client.factory()
+    try:
+        principal = authenticate_machine_token("Bearer " + issued["token"], db)
+        credential = issue_session_credential(db, principal, session_id=session_id, ttl_seconds=300)
+        closed = close_agent_session(
+            db, principal, session_id=session_id, status="closed", reason_code="TEST_SESSION_CLOSE"
+        )
+        assert closed.status == "closed"
+        stored = db.get(MachineSessionCredential, credential.credential_id)
+        assert stored.revoked_at is not None
+        with pytest.raises(HTTPException) as exc:
+            authenticate_session_credential(db, "Bearer " + credential.token)
+        assert exc.value.status_code == 401
+    finally:
+        db.close()
+
+
+def test_identity_revocation_revokes_provider_vault_credential_reference(security_client):
+    from app.machine_identity import authenticate_machine_token
+    from app.session_credentials import issue_session_credential
+    from app.security_models import MachineSessionCredential
+
+    issued, session_id, _headers = _issue_tool_session(security_client)
+    db = security_client.factory()
+    try:
+        principal = authenticate_machine_token("Bearer " + issued["token"], db)
+        credential = issue_session_credential(db, principal, session_id=session_id, ttl_seconds=300)
+        stored = db.get(MachineSessionCredential, credential.credential_id)
+        stored.provider_vault_id = "vault_test"
+        stored.provider_credential_id = "credential_test"
+        stored.provider_credential_status = "active"
+        db.commit()
+    finally:
+        db.close()
+
+    response = security_client.post(
+        f"/v1/orgs/{security_client.org_id}/machine-identities/{issued['id']}/revoke"
+    )
+    assert response.status_code == 200, response.text
+    db = security_client.factory()
+    try:
+        stored = db.get(MachineSessionCredential, credential.credential_id)
+        assert stored.revoked_at is not None
+        assert stored.provider_credential_status == "delete_pending"
+    finally:
+        db.close()
+
+
+def test_machine_session_route_returns_one_time_mcp_token_only_when_enabled(security_client, monkeypatch):
+    from app.config import settings
+    from app.security_models import MachineSessionCredential
+
+    issued = _create_identity(security_client, scopes=["sessions:create"], classes=["public"])
+    monkeypatch.setattr(settings, "mcp_gateway_enabled", True)
+    monkeypatch.setattr(settings, "mcp_public_url", "https://api.example.test/mcp/agency-os")
+    monkeypatch.setattr(settings, "mcp_session_token_ttl_seconds", 300)
+    response = security_client.post(
+        "/v1/machine/sessions",
+        headers={"Authorization": "Bearer " + issued["token"]},
+        json={"purpose": "Public MCP session", "data_class": "public", "ttl_seconds": 600},
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["mcp_token"].startswith("aos_ms_")
+    assert body["mcp_server_url"] == settings.mcp_public_url
+    db = security_client.factory()
+    try:
+        credential = db.query(MachineSessionCredential).filter_by(session_id=body["id"]).one()
+        assert body["mcp_token"].split(".", 1)[1] not in credential.token_hash
+        assert credential.token_prefix == f"aos_ms_{credential.id}."
+    finally:
+        db.close()
+
+
+def test_founder_close_session_route_revokes_mcp_token(security_client):
+    from app.machine_identity import authenticate_machine_token
+    from app.session_credentials import issue_session_credential, authenticate_session_credential
+
+    issued, session_id, _headers = _issue_tool_session(security_client)
+    db = security_client.factory()
+    try:
+        principal = authenticate_machine_token("Bearer " + issued["token"], db)
+        credential = issue_session_credential(db, principal, session_id=session_id, ttl_seconds=300)
+    finally:
+        db.close()
+    response = security_client.post(
+        f"/v1/orgs/{security_client.org_id}/workspaces/{security_client.workspace_id}/machine-sessions/{session_id}/close"
+    )
+    assert response.status_code == 200, response.text
+    db = security_client.factory()
+    try:
+        with pytest.raises(HTTPException):
+            authenticate_session_credential(db, "Bearer " + credential.token)
+    finally:
+        db.close()
