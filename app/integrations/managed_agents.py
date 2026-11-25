@@ -1,9 +1,10 @@
-"""Conservative Claude Managed Agents adapter with durable session recovery.
+"""Claude Managed Agents adapter with OS-authorized custom-tool execution.
 
-The first integration slice refuses provider-side tools, MCP servers, skills,
-and multiagent workflows until the Agency OS MCP gateway and authorization
-enforcement are implemented. A provider session is complete only when every
-workflow run has ended and the primary turn reaches end_turn.
+Only custom tools declared by the OS Tool Registry are accepted. Built-in
+toolsets, MCP servers, skills and multiagent features remain disabled until
+their separate security boundaries are implemented and verified. A provider
+session is complete only when every workflow run has ended and the primary
+turn reaches end_turn.
 """
 from __future__ import annotations
 
@@ -386,8 +387,8 @@ class ManagedAgentsRuntime(AgentRuntime):
             session_id = request.external_run_id
             if not session_id:
                 body = {
-                    # The provider-side Agent has been inspected and is required
-                    # to have no tools, MCP servers, skills or multiagent features.
+                    # Provider Agent tools are revalidated against the OS registry
+                    # before each session create/resume; only registered custom tools pass.
                     "agent": self.config.claude_managed_agent_id,
                     "environment_id": self.config.claude_managed_environment_id,
                     "budget": {
