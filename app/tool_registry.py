@@ -47,6 +47,10 @@ class LeadResearchCaptureInput(BaseModel):
             host = (parsed.hostname or "").lower().rstrip(".")
             if parsed.scheme != "https" or not host or parsed.username or parsed.password:
                 raise ValueError("Source references must be public HTTPS URLs without embedded credentials")
+            try:
+                parsed.port
+            except ValueError as exc:
+                raise ValueError("Source reference has an invalid port") from exc
             if host in {"localhost", "localhost.localdomain"} or host.endswith((".local", ".internal", ".test")):
                 raise ValueError("Private or local source hosts are not allowed")
             try:
@@ -60,6 +64,8 @@ class LeadResearchCaptureInput(BaseModel):
                 raise ValueError("Private or reserved IP source hosts are not allowed")
             if len(value) > 1000:
                 raise ValueError("Source reference is too long")
+        if len(set(values)) != len(values):
+            raise ValueError("Duplicate source references are not allowed")
         return values
 
     @field_validator("buying_signals", "risks")
