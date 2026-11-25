@@ -204,7 +204,7 @@ def invoke_registered_tool(
         validated_result = validate_tool_output(spec, raw_result)
         safe_result, output_report = protect_untrusted_payload(
             validated_result,
-            trusted_internal_id_keys={"id", "draft_id", "lead_id", "research_record_id"},
+            trusted_internal_id_keys={"draft_id", "lead_id", "research_record_id"},
         )
     except DataProtectionBlocked:
         _deny(
