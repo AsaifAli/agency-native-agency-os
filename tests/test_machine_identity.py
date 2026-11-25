@@ -573,3 +573,34 @@ def test_nonfounder_cannot_review_agent_research_draft(security_client):
     base = f"/v1/orgs/{security_client.org_id}/workspaces/{security_client.workspace_id}/lead-research-drafts"
     denied = security_client.post(f"{base}/{draft_id}/review", json={"decision": "approve"})
     assert denied.status_code == 403
+
+
+def test_rejected_research_draft_cannot_be_promoted(security_client):
+    issued, session_id, headers = _issue_research_session(security_client)
+    captured = security_client.post(
+        "/v1/machine/tools/revenue.lead.research.capture/invoke",
+        headers={**headers, "Idempotency-Key": "revenue-research-rejected"},
+        json={"session_id": session_id, "input": _research_payload()},
+    )
+    assert captured.status_code == 200
+    draft_id = captured.json()["result"]["draft_id"]
+    base = f"/v1/orgs/{security_client.org_id}/workspaces/{security_client.workspace_id}/lead-research-drafts"
+    rejected = security_client.post(
+        f"{base}/{draft_id}/review",
+        json={"decision": "reject", "review_note": "Insufficient evidence."},
+    )
+    assert rejected.status_code == 200 and rejected.json()["status"] == "rejected"
+    promoted = security_client.post(f"{base}/{draft_id}/promote")
+    assert promoted.status_code == 409
+
+
+def test_revenue_research_tool_rejects_duplicate_source_references(security_client):
+    issued, session_id, headers = _issue_research_session(security_client)
+    payload = _research_payload()
+    payload["source_references"] = [payload["source_references"][0], payload["source_references"][0]]
+    response = security_client.post(
+        "/v1/machine/tools/revenue.lead.research.capture/invoke",
+        headers={**headers, "Idempotency-Key": "revenue-research-duplicate-source"},
+        json={"session_id": session_id, "input": payload},
+    )
+    assert response.status_code == 422
