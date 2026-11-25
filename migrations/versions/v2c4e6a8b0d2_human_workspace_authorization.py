@@ -18,7 +18,7 @@ WORKSPACE_TABLES = (
     "call_transcripts", "client_onboardings", "clients",
     "communication_blocks", "communication_consents", "contact_activities",
     "contacts", "contract_records", "delegations", "evaluation_runs",
-    "executions", "invoice_records", "leads", "milestones",
+    "executions", "invoice_records", "leads", "machine_identities", "milestones",
     "onboarding_checklist_items", "opportunities", "orchestration_plan_drafts",
     "orchestration_plans", "outbound_message_events", "outbound_messages",
     "outbound_senders", "outbox_events", "outreach_drafts", "payment_receipts",
@@ -362,6 +362,10 @@ def upgrade() -> None:
                 OR (
                     org_id = nullif(current_setting('agency_os.machine_org_id', true), '')
                     AND workspace_id = nullif(current_setting('agency_os.machine_workspace_id', true), '')
+                )
+                OR (
+                    "{table}" = 'machine_identities'
+                    AND id = nullif(current_setting('agency_os.machine_identity_lookup_id', true), '')
                 )
             )
             WITH CHECK (
