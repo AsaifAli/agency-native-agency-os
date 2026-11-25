@@ -767,6 +767,7 @@ def reject_invoice(
     item = db.query(InvoiceRecord).filter_by(id=invoice_id, org_id=org_id).with_for_update().first()
     if item is None:
         raise HTTPException(404, "Invoice not found")
+    _workspace(db, org_id, item.workspace_id)
     require_founder_authority(db, org_id, p.user.id)
     if item.status != "pending_approval" or item.approval_id != body.approval_id:
         raise HTTPException(409, "Invoice is not awaiting this approval")
@@ -1039,6 +1040,7 @@ def reject_onboarding_activation(
     item = db.query(ClientOnboarding).filter_by(id=onboarding_id, org_id=org_id).with_for_update().first()
     if item is None:
         raise HTTPException(404, "Onboarding not found")
+    _workspace(db, org_id, item.workspace_id)
     require_founder_authority(db, org_id, p.user.id)
     if item.status != "pending_approval" or item.approval_id != body.approval_id:
         raise HTTPException(409, "Onboarding is not awaiting this approval")
@@ -1258,6 +1260,7 @@ def record_contract_execution(
     item = db.query(ContractRecord).filter_by(id=contract_id, org_id=org_id).with_for_update().first()
     if item is None:
         raise HTTPException(404, "Contract not found")
+    _workspace(db, org_id, item.workspace_id)
     require_founder_authority(db, org_id, p.user.id)
     if item.status != "pending_approval" or item.approval_id != body.approval_id:
         raise HTTPException(409, "Contract is not awaiting this approval")
@@ -1472,6 +1475,7 @@ def reject_proposal(
     item = db.query(Proposal).filter_by(id=proposal_id, org_id=org_id).with_for_update().first()
     if item is None:
         raise HTTPException(404, "Proposal not found")
+    _workspace(db, org_id, item.workspace_id)
     require_founder_authority(db, org_id, p.user.id)
     if item.status != "pending_approval" or item.approval_id != body.approval_id:
         raise HTTPException(409, "Proposal is not awaiting this approval")
