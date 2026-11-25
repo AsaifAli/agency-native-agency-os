@@ -350,3 +350,17 @@ A feature is **production-ready** only when implementation, authorization, tenan
 - [ ] Continue implementation from current main. The MCP bridge remains a design-only milestone; its authenticated endpoint, session token, vault lifecycle and contract/isolation/recovery tests are still outstanding.
 
 **Validation boundary:** this was a Git-tree/source comparison through GitHub. No local tests, frontend build, PostgreSQL migration rehearsal or CI run was performed as part of this branch audit.
+
+
+## Managed Agents tool transport decision review — 2026-11-25
+
+- [x] Reviewed the unmerged `feature/managed-agent-os-tool-execution` implementation against current main and Anthropic's documented custom-tool event flow.
+- [x] Recorded the preferred first integration: OS-worker-executed Managed Agents custom tools, with no public MCP endpoint or provider-held OS bearer token.
+- [x] Deferred MCP connector implementation unless a concrete provider-side connectivity use case justifies its additional endpoint, token and vault lifecycle.
+- [ ] Port the shared invocation service and execution-scoped custom-tool callback onto current main without replacing current gateway/DPG/worker code.
+- [ ] Enforce enabled WorkforceCapability grants for every custom tool call; machine identity scopes are necessary but not sufficient.
+- [ ] Add idempotent result replay across provider event retries and OS session renewal.
+- [ ] Add PostgreSQL 16 locking/migration, cross-workspace isolation, revoked identity, stale lease, crash recovery and synthetic end-to-end tests.
+- [ ] Keep all provider tools disabled until the above evidence and founder-approved pilot are complete.
+
+**Evidence boundary:** Anthropic documents the custom-tool event/result flow. The candidate branch has authored tests, but no tests were run by this audit. No custom-tool runtime capability is claimed as implemented on main.
