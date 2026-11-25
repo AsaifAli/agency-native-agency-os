@@ -1295,6 +1295,7 @@ def reject_contract(
     item = db.query(ContractRecord).filter_by(id=contract_id, org_id=org_id).with_for_update().first()
     if item is None:
         raise HTTPException(404, "Contract not found")
+    _workspace(db, org_id, item.workspace_id)
     require_founder_authority(db, org_id, p.user.id)
     if item.status != "pending_approval" or item.approval_id != body.approval_id:
         raise HTTPException(409, "Contract is not awaiting this approval")
