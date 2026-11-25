@@ -4,6 +4,7 @@ from app.data_protection import (
     DataProtectionBlocked,
     protect_execution_request,
     sanitize_text,
+    protect_untrusted_payload,
 )
 from app.integrations.runtime import ExecutionRequest
 from app.models import DataClass
@@ -225,3 +226,26 @@ def test_protect_execution_request_rejects_invalid_request_policy_types():
             client_authorized="true",
         ))
     assert invalid_authorization.value.code == "INVALID_EXECUTION_POLICY"
+
+
+def test_protect_untrusted_payload_redacts_nested_values_and_keys():
+    payload = {
+        "owner@example.com": {
+            "contact": "billing@example.com",
+            "notes": ["Call +91 98765 43210"],
+        }
+    }
+    protected, report = protect_untrusted_payload(payload)
+    assert "owner@example.com" not in protected
+    assert "[REDACTED_EMAIL]" in protected
+    assert protected["[REDACTED_EMAIL]"]["contact"] == "[REDACTED_EMAIL]"
+    assert report.redaction_counts == {"EMAIL": 2, "PHONE": 1}
+
+
+def test_protect_untrusted_payload_rejects_oversized_or_non_json_values():
+    with pytest.raises(DataProtectionBlocked) as oversized:
+        protect_untrusted_payload({"large": "x" * 70_000})
+    assert oversized.value.code == "UNTRUSTED_PAYLOAD_TOO_LARGE"
+
+    with pytest.raises(DataProtectionBlocked):
+        protect_untrusted_payload({"unsupported": object()})
