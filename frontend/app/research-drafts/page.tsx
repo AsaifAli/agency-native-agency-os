@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Page from "@/components/page";
 import Notice from "@/components/notice";
 import { api, orgId, type Workspace } from "@/lib/api";
@@ -34,9 +34,16 @@ export default function ResearchDraftsPage() {
   const [workspaceId, setWorkspaceId] = useState("");
   const [status, setStatus] = useState<DraftStatus>("pending_review");
   const [drafts, setDrafts] = useState<ResearchDraft[]>([]);
+  const [draftsKey, setDraftsKey] = useState("");
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
-  const [busyId, setBusyId] = useState("");
+  const [pendingActionIds, setPendingActionIds] = useState<Set<string>>(() => new Set());
+  const requestGeneration = useRef(0);
+  const viewKey = `${orgId()}:${workspaceId}:${status}`;
+  const viewKeyRef = useRef(viewKey);
+  viewKeyRef.current = viewKey;
+  const visibleDrafts = draftsKey === viewKey ? drafts : [];
+  const viewLoading = loading || (!!workspaceId && draftsKey !== viewKey);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -57,27 +64,40 @@ export default function ResearchDraftsPage() {
   }, []);
 
   const loadDrafts = useCallback(async () => {
-    if (!workspaceId || !orgId()) return;
+    const requestKey = `${orgId()}:${workspaceId}:${status}`;
+    if (!workspaceId || !orgId() || viewKeyRef.current !== requestKey) return;
+    const generation = ++requestGeneration.current;
     setLoading(true);
     setError("");
     try {
       const result = await api<{ items: ResearchDraft[] }>(
         `/v1/orgs/${orgId()}/workspaces/${encodeURIComponent(workspaceId)}/lead-research-drafts?status=${status}&limit=100`,
       );
-      setDrafts(result.items);
+      if (requestGeneration.current === generation && viewKeyRef.current === requestKey) {
+        setDrafts(result.items);
+        setDraftsKey(requestKey);
+      }
     } catch (err) {
-      setError((err as Error).message);
+      if (requestGeneration.current === generation && viewKeyRef.current === requestKey) {
+        setError((err as Error).message);
+      }
     } finally {
-      setLoading(false);
+      if (requestGeneration.current === generation && viewKeyRef.current === requestKey) {
+        setLoading(false);
+      }
     }
   }, [workspaceId, status]);
 
   useEffect(() => {
     void loadDrafts();
+    return () => {
+      requestGeneration.current += 1;
+    };
   }, [loadDrafts]);
 
   async function reviewDraft(draft: ResearchDraft, decision: "approve" | "reject") {
-    setBusyId(draft.id);
+    if (pendingActionIds.has(draft.id)) return;
+    setPendingActionIds((current) => new Set(current).add(draft.id));
     setError("");
     setNotice("");
     try {
@@ -96,12 +116,17 @@ export default function ResearchDraftsPage() {
     } catch (err) {
       setError((err as Error).message);
     } finally {
-      setBusyId("");
+      setPendingActionIds((current) => {
+        const next = new Set(current);
+        next.delete(draft.id);
+        return next;
+      });
     }
   }
 
   async function promoteDraft(draft: ResearchDraft) {
-    setBusyId(draft.id);
+    if (pendingActionIds.has(draft.id)) return;
+    setPendingActionIds((current) => new Set(current).add(draft.id));
     setError("");
     setNotice("");
     try {
@@ -114,7 +139,11 @@ export default function ResearchDraftsPage() {
     } catch (err) {
       setError((err as Error).message);
     } finally {
-      setBusyId("");
+      setPendingActionIds((current) => {
+        const next = new Set(current);
+        next.delete(draft.id);
+        return next;
+      });
     }
   }
 
@@ -131,12 +160,14 @@ export default function ResearchDraftsPage() {
       <section className="panel">
         <div className="panel-head">
           <div className="panel-title">Review queue</div>
-          <select className="field" value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)}>
+          <label htmlFor="research-workspace-filter" className="activity-meta">Workspace</label>
+          <select id="research-workspace-filter" aria-label="Workspace filter" className="field" value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)}>
             {workspaces.map((workspace) => (
               <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
             ))}
           </select>
-          <select className="field" value={status} onChange={(event) => setStatus(event.target.value as DraftStatus)}>
+          <label htmlFor="research-status-filter" className="activity-meta">Draft status</label>
+          <select id="research-status-filter" aria-label="Draft status filter" className="field" value={status} onChange={(event) => setStatus(event.target.value as DraftStatus)}>
             {statusOptions.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
@@ -147,13 +178,13 @@ export default function ResearchDraftsPage() {
         </div>
         {error && <div className="error">{error}</div>}
         {notice && <div className="success">{notice}</div>}
-        {loading ? (
+        {viewLoading ? (
           <div className="empty">Loading research drafts…</div>
-        ) : drafts.length === 0 ? (
+        ) : visibleDrafts.length === 0 ? (
           <div className="empty">No {status.replaceAll("_", " ")} drafts in this workspace.</div>
         ) : (
           <div className="activity">
-            {drafts.map((draft) => (
+            {visibleDrafts.map((draft) => (
               <article className="panel" key={draft.id} style={{ marginBottom: 14 }}>
                 <div className="panel-head">
                   <div>
@@ -196,10 +227,10 @@ export default function ResearchDraftsPage() {
                       onChange={(event) => setReviewNotes((current) => ({ ...current, [draft.id]: event.target.value }))}
                     />
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button className="button primary" type="button" disabled={busyId === draft.id} onClick={() => void reviewDraft(draft, "approve")}>
-                        {busyId === draft.id ? "Saving…" : "Approve for CRM"}
+                      <button className="button primary" type="button" disabled={pendingActionIds.has(draft.id)} onClick={() => void reviewDraft(draft, "approve")}>
+                        {pendingActionIds.has(draft.id) ? "Saving…" : "Approve for CRM"}
                       </button>
-                      <button className="button secondary" type="button" disabled={busyId === draft.id} onClick={() => void reviewDraft(draft, "reject")}>
+                      <button className="button secondary" type="button" disabled={pendingActionIds.has(draft.id)} onClick={() => void reviewDraft(draft, "reject")}>
                         Reject
                       </button>
                     </div>
@@ -207,8 +238,8 @@ export default function ResearchDraftsPage() {
                 )}
                 {draft.status === "approved" && (
                   <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 16 }}>
-                    <button className="button primary" type="button" disabled={busyId === draft.id} onClick={() => void promoteDraft(draft)}>
-                      {busyId === draft.id ? "Promoting…" : "Promote to CRM"}
+                    <button className="button primary" type="button" disabled={pendingActionIds.has(draft.id)} onClick={() => void promoteDraft(draft)}>
+                      {pendingActionIds.has(draft.id) ? "Promoting…" : "Promote to CRM"}
                     </button>
                     <span className="activity-meta">This creates a CRM lead and research record. It does not create a contact or send outreach.</span>
                   </div>
