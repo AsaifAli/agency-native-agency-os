@@ -1,4 +1,5 @@
 from pydantic import Field, model_validator
+from urllib.parse import urlparse
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,6 +14,10 @@ class Settings(BaseSettings):
     dev_auth_enabled: bool = True
     mock_runtime_enabled: bool = False
     cors_origins: str = "http://localhost:3000"
+    rate_limit_enabled: bool = False
+    rate_limit_general_per_minute: int = Field(default=120, ge=1, le=10000)
+    rate_limit_expensive_per_minute: int = Field(default=10, ge=1, le=1000)
+    rate_limit_auth_per_minute: int = Field(default=5, ge=1, le=100)
 
     db_connect_timeout_seconds: int = Field(default=5, ge=1, le=60)
     db_pool_timeout_seconds: int = Field(default=5, ge=1, le=300)
@@ -61,6 +66,32 @@ class Settings(BaseSettings):
                 "OUTBOX_MAX_RETRY_SECONDS must be greater than or equal "
                 "to OUTBOX_BASE_RETRY_SECONDS"
             )
+        if self.app_env.lower() == "production":
+            errors = []
+            if self.dev_auth_enabled:
+                errors.append("DEV_AUTH_ENABLED must be false in production")
+            if self.mock_runtime_enabled:
+                errors.append("MOCK_RUNTIME_ENABLED must be false in production")
+            if len(self.jwt_secret) < 64 or self.jwt_secret == "unsafe-development-secret-change-me":
+                errors.append("JWT_SECRET must be a secret-manager supplied value of at least 64 characters")
+            if not self.database_url.startswith(("postgresql://", "postgresql+psycopg://")):
+                errors.append("DATABASE_URL must use PostgreSQL in production")
+            db_password = urlparse(self.database_url).password
+            if not db_password or len(db_password) < 32 or db_password.lower() in {"change-me", "password", "postgres", "local-only-change-me"}:
+                errors.append("DATABASE_URL must contain a strong, unique database password in production")
+            if not self.redis_url.startswith("rediss://"):
+                errors.append("REDIS_URL must use TLS (rediss://) in production")
+            origins = [item.strip() for item in self.cors_origins.split(",") if item.strip()]
+            if not origins or any(item == "*" or urlparse(item).scheme != "https" or not urlparse(item).netloc for item in origins):
+                errors.append("CORS_ORIGINS must contain only explicit HTTPS origins in production")
+            if not self.rate_limit_enabled:
+                errors.append("RATE_LIMIT_ENABLED must be true in production")
+            if self.claude_managed_agents_enabled:
+                provider_url = urlparse(self.anthropic_api_base_url)
+                if provider_url.scheme != "https" or provider_url.hostname != "api.anthropic.com" or provider_url.username or provider_url.password or provider_url.port not in (None, 443):
+                    errors.append("ANTHROPIC_API_BASE_URL must use the official HTTPS api.anthropic.com endpoint in production")
+            if errors:
+                raise ValueError("; ".join(errors))
         return self
 
 

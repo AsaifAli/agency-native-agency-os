@@ -8,6 +8,7 @@ from sqlalchemy import text, or_
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.db import get_db
+from app.rate_limit import RedisRateLimitMiddleware
 from app.config import settings
 from app.workforce_service import initialize_workforce
 from app.auth import (
@@ -70,6 +71,8 @@ app = FastAPI(
     version="0.1.0",
     description="Founder-controlled Agency OS foundation",
 )
+
+app.add_middleware(RedisRateLimitMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

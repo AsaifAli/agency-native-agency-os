@@ -197,7 +197,7 @@ export default function ServiceCataloguePage() {
               </div>
             ))}
           </div>
-        ) : <div className="empty"><strong>No service offerings yet</strong>Define the agency's service lines and delivery boundaries before using them in client proposals.</div>}
+        ) : <div className="empty"><strong>No service offerings yet</strong>Define the agency&apos;s service lines and delivery boundaries before using them in client proposals.</div>}
       </section>
     </Page>
   );

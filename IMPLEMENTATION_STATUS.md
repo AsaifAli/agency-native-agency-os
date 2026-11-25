@@ -286,3 +286,8 @@ Validation: 285 backend tests passed, 4 PostgreSQL-only tests skipped; compileal
 ## 2026-11-25 — Pre-deploy security audit
 
 Completed a 20-control source/configuration audit. Findings and exact remediation requirements are in `docs/PRE_DEPLOY_SECURITY_AUDIT_20_POINT.md`. Remediated dependency findings: Next.js/eslint-config-next 15.5.29, PostCSS 8.5.33 and Sharp 0.35.5; npm audit reports zero vulnerabilities. Pytest 9.0.3 is now development-only in `requirements-dev.txt`; pip-audit reports no known vulnerabilities in either requirements set. Production browser source maps are explicitly disabled. Full backend suite: 285 passed, 4 PostgreSQL-only skipped. Production readiness remains NO-GO: production auth/session/MFA, removal of localStorage bearer storage, PostgreSQL RLS, general rate limiting, production fail-closed config, SSRF egress controls and further security verification are still outstanding.
+
+
+## 2026-11-25 — Security hardening continuation
+
+Added production fail-closed configuration checks, Redis-backed request throttling, removal of browser-persisted bearer tokens, required Compose DB password, ESLint 9 flat config, production source-map disablement and constrained successful Next.js build. Validation: backend 298 passed / 4 PostgreSQL-only skipped; npm audit 0 vulnerabilities; frontend lint 0 errors / 7 warnings; frontend build successful with 31 static pages. Security release remains NO-GO because production identity/session/MFA and PostgreSQL 16 RLS/runtime-role isolation are not implemented or verified. See `docs/PRE_DEPLOY_SECURITY_AUDIT_20_POINT.md`.

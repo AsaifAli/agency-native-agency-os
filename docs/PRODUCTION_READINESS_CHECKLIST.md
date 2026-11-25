@@ -412,3 +412,19 @@ Additional review controls: identity/session locks follow revocation lock order;
 - [ ] Complete PostgreSQL 16 test suite, ESLint flat config and full frontend production build; perform independent security review and secret-history scan.
 
 **Security release decision: NO-GO.** Dependency vulnerabilities found by this audit were patched, but the critical identity, RLS and verification gaps remain. See `docs/PRE_DEPLOY_SECURITY_AUDIT_20_POINT.md` for all 20 controls and evidence boundaries.
+
+
+## 2026-11-25 — Security hardening continuation
+
+- [x] Production startup validation now fails closed for dev auth, mock runtime, weak JWT/database passwords, SQLite, non-TLS Redis, wildcard/non-HTTPS CORS, disabled rate limiting and untrusted Claude API base URLs.
+- [x] Added Redis-backed per-minute request throttling for auth, expensive and general API routes; production returns 503 if Redis is unavailable and 429 with Retry-After when limited.
+- [x] Removed localStorage/sessionStorage bearer-token persistence; development override is memory-only and hidden in production.
+- [x] Removed insecure Docker Compose database-password fallback; POSTGRES_PASSWORD is required.
+- [x] Added ESLint 9 flat config; lint completes with 0 errors (7 existing hook dependency warnings).
+- [x] Production frontend build passes and generates all 31 static pages; build worker count constrained to one to avoid EAGAIN in cloud environments.
+- [x] Backend full suite: 296 passed, 4 PostgreSQL-only tests skipped.
+- [ ] Production identity provider/session lifecycle and MFA still not implemented; no password auth should be added without selecting the identity architecture.
+- [ ] PostgreSQL 16 RLS and non-owner runtime role still not implemented or verified.
+- [ ] Redis integration/load tests, trusted-proxy setup, SSRF egress controls, complete route authorization review, log redaction, secret-history scan and deployment/restore review remain.
+
+**Security release decision remains NO-GO** until identity/MFA and PostgreSQL RLS are implemented and verified. Full evidence is in `docs/PRE_DEPLOY_SECURITY_AUDIT_20_POINT.md`.

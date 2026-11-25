@@ -1,11 +1,20 @@
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+let inMemoryAccessToken = "";
+
+export function setInMemoryAccessToken(token: string) {
+  inMemoryAccessToken = token.trim();
+}
+
+export function clearInMemoryAccessToken() {
+  inMemoryAccessToken = "";
+}
+
 export function orgId(){return process.env.NEXT_PUBLIC_ORG_ID || ""}
 export function authHeaders(): HeadersInit {
   if (typeof window === "undefined") return {};
-  const stored = window.localStorage.getItem("agency_os_token");
   const allowDev = process.env.NEXT_PUBLIC_ALLOW_DEV_AUTH === "true" && process.env.NODE_ENV !== "production";
   const email = process.env.NEXT_PUBLIC_DEV_EMAIL || "founder@example.com";
-  const token = stored || (allowDev ? `dev:${email}` : "");
+  const token = inMemoryAccessToken || (allowDev ? `dev:${email}` : "");
   return { "Content-Type":"application/json", ...(token ? { "Authorization":`Bearer ${token}` } : {}) };
 }
 export async function api<T>(path:string, init:RequestInit={}):Promise<T>{

@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: agency_os
       POSTGRES_USER: agency_os
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-only-change-me}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env before starting Agency OS}
     ports:
       - "5432:5432"
     volumes:
@@ -24,7 +24,7 @@ services:
     build: .
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+psycopg://agency_os:${POSTGRES_PASSWORD:-local-only-change-me}@postgres:5432/agency_os
+      DATABASE_URL: postgresql+psycopg://agency_os:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env before starting Agency OS}@postgres:5432/agency_os
     command: ["alembic", "upgrade", "head"]
     restart: "no"
     depends_on:
@@ -35,7 +35,7 @@ services:
     build: .
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+psycopg://agency_os:${POSTGRES_PASSWORD:-local-only-change-me}@postgres:5432/agency_os
+      DATABASE_URL: postgresql+psycopg://agency_os:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env before starting Agency OS}@postgres:5432/agency_os
       REDIS_URL: redis://redis:6379/0
     ports:
       - "8000:8000"
@@ -59,7 +59,7 @@ services:
     build: .
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+psycopg://agency_os:${POSTGRES_PASSWORD:-local-only-change-me}@postgres:5432/agency_os
+      DATABASE_URL: postgresql+psycopg://agency_os:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env before starting Agency OS}@postgres:5432/agency_os
     command: ["python", "-m", "app.worker.main"]
     init: true
     restart: unless-stopped
