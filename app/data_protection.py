@@ -44,7 +44,7 @@ _SECRET_PATTERNS = (
     re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
     re.compile(
         r"\b(?:api[_ -]?key|access[_ -]?token|client[_ -]?secret|password)\s*[:=]\s*"
-        r"[\\"']?[^\s\\"',;]{8,}",
+        r"[\"']?[^\s\"',;]{8,}",
         re.IGNORECASE,
     ),
 )
