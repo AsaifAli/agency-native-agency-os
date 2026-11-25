@@ -425,9 +425,10 @@ def create_workspace_grant(
 ):
     require_membership(org_id, p, db)
     require_founder_authority(db, org_id, p.user.id)
-    workspace = db.query(Workspace).filter_by(org_id=org_id, id=workspace_id).first()
-    if workspace is None:
-        raise HTTPException(404, "Workspace not found")
+    if db.get_bind().dialect.name != "postgresql":
+        workspace = db.query(Workspace).filter_by(org_id=org_id, id=workspace_id).first()
+        if workspace is None:
+            raise HTTPException(404, "Workspace not found")
     target = db.query(User).filter_by(id=user_id, active=True).first()
     if target is None or not db.query(Membership.id).filter_by(
         org_id=org_id, user_id=user_id
@@ -473,9 +474,10 @@ def revoke_workspace_grant(
 ):
     require_membership(org_id, p, db)
     require_founder_authority(db, org_id, p.user.id)
-    workspace = db.query(Workspace).filter_by(org_id=org_id, id=workspace_id).first()
-    if workspace is None:
-        raise HTTPException(404, "Workspace not found")
+    if db.get_bind().dialect.name != "postgresql":
+        workspace = db.query(Workspace).filter_by(org_id=org_id, id=workspace_id).first()
+        if workspace is None:
+            raise HTTPException(404, "Workspace not found")
     try:
         if db.get_bind().dialect.name == "postgresql":
             revoked = db.execute(
