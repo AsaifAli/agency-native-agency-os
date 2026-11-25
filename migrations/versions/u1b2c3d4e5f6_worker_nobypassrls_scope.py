@@ -210,6 +210,15 @@ def upgrade() -> None:
             public.machine_identities
         FROM agency_os_worker
     """)
+    # Future tables/sequences are not automatically exposed to the worker.
+    op.execute("""
+        ALTER DEFAULT PRIVILEGES FOR ROLE agency_os_migrator IN SCHEMA public
+        REVOKE ALL ON TABLES FROM agency_os_worker
+    """)
+    op.execute("""
+        ALTER DEFAULT PRIVILEGES FOR ROLE agency_os_migrator IN SCHEMA public
+        REVOKE ALL ON SEQUENCES FROM agency_os_worker
+    """)
 
 
 def downgrade() -> None:
