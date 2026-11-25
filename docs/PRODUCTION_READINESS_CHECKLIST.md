@@ -1,9 +1,9 @@
 # Agency OS Production Readiness Checklist
 
 **Last reviewed:** 2026-11-26
-**Tracking branch:** `main` (PR #45 merged); `security/predeploy-20-point-audit` (PR #47 open draft)
-**Latest merged milestone:** [PR #45](https://github.com/AsaifAli/agency-native-agency-os/pull/45)
-**Status:** PR #45 is merged. PR #47 remains an open draft. The security branch now includes persistent session revocation/rotation/retention, frontend refresh, JWT key overlap, PostgreSQL RLS candidate with separate API/worker/migrator roles, route authorization guards, log redaction and OIDC URL validation. These changes remain unmerged; the original RLS test set has passed against a local isolated PostgreSQL 16 database; the worker NOBYPASSRLS follow-up migration and configured PostgreSQL test suite have now passed in the user's isolated local Compose database (22 passed, 0 failed); this is not production validation. Not a certification or release approval.
+**Tracking branch:** `main` (PRs #45, #47 and #48 merged)
+**Latest merged security milestones:** [PR #47](https://github.com/AsaifAli/agency-native-agency-os/pull/47) and [PR #48](https://github.com/AsaifAli/agency-native-agency-os/pull/48)
+**Status:** PRs #47 and #48 are merged to `main`. The merged baseline includes persistent browser-session revocation/rotation/retention, JWT key overlap, 51 tenant RLS policies plus `execution_attempts`, separate API/migrator/worker roles, worker `NOBYPASSRLS`, scoped worker sessions, route authorization guards and log redaction. User-run isolated PostgreSQL evidence: PR #47 suite 5 passed; PR #48 migration/bootstrap and configured test image 22 passed, 0 failed. Earlier candidate evidence includes 364 backend tests passed and 5 PostgreSQL-only tests skipped, frontend lint (0 errors; 7 existing warnings) and Next.js production build. This is not a fresh full-suite run on current `main`, production migration rehearsal, certification or release approval.
 
 ## Progress snapshot
 
@@ -15,7 +15,7 @@
 | External configuration | **5%** | Only limited setup is evidenced; most providers remain unconfigured |
 | Release readiness | **Not ready** | Backend suite passes on reconciled branch; PostgreSQL 16 and live Claude provider validation remain unverified |
 
-Percentages are weighted engineering estimates, not automated metrics. The values above are the last reconciled-mainline baseline and do not yet credit the unmerged PR #47 security candidate. A partially implemented feature does not count as complete. The production verification percentage is intentionally lower than implementation because code presence is not proof of safe operation. Candidate verification evidence is recorded separately below.
+Percentages are weighted engineering estimates, not automated metrics. They are the prior baseline and have not yet been fully recalculated after PRs #47/#48; do not interpret them as a measured completion percentage. A partially implemented feature does not count as complete. Production verification remains lower than implementation because code presence and isolated tests are not proof of safe operation.
 
 ## Workstream scorecard
 
@@ -28,7 +28,7 @@ Percentages are weighted engineering estimates, not automated metrics. The value
 | Security and governance | 60% | 40% | Merged baseline includes founder-only approvals, machine identity/session grants, DPG redaction and exact workforce tool grants. PR #47 candidate adds browser-session revocation/rotation/retention, JWT key overlap, 51 RLS policies, API/migrator/worker role split, route guards and log redaction; still unmerged and not live-verified. Remaining: human workspace grants, PostgreSQL verification, secrets/egress controls and independent security review. The worker NOBYPASSRLS candidate is on `security/worker-rls-capabilities`; its migration and 22-test isolated PostgreSQL suite passed locally, but production migration/concurrency validation remains outstanding. |
 | Automation and execution reliability | 55% | 45% | Persisted executions/attempts, leases, heartbeat/recovery, retries, outbox and execution-scoped idempotent Claude tool callbacks. Remaining: integration-wide reconciliation, dead-letter operations, cancellation, worker load tests and operational alerts. |
 | Founder Console | 60% | 40% | Workforce, tasks, operations, approvals, CRM, proposals, contracts, onboarding, invoices, audit/monitoring, research/outreach and retainer page foundations. Remaining: integrated lifecycle views, tool/permission controls, finance and client-health views, accessible UX and end-to-end workflow polish. |
-| Verification and operations | 28% | 72% | PR #47 candidate: 364 backend tests passed, 5 PostgreSQL-only skipped; compileall, isolated PostgreSQL SQL rendering, Compose YAML and role-script syntax passed; frontend lint 0 errors/7 existing warnings and Next.js production build passed. User also applied PR #47/#48 migrations and ran the isolated PostgreSQL test image on PR #48: 22 passed, 0 failed. Remaining: production-like PostgreSQL migration/concurrency, worker compromise-boundary review, security scans/SBOM, backup restore, alerting, RPO/RTO and runbooks. |
+| Verification and operations | 28% | 72% | Candidate evidence carried into merged PRs: 364 backend tests passed, 5 PostgreSQL-only skipped; compileall, Compose YAML and role-script syntax passed; frontend lint 0 errors/7 existing warnings and Next.js production build passed. User-run isolated PostgreSQL suites: 5 passed for PR #47 and 22 passed for PR #48. A new startup guard now checks all 52 expected RLS tables; its regression tests are added but not yet executed. Remaining: exact-main full suite, production-like PostgreSQL migration/concurrency, worker compromise-boundary review, security scans/SBOM, backup restore, alerting, RPO/RTO and runbooks. |
 | External integrations and configuration | 5% | 95% | Website intake is designed to be disabled until configured. Remaining: Claude production account/runtime, approved research sources, email/LinkedIn providers, telephony, object storage, secrets, webhook endpoints, domain/DNS and external legal/provider review. |
 
 ## Detailed delivery checklist
@@ -97,8 +97,9 @@ Percentages are weighted engineering estimates, not automated metrics. The value
 - [ ] Client update drafts and renewal recommendations; sensitive communications remain approval-gated.
 
 ### 6. Security, governance and privacy
-- [ ] Data Protection Gateway for classification, minimization, PII detection/redaction and runtime eligibility.
-- [ ] RBAC/ABAC and cross-workspace isolation tests for API, files, workers, sessions, caches and artifacts.
+- [x] Foundational Data Protection Gateway for selected execution, machine-session, tool and research flows.
+- [ ] Complete classification, minimization, PII detection/redaction and runtime-eligibility coverage across every ingestion, file, RAG, provider, log, cache and artifact path.
+- [ ] Human workspace-level grants and route-by-route enforcement; cross-workspace isolation tests for API, files, workers, sessions, caches and artifacts. Current human membership remains organization-wide.
 - [ ] Scoped credentials, secret rotation, egress allowlists, sandbox isolation and resource limits.
 - [ ] Tamper-evident audit retention and access review.
 - [ ] Approval consumption and protected action in one database transaction for all high-impact actions.
