@@ -172,8 +172,15 @@ A feature is **production-ready** only when implementation, authorization, tenan
 - [ ] Complete delivery QA/handover, support/SLA/renewal, finance reconciliation, backup restore, SBOM, monitoring/alerts and independent security review.
 - [ ] Complete external configuration and synthetic end-to-end deployment verification for the website bridge and provider integrations.
 
-**Release boundary:** PR #33 is open and unverified; PR #30 and PR #32 were closed as superseded after rebasing their changes onto current main. GitHub Actions runner allocation is blocked by account billing; no Actions reruns were started. No claim of production readiness, live autonomous dispatch, or compliance is made.
+**Release boundary:** PR #33 is open and unverified; PR #30 and PR #32 were closed as superseded; PR #33 is the current security candidate. GitHub Actions runner allocation is blocked by account billing; no Actions reruns were started. No claim of production readiness, live autonomous dispatch, or compliance is made.
 
 
 - PR #30 was closed as superseded (not merged); PR #33 carries the tenant/DPG work on the current main head. Its branch is 10 commits ahead and 0 behind at the latest comparison; test and migration execution remain outstanding.
 - Progress percentages remain at the last evidence-backed snapshot (52% internal implementation, 49% overall including integrations, 20% production verification, 5% external configuration). They are not increased for unmerged or unexecuted work.
+
+
+## Development validation policy
+- GitHub Actions is supplementary CI, not a prerequisite for implementation or independent testing.
+- Run focused unit tests and backend suites in an available development environment; run database migration and tenant-isolation tests against disposable PostgreSQL before merge.
+- Record exact commands, environment and results. Never mark tests complete from authored test files alone.
+- PR #33 adds a second hardening pass: provider output identifiers and prior external run IDs are rejected if they contain PII/secrets; the provider run-ID persistence callback is wrapped so raw IDs cannot bypass the DPG; complete execution payload size is bounded before regex sanitization.
