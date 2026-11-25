@@ -361,3 +361,46 @@ def test_managed_agents_requires_os_executor_when_custom_tools_are_enabled():
     )
     with pytest.raises(RuntimeNotConfiguredError):
         runtime.start(request())
+
+
+def test_managed_agents_waits_for_idle_session_to_resume_after_custom_tool_result():
+    from app.tool_registry import managed_agent_custom_tool_definitions
+    tool = next(item for item in managed_agent_custom_tool_definitions() if item["name"] == "os_system_health_read")
+    state = {"poll": 0, "answered": False}
+    def handler(req):
+        if req.method == "GET" and req.url.path == "/v1/agents/agent_test":
+            return httpx.Response(200, json={"id": "agent_test", "archived_at": None, "tools": [tool], "mcp_servers": [], "skills": [], "multiagent": None})
+        if req.method == "POST" and req.url.path == "/v1/sessions":
+            return httpx.Response(200, json={"id": "sesn_resume"})
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_resume":
+            state["poll"] += 1
+            statuses = ["running", "idle", "running", "idle"]
+            return httpx.Response(200, json={"id": "sesn_resume", "status": statuses[min(state["poll"] - 1, 3)]})
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_resume/events":
+            if not state["answered"]:
+                return httpx.Response(200, json={"data": [{"type": "agent.custom_tool_use", "id": "sevt_resume_1", "name": "os_system_health_read", "input": {}}]})
+            if state["poll"] == 2:
+                return httpx.Response(200, json={"data": [
+                    {"type": "agent.custom_tool_use", "id": "sevt_resume_1", "name": "os_system_health_read", "input": {}},
+                    {"type": "user.custom_tool_result", "custom_tool_use_id": "sevt_resume_1"},
+                    {"type": "session.status_idle", "stop_reason": {"type": "requires_action", "event_ids": ["sevt_resume_1"]}},
+                ]})
+            return httpx.Response(200, json={"data": [
+                {"type": "agent.custom_tool_use", "id": "sevt_resume_1", "name": "os_system_health_read", "input": {}},
+                {"type": "user.custom_tool_result", "custom_tool_use_id": "sevt_resume_1"},
+                {"type": "agent.message", "content": [{"type": "text", "text": "Resumed after tool."}]},
+                {"type": "session.status_idle", "stop_reason": {"type": "end_turn"}},
+            ]})
+        if req.method == "POST" and req.url.path == "/v1/sessions/sesn_resume/events":
+            state["answered"] = True
+            return httpx.Response(200, json={"data": []})
+        return httpx.Response(404)
+    runtime = ManagedAgentsRuntime(
+        config(),
+        client_factory=lambda: httpx.Client(base_url="https://api.anthropic.com", transport=httpx.MockTransport(handler)),
+        sleep=lambda _seconds: None,
+    )
+    result = runtime.start(request(execute_custom_tool=lambda *_args: {"database": "ok"}))
+    assert result.detail == "Resumed after tool."
+    assert state["poll"] == 4
+
