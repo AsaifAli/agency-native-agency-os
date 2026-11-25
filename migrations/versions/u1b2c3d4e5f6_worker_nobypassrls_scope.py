@@ -142,6 +142,51 @@ def upgrade() -> None:
     op.execute("GRANT USAGE ON SCHEMA agency_os_private TO agency_os_worker")
     op.execute("GRANT EXECUTE ON FUNCTION agency_os_private.user_has_org_access(text, text) TO agency_os_worker")
 
+    # Execution attempts have no org_id of their own; inherit the scope of
+    # their parent execution so they cannot become an unprotected side table.
+    op.execute("ALTER TABLE public.execution_attempts ENABLE ROW LEVEL SECURITY")
+    op.execute("ALTER TABLE public.execution_attempts FORCE ROW LEVEL SECURITY")
+    op.execute("""
+        CREATE POLICY execution_attempt_tenant_isolation
+        ON public.execution_attempts
+        USING (
+            EXISTS (
+                SELECT 1 FROM public.executions AS e
+                WHERE e.id = execution_id
+                  AND (
+                    agency_os_private.user_has_org_access(
+                        e.org_id, nullif(current_setting('agency_os.user_id', true), '')
+                    )
+                    OR (
+                        e.org_id = nullif(current_setting('agency_os.machine_org_id', true), '')
+                        AND e.workspace_id = nullif(current_setting('agency_os.machine_workspace_id', true), '')
+                    )
+                  )
+            )
+        )
+        WITH CHECK (
+            EXISTS (
+                SELECT 1 FROM public.executions AS e
+                WHERE e.id = execution_id
+                  AND (
+                    agency_os_private.user_has_org_access(
+                        e.org_id, nullif(current_setting('agency_os.user_id', true), '')
+                    )
+                    OR (
+                        e.org_id = nullif(current_setting('agency_os.machine_org_id', true), '')
+                        AND e.workspace_id = nullif(current_setting('agency_os.machine_workspace_id', true), '')
+                    )
+                  )
+            )
+        )
+    """)
+    op.execute("""
+        REVOKE ALL ON TABLE public.users, public.browser_sessions,
+            public.memberships, public.founder_authorities,
+            public.machine_identities
+        FROM agency_os_worker
+    """)
+
 
 def downgrade() -> None:
     op.execute("""
