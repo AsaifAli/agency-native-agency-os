@@ -123,6 +123,57 @@ class Lead(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
 
 
+class LeadResearchRecord(Base):
+    """Append-only, source-backed research findings prepared by a human or agent."""
+    __tablename__ = "lead_research_records"
+    __table_args__ = (
+        Index("ix_lead_research_scope_lead_time", "org_id", "workspace_id", "lead_id", "researched_at"),
+        CheckConstraint("fit_score BETWEEN 0 AND 100", name="ck_lead_research_fit_score"),
+        CheckConstraint("confidence_score BETWEEN 0 AND 100", name="ck_lead_research_confidence_score"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    lead_id: Mapped[str] = mapped_column(ForeignKey("leads.id", ondelete="CASCADE"), nullable=False, index=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    fit_score: Mapped[int] = mapped_column(Integer, nullable=False)
+    confidence_score: Mapped[int] = mapped_column(Integer, nullable=False)
+    buying_signals: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    risks: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    source_references: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    researched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class OutreachDraft(Base):
+    """Agent-prepared communication draft; never sends or schedules a message."""
+    __tablename__ = "outreach_drafts"
+    __table_args__ = (
+        Index("ix_outreach_drafts_scope_status", "org_id", "workspace_id", "status"),
+        CheckConstraint("channel IN ('email','linkedin','call_script')", name="ck_outreach_draft_channel"),
+        CheckConstraint("status IN ('draft','approved_draft','rejected')", name="ck_outreach_draft_status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    lead_id: Mapped[str] = mapped_column(ForeignKey("leads.id", ondelete="CASCADE"), nullable=False, index=True)
+    contact_id: Mapped[str | None] = mapped_column(ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True, index=True)
+    channel: Mapped[str] = mapped_column(String(24), nullable=False)
+    subject: Mapped[str] = mapped_column(String(240), default="", server_default="", nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    personalization_basis: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
+    source_research_ids: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="draft", server_default="draft", nullable=False)
+    reviewed_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_note: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
 class Opportunity(Base):
     __tablename__ = "opportunities"
     __table_args__ = (

@@ -137,6 +137,107 @@ def test_revenue_delivery_vertical_slice_and_audit(client):
     assert r.json()["status"] == "completed"
 
 
+def test_agent_research_and_outreach_drafts_are_source_backed_and_never_send(client):
+    org, ws = client.org_id, client.ws_id
+    lead = client.post(f"/v1/orgs/{org}/leads", headers=auth(), json={
+        "workspace_id": ws, "company_name": "Research Target Ltd",
+        "contact_name": "Asha", "email": "asha@example.test",
+        "source": "agent_research",
+    })
+    assert lead.status_code == 201, lead.text
+    lead_id = lead.json()["id"]
+    research = client.post(f"/v1/orgs/{org}/lead-research", headers=auth(), json={
+        "workspace_id": ws, "lead_id": lead_id,
+        "summary": "The company is expanding its data platform and has a relevant automation need.",
+        "fit_score": 84, "confidence_score": 72,
+        "buying_signals": ["Public hiring for data engineering"],
+        "risks": ["Budget authority is not confirmed"],
+        "source_references": [{
+            "label": "Company careers page", "url": "https://example.test/careers",
+            "accessed_at": "2026-11-25T10:00:00Z",
+        }],
+    })
+    assert research.status_code == 201, research.text
+    research_id = research.json()["id"]
+    assert research.json()["source_references"][0]["url"] == "https://example.test/careers"
+    cross_workspace_research = client.get(
+        f"/v1/orgs/{org}/leads/{lead_id}/research?workspace_id={client.other_ws_id}",
+        headers=auth(),
+    )
+    assert cross_workspace_research.status_code == 404
+    other_workspace_drafts = client.get(
+        f"/v1/orgs/{org}/outreach-drafts?workspace_id={client.other_ws_id}",
+        headers=auth(),
+    )
+    assert other_workspace_drafts.status_code == 200
+    assert other_workspace_drafts.json() == []
+    future_research = client.post(f"/v1/orgs/{org}/lead-research", headers=auth(), json={
+        "workspace_id": ws, "lead_id": lead_id,
+        "summary": "Future-dated research evidence must be rejected by the API.",
+        "fit_score": 50, "confidence_score": 50,
+        "researched_at": "2027-01-01T00:00:00Z",
+        "source_references": [{
+            "label": "Company careers page", "url": "https://example.test/careers",
+            "accessed_at": "2026-11-25T10:00:00Z",
+        }],
+    })
+    assert future_research.status_code == 422
+
+    invalid_source = client.post(f"/v1/orgs/{org}/lead-research", headers=auth(), json={
+        "workspace_id": ws, "lead_id": lead_id,
+        "summary": "This research uses an unsafe source reference and must be rejected.",
+        "fit_score": 50, "confidence_score": 50,
+        "source_references": [{
+            "label": "Unsafe URL", "url": "http://example.test",
+            "accessed_at": "2026-11-25T10:00:00Z",
+        }],
+    })
+    assert invalid_source.status_code == 422
+
+    draft = client.post(f"/v1/orgs/{org}/outreach-drafts", headers=auth(), json={
+        "workspace_id": ws, "lead_id": lead_id, "channel": "email",
+        "subject": "Thought on your data platform",
+        "body": "I noticed your team is expanding its data platform and wanted to share a relevant idea.",
+        "personalization_basis": "Company careers page; research record " + research_id,
+        "source_research_ids": [research_id],
+    })
+    assert draft.status_code == 201, draft.text
+    draft_id = draft.json()["id"]
+    assert draft.json()["status"] == "draft"
+
+    db = client.app.dependency_overrides
+    from app.db import get_db
+    session_generator = db[get_db]()
+    session = next(session_generator)
+    try:
+        from app.models import FounderAuthority
+        session.add(FounderAuthority(
+            org_id=org, user_id=client_user_id(client),
+            grant_source="test_outreach_review",
+        ))
+        session.commit()
+    finally:
+        session_generator.close()
+
+    reviewed = client.post(f"/v1/orgs/{org}/outreach-drafts/{draft_id}/review", headers=auth(), json={
+        "decision": "approve_draft", "note": "Draft reviewed; dispatch remains a separate gated action.",
+    })
+    assert reviewed.status_code == 200, reviewed.text
+    assert reviewed.json()["status"] == "approved_draft"
+    assert "send" not in reviewed.json()
+
+
+def client_user_id(client):
+    from app.db import get_db
+    generator = client.app.dependency_overrides[get_db]()
+    session = next(generator)
+    try:
+        from app.models import User
+        return session.query(User.id).filter_by(email="domain-owner@example.test").scalar()
+    finally:
+        generator.close()
+
+
 def test_contact_activity_timeline_is_scoped_and_append_only(client):
     org, ws = client.org_id, client.ws_id
     created = client.post(f"/v1/orgs/{org}/contacts", headers=auth(), json={

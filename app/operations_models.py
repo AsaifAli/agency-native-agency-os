@@ -86,12 +86,17 @@ class Proposal(Base):
         CheckConstraint("status IN ('draft','pending_approval','approved','rejected','withdrawn')", name="ck_proposal_status"),
         CheckConstraint("amount_minor >= 0", name="ck_proposal_amount_nonnegative"),
         CheckConstraint("validity_days >= 1 AND validity_days <= 180", name="ck_proposal_validity_days"),
+        CheckConstraint("engagement_type IN ('one_time','retainer')", name="ck_proposal_engagement_type"),
+        CheckConstraint("billing_frequency IN ('one_time','monthly','quarterly','annual')", name="ck_proposal_billing_frequency"),
+        CheckConstraint("(engagement_type = 'one_time' AND billing_frequency = 'one_time' AND term_months IS NULL AND included_hours_per_period IS NULL AND rollover_hours = false AND auto_renew = false) OR (engagement_type = 'retainer' AND billing_frequency IN ('monthly','quarterly','annual') AND term_months BETWEEN 1 AND 60 AND included_hours_per_period IS NOT NULL AND included_hours_per_period >= 0)", name="ck_proposal_engagement_terms"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
     org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
     opportunity_id: Mapped[str] = mapped_column(ForeignKey("opportunities.id", ondelete="RESTRICT"), nullable=False, index=True)
+    service_offering_id: Mapped[str | None] = mapped_column(ForeignKey("service_offerings.id", ondelete="RESTRICT"), nullable=True, index=True)
+    service_offering_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     title: Mapped[str] = mapped_column(String(240), nullable=False)
     service_line: Mapped[str] = mapped_column(String(120), nullable=False)
     scope_summary: Mapped[str] = mapped_column(Text, nullable=False)
@@ -101,6 +106,13 @@ class Proposal(Base):
     amount_minor: Mapped[int] = mapped_column(Integer, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     validity_days: Mapped[int] = mapped_column(Integer, default=30, server_default="30", nullable=False)
+    engagement_type: Mapped[str] = mapped_column(String(24), default="one_time", server_default="one_time", nullable=False)
+    billing_frequency: Mapped[str] = mapped_column(String(24), default="one_time", server_default="one_time", nullable=False)
+    term_months: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    included_hours_per_period: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rollover_hours: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
+    support_response_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    auto_renew: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
     status: Mapped[str] = mapped_column(String(24), default="draft", server_default="draft", nullable=False)
     approval_id: Mapped[str | None] = mapped_column(ForeignKey("approvals.id"), nullable=True)
     approved_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
@@ -202,6 +214,7 @@ class InvoiceRecord(Base):
     __table_args__ = (
         UniqueConstraint("org_id", "workspace_id", "invoice_number", name="uq_invoice_number_workspace"),
         UniqueConstraint("org_id", "workspace_id", "external_reference", name="uq_invoice_external_reference"),
+        UniqueConstraint("org_id", "workspace_id", "retainer_period_id", name="uq_invoice_retainer_period"),
         Index("ix_invoice_records_scope_status", "org_id", "workspace_id", "status"),
         CheckConstraint("status IN ('draft','pending_approval','issued','partially_paid','paid','rejected','cancelled')", name="ck_invoice_record_status"),
         CheckConstraint("amount_minor > 0 AND paid_minor >= 0 AND paid_minor <= amount_minor", name="ck_invoice_amount_paid_range"),
@@ -213,6 +226,7 @@ class InvoiceRecord(Base):
     client_id: Mapped[str] = mapped_column(ForeignKey("clients.id", ondelete="RESTRICT"), nullable=False, index=True)
     contract_id: Mapped[str] = mapped_column(ForeignKey("contract_records.id", ondelete="RESTRICT"), nullable=False, index=True)
     project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id", ondelete="RESTRICT"), nullable=True, index=True)
+    retainer_period_id: Mapped[str | None] = mapped_column(ForeignKey("retainer_service_periods.id", ondelete="RESTRICT"), nullable=True, index=True)
     invoice_number: Mapped[str] = mapped_column(String(80), nullable=False)
     title: Mapped[str] = mapped_column(String(240), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
@@ -283,6 +297,38 @@ class ScopeChangeRequest(Base):
     approval_id: Mapped[str | None] = mapped_column(ForeignKey("approvals.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+
+class RetainerServicePeriod(Base):
+    """Immutable commercial-period boundaries with founder-closed usage snapshots."""
+    __tablename__ = "retainer_service_periods"
+    __table_args__ = (
+        UniqueConstraint("org_id", "workspace_id", "contract_id", "period_number", name="uq_retainer_period_number"),
+        Index("ix_retainer_period_project_window", "org_id", "workspace_id", "project_id", "starts_at", "ends_at"),
+        CheckConstraint("period_number BETWEEN 1 AND 60", name="ck_retainer_period_number"),
+        CheckConstraint("included_hours >= 0 AND rollover_in_hours >= 0", name="ck_retainer_period_allowance"),
+        CheckConstraint("used_minutes >= 0 AND overage_minutes >= 0", name="ck_retainer_period_usage"),
+        CheckConstraint("status IN ('open','closed')", name="ck_retainer_period_status"),
+        CheckConstraint("ends_at > starts_at", name="ck_retainer_period_dates"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    contract_id: Mapped[str] = mapped_column(ForeignKey("contract_records.id", ondelete="RESTRICT"), nullable=False, index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True)
+    period_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    included_hours: Mapped[int] = mapped_column(Integer, nullable=False)
+    rollover_in_hours: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    used_minutes: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    overage_minutes: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="open", server_default="open", nullable=False)
+    closed_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 
 
 class TimeEntry(Base):

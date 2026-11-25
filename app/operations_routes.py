@@ -4,6 +4,7 @@ These endpoints persist operational records. They do not send invoices, collect
 payments, authorize scope changes without a founder approval, or dispatch events.
 """
 from datetime import datetime, timedelta, timezone
+import calendar
 import uuid
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -20,7 +21,7 @@ from app.db import get_db
 from app.models import Role, Workspace, Approval, ApprovalStatus, Execution, ExecutionStatus, Task, Agent
 
 from app.domain_models import Project, Opportunity, Client
-from app.operations_models import ServicePlaybook, ServiceOffering, Proposal, ContractRecord, ClientOnboarding, OnboardingChecklistItem, InvoiceRecord, PaymentReceipt, ScopeChangeRequest, TimeEntry, ProjectCost
+from app.operations_models import ServicePlaybook, ServiceOffering, Proposal, ContractRecord, ClientOnboarding, OnboardingChecklistItem, InvoiceRecord, PaymentReceipt, ScopeChangeRequest, TimeEntry, ProjectCost, RetainerServicePeriod
 from app.telephony.models import OutboxEvent
 from app.action_policy import require_approved_action
 from app.audit import record_event
@@ -61,6 +62,19 @@ def _read_or_founder(
     if role not in roles and not has_founder_authority(db, org_id, p.user.id):
         require_role(role, roles)
     _workspace(db, org_id, workspace_id)
+
+
+
+def _add_calendar_months(value: datetime, months: int) -> datetime:
+    """Add calendar months while preserving the original day when possible."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    value = value.astimezone(timezone.utc)
+    month_index = value.year * 12 + (value.month - 1) + months
+    year, month_zero = divmod(month_index, 12)
+    month = month_zero + 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return value.replace(year=year, month=month, day=day)
 
 
 def _event(db, org_id, actor_id, event_type, resource_type, resource_id, workspace_id, payload=None):
@@ -190,6 +204,7 @@ class InvoiceOut(BaseModel):
     client_id: str
     contract_id: str
     project_id: str | None
+    retainer_period_id: str | None
     invoice_number: str
     title: str
     description: str
@@ -319,6 +334,7 @@ class ContractOut(BaseModel):
 class ProposalCreate(BaseModel):
     workspace_id: str
     opportunity_id: str
+    service_offering_id: str | None = None
     title: str = Field(min_length=3, max_length=240)
     service_line: str = Field(min_length=2, max_length=120)
     scope_summary: str = Field(min_length=10, max_length=12000)
@@ -328,6 +344,13 @@ class ProposalCreate(BaseModel):
     amount_minor: int = Field(ge=0, le=2_000_000_000)
     currency: str = Field(pattern="^[A-Z]{3}$")
     validity_days: int = Field(default=30, ge=1, le=180)
+    engagement_type: str = Field(default="one_time", pattern="^(one_time|retainer)$")
+    billing_frequency: str = Field(default="one_time", pattern="^(one_time|monthly|quarterly|annual)$")
+    term_months: int | None = Field(default=None, ge=1, le=60)
+    included_hours_per_period: int | None = Field(default=None, ge=0, le=10000)
+    rollover_hours: bool = False
+    support_response_hours: int | None = Field(default=None, ge=1, le=720)
+    auto_renew: bool = False
 
 
 class ProposalDecision(BaseModel):
@@ -340,6 +363,8 @@ class ProposalOut(BaseModel):
     id: str
     workspace_id: str
     opportunity_id: str
+    service_offering_id: str | None
+    service_offering_snapshot: dict | None
     title: str
     service_line: str
     scope_summary: str
@@ -349,6 +374,13 @@ class ProposalOut(BaseModel):
     amount_minor: int
     currency: str
     validity_days: int
+    engagement_type: str
+    billing_frequency: str
+    term_months: int | None
+    included_hours_per_period: int | None
+    rollover_hours: bool
+    support_response_hours: int | None
+    auto_renew: bool
     status: str
     approval_id: str | None
     approved_by: str | None
@@ -1132,6 +1164,16 @@ def create_contract_draft(
     ).first()
     if duplicate:
         raise HTTPException(409, "Contract number already exists in this workspace")
+    billing_period_count = 1
+    contract_value_minor = proposal.amount_minor
+    if proposal.engagement_type == "retainer":
+        months_per_period = {"monthly": 1, "quarterly": 3, "annual": 12}[proposal.billing_frequency]
+        if proposal.term_months is None or proposal.term_months % months_per_period != 0:
+            raise HTTPException(422, "Retainer term must contain complete billing periods")
+        billing_period_count = proposal.term_months // months_per_period
+        contract_value_minor = proposal.amount_minor * billing_period_count
+        if contract_value_minor > 2_000_000_000:
+            raise HTTPException(422, "Total retainer commitment exceeds the supported contract value range")
     snapshot = {
         "proposal_id": proposal.id,
         "proposal_title": proposal.title,
@@ -1140,16 +1182,25 @@ def create_contract_draft(
         "deliverables": proposal.deliverables,
         "assumptions": proposal.assumptions,
         "exclusions": proposal.exclusions,
-        "amount_minor": proposal.amount_minor,
+        "amount_minor": contract_value_minor,
+        "billing_amount_per_period_minor": proposal.amount_minor if proposal.engagement_type == "retainer" else None,
+        "billing_period_count": billing_period_count,
         "currency": proposal.currency,
         "validity_days": proposal.validity_days,
+        "engagement_type": proposal.engagement_type,
+        "billing_frequency": proposal.billing_frequency,
+        "term_months": proposal.term_months,
+        "included_hours_per_period": proposal.included_hours_per_period,
+        "rollover_hours": proposal.rollover_hours,
+        "support_response_hours": proposal.support_response_hours,
+        "auto_renew": proposal.auto_renew,
         "proposal_approved_by": proposal.approved_by,
         "proposal_approved_at": proposal.approved_at.isoformat() if proposal.approved_at else None,
     }
     item = ContractRecord(
         org_id=org_id, workspace_id=body.workspace_id, client_id=client.id,
         proposal_id=proposal.id, contract_number=body.contract_number.strip(),
-        title=body.title.strip(), amount_minor=proposal.amount_minor,
+        title=body.title.strip(), amount_minor=contract_value_minor,
         currency=proposal.currency, terms_snapshot=snapshot, created_by=p.user.id,
     )
     db.add(item)
@@ -1297,12 +1348,51 @@ def create_proposal(
         raise HTTPException(404, "Opportunity not found")
     if body.currency != opportunity.currency:
         raise HTTPException(422, "Proposal currency must match the linked opportunity currency")
+    offering = None
+    offering_snapshot = None
+    if body.service_offering_id:
+        offering = db.query(ServiceOffering).filter_by(
+            id=body.service_offering_id, org_id=org_id, workspace_id=body.workspace_id,
+            status="active",
+        ).first()
+        if offering is None:
+            raise HTTPException(404, "Active service offering not found in this workspace")
+        if offering.currency != body.currency:
+            raise HTTPException(422, "Service offering currency must match the linked opportunity currency")
+        offering_snapshot = {
+            "id": offering.id, "code": offering.code, "version": offering.version,
+            "name": offering.name, "service_line": offering.service_line,
+            "description": offering.description, "pricing_model": offering.pricing_model,
+            "indicative_price_minor": offering.indicative_price_minor,
+            "currency": offering.currency, "typical_duration_days": offering.typical_duration_days,
+            "target_outcomes": list(offering.target_outcomes or []),
+            "deliverables": list(offering.deliverables or []),
+            "required_inputs": list(offering.required_inputs or []),
+            "exclusions": list(offering.exclusions or []),
+        }
+    if body.engagement_type == "one_time":
+        if (body.billing_frequency != "one_time" or body.term_months is not None
+                or body.included_hours_per_period is not None or body.rollover_hours
+                or body.support_response_hours is not None or body.auto_renew):
+            raise HTTPException(422, "One-time engagements cannot define recurring billing or retainer service terms")
+    else:
+        if body.billing_frequency == "one_time" or body.term_months is None or body.included_hours_per_period is None:
+            raise HTTPException(422, "Retainers require a recurring billing frequency, fixed term and included hours per period")
+        months_per_period = {"monthly": 1, "quarterly": 3, "annual": 12}[body.billing_frequency]
+        if body.term_months % months_per_period != 0:
+            raise HTTPException(422, "Retainer term must contain complete billing periods")
     item = Proposal(
         org_id=org_id, workspace_id=body.workspace_id, opportunity_id=body.opportunity_id,
-        title=body.title, service_line=body.service_line, scope_summary=body.scope_summary,
-        deliverables=body.deliverables, assumptions=body.assumptions,
-        exclusions=body.exclusions, amount_minor=body.amount_minor,
-        currency=body.currency, validity_days=body.validity_days, created_by=p.user.id,
+        service_offering_id=offering.id if offering else None,
+        service_offering_snapshot=offering_snapshot,
+        title=body.title, service_line=offering.service_line if offering else body.service_line, scope_summary=body.scope_summary,
+        deliverables=body.deliverables or (list(offering.deliverables or []) if offering else []), assumptions=body.assumptions,
+        exclusions=body.exclusions or (list(offering.exclusions or []) if offering else []), amount_minor=body.amount_minor,
+        currency=body.currency, validity_days=body.validity_days,
+        engagement_type=body.engagement_type, billing_frequency=body.billing_frequency,
+        term_months=body.term_months, included_hours_per_period=body.included_hours_per_period,
+        rollover_hours=body.rollover_hours, support_response_hours=body.support_response_hours,
+        auto_renew=body.auto_renew, created_by=p.user.id,
     )
     db.add(item)
     db.flush()
@@ -1527,7 +1617,26 @@ def create_time_entry(
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
     _write(org_id, body.workspace_id, p, db)
-    _project(db, org_id, body.workspace_id, body.project_id)
+    project = _project(db, org_id, body.workspace_id, body.project_id)
+    if body.started_at.tzinfo is None:
+        raise HTTPException(422, "Time entry start timestamp must include a timezone")
+    onboarding = db.query(ClientOnboarding).filter_by(
+        org_id=org_id, workspace_id=body.workspace_id, project_id=project.id, status="active",
+    ).first()
+    if onboarding and body.billable:
+        contract = db.query(ContractRecord).filter_by(
+            id=onboarding.contract_id, org_id=org_id, workspace_id=body.workspace_id,
+        ).first()
+        if contract and (contract.terms_snapshot or {}).get("engagement_type") == "retainer":
+            period = db.query(RetainerServicePeriod).filter(
+                RetainerServicePeriod.org_id == org_id,
+                RetainerServicePeriod.workspace_id == body.workspace_id,
+                RetainerServicePeriod.project_id == project.id,
+                RetainerServicePeriod.starts_at <= body.started_at,
+                RetainerServicePeriod.ends_at > body.started_at,
+            ).with_for_update().first()
+            if period is None or period.status != "open":
+                raise HTTPException(409, "Billable retainer time requires an open service period")
     if body.task_id:
         from app.models import Task
         if not db.query(Task.id).filter_by(id=body.task_id, org_id=org_id, workspace_id=body.workspace_id).first():
@@ -1788,3 +1897,216 @@ def outbox_health(
         "dead_letter_count": counts.get("dead_letter", 0),
         "published_count": counts.get("published", 0),
     }
+class RetainerPeriodCreate(BaseModel):
+    workspace_id: str
+    contract_id: str
+    project_id: str
+    period_number: int = Field(ge=1, le=60)
+    starts_at: datetime
+    ends_at: datetime
+
+
+class RetainerPeriodOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    workspace_id: str
+    contract_id: str
+    project_id: str
+    period_number: int
+    starts_at: datetime
+    ends_at: datetime
+    included_hours: int
+    rollover_in_hours: int
+    used_minutes: int
+    overage_minutes: int
+    status: str
+    closed_by: str | None
+    closed_at: datetime | None
+    created_by: str
+    created_at: datetime
+
+
+@router.get("/retainer-periods", response_model=list[RetainerPeriodOut])
+def list_retainer_periods(org_id: str, workspace_id: str = Query(min_length=1), contract_id: str | None = None, db: Session = Depends(get_db), p: Principal = Depends(get_principal)):
+    _read_or_founder(org_id, workspace_id, p, db, {Role.owner, Role.admin, Role.operator, Role.reviewer})
+    q = db.query(RetainerServicePeriod).filter_by(org_id=org_id, workspace_id=workspace_id)
+    if contract_id:
+        if not db.query(ContractRecord.id).filter_by(id=contract_id, org_id=org_id, workspace_id=workspace_id).first():
+            raise HTTPException(404, "Contract not found")
+        q = q.filter_by(contract_id=contract_id)
+    return q.order_by(RetainerServicePeriod.period_number.asc()).limit(500).all()
+
+
+@router.post("/retainer-periods", response_model=RetainerPeriodOut, status_code=201)
+def create_retainer_period(org_id: str, body: RetainerPeriodCreate, db: Session = Depends(get_db), p: Principal = Depends(get_principal)):
+    _write(org_id, body.workspace_id, p, db)
+    require_founder_authority(db, org_id, p.user.id)
+    if body.starts_at.tzinfo is None or body.ends_at.tzinfo is None or body.ends_at <= body.starts_at:
+        raise HTTPException(422, "Retainer period dates must be timezone-aware and end after start")
+    contract = db.query(ContractRecord).filter_by(id=body.contract_id, org_id=org_id, workspace_id=body.workspace_id, status="executed").with_for_update().first()
+    if contract is None:
+        raise HTTPException(409, "Retainer periods require an executed contract in this workspace")
+    terms = contract.terms_snapshot or {}
+    if terms.get("engagement_type") != "retainer":
+        raise HTTPException(422, "Only retainer contracts have service periods")
+    if body.period_number > int(terms.get("billing_period_count") or 0):
+        raise HTTPException(422, "Period number exceeds the contracted billing periods")
+    onboarding = db.query(ClientOnboarding).filter_by(org_id=org_id, workspace_id=body.workspace_id, contract_id=contract.id, project_id=body.project_id, status="active").first()
+    if onboarding is None:
+        raise HTTPException(422, "Project must be activated through this contract's onboarding")
+    cadence_months = {"monthly": 1, "quarterly": 3, "annual": 12}.get(terms.get("billing_frequency"))
+    if cadence_months is None:
+        raise HTTPException(409, "Retainer billing cadence is invalid")
+    previous = None
+    first_period = None
+    if body.period_number > 1:
+        previous = db.query(RetainerServicePeriod).filter_by(org_id=org_id, workspace_id=body.workspace_id, contract_id=contract.id, period_number=body.period_number - 1).with_for_update().first()
+        first_period = db.query(RetainerServicePeriod).filter_by(
+            org_id=org_id, workspace_id=body.workspace_id, contract_id=contract.id, period_number=1,
+        ).first()
+        if previous is None or previous.status != "closed" or first_period is None:
+            raise HTTPException(409, "The preceding and first service periods must exist; the preceding period must be closed")
+    elif db.query(RetainerServicePeriod.id).filter_by(
+        org_id=org_id, workspace_id=body.workspace_id, contract_id=contract.id,
+    ).first():
+        raise HTTPException(409, "Period one already exists")
+    anchor = first_period.starts_at if first_period else body.starts_at
+    expected_start = _add_calendar_months(anchor, (body.period_number - 1) * cadence_months)
+    expected_end = _add_calendar_months(anchor, body.period_number * cadence_months)
+    actual_start = body.starts_at.astimezone(timezone.utc)
+    actual_end = body.ends_at.astimezone(timezone.utc)
+    if actual_start != expected_start or actual_end != expected_end:
+        raise HTTPException(422, "Retainer service period dates must match the contracted calendar billing cadence")
+    if db.query(RetainerServicePeriod.id).filter_by(org_id=org_id, workspace_id=body.workspace_id, contract_id=contract.id, period_number=body.period_number).first():
+        raise HTTPException(409, "This retainer service period already exists")
+    rollover = 0
+    if terms.get("rollover_hours") and previous:
+        unused = max(0, (previous.included_hours + previous.rollover_in_hours) * 60 - previous.used_minutes)
+        rollover = unused // 60
+    item = RetainerServicePeriod(org_id=org_id, workspace_id=body.workspace_id, contract_id=contract.id, project_id=body.project_id, period_number=body.period_number, starts_at=body.starts_at, ends_at=body.ends_at, included_hours=int(terms.get("included_hours_per_period") or 0), rollover_in_hours=rollover, created_by=p.user.id)
+    db.add(item)
+    db.flush()
+    _event(db, org_id, p.user.id, "retainer.period_created", "retainer_service_period", item.id, body.workspace_id, {"contract_id": contract.id, "period_number": item.period_number})
+    _outbox(db, org_id, body.workspace_id, "retainer.period_created", "retainer_service_period", item.id, {"contract_id": contract.id, "period_number": item.period_number})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.post("/retainer-periods/{period_id}/close", response_model=RetainerPeriodOut)
+def close_retainer_period(org_id: str, period_id: str, db: Session = Depends(get_db), p: Principal = Depends(get_principal)):
+    item = db.query(RetainerServicePeriod).filter_by(id=period_id, org_id=org_id).with_for_update().first()
+    if item is None:
+        raise HTTPException(404, "Retainer service period not found")
+    _write(org_id, item.workspace_id, p, db)
+    require_founder_authority(db, org_id, p.user.id)
+    if item.status == "closed":
+        return item
+    now = datetime.now(timezone.utc)
+    period_end = item.ends_at
+    if period_end.tzinfo is None:
+        period_end = period_end.replace(tzinfo=timezone.utc)
+    if now < period_end:
+        raise HTTPException(409, "A service period cannot be closed before its end date")
+    used = db.query(func.coalesce(func.sum(TimeEntry.duration_minutes), 0)).filter(TimeEntry.org_id == org_id, TimeEntry.workspace_id == item.workspace_id, TimeEntry.project_id == item.project_id, TimeEntry.billable.is_(True), TimeEntry.started_at >= item.starts_at, TimeEntry.started_at < item.ends_at).scalar() or 0
+    item.used_minutes = int(used)
+    item.overage_minutes = max(0, item.used_minutes - (item.included_hours + item.rollover_in_hours) * 60)
+    item.status = "closed"
+    item.closed_by = p.user.id
+    item.closed_at = now
+    _event(db, org_id, p.user.id, "retainer.period_closed", "retainer_service_period", item.id, item.workspace_id, {"used_minutes": item.used_minutes, "overage_minutes": item.overage_minutes})
+    _outbox(db, org_id, item.workspace_id, "retainer.period_closed", "retainer_service_period", item.id, {"contract_id": item.contract_id, "used_minutes": item.used_minutes, "overage_minutes": item.overage_minutes})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+
+class RetainerInvoiceDraftCreate(BaseModel):
+    due_date: datetime
+
+
+@router.post("/retainer-periods/{period_id}/invoice-draft", response_model=InvoiceOut)
+def create_retainer_invoice_draft(
+    org_id: str, period_id: str, body: RetainerInvoiceDraftCreate,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    period = db.query(RetainerServicePeriod).filter_by(
+        id=period_id, org_id=org_id,
+    ).with_for_update().first()
+    if period is None:
+        raise HTTPException(404, "Retainer service period not found")
+    _write(org_id, period.workspace_id, p, db)
+    if period.status != "closed":
+        raise HTTPException(409, "Retainer period must be closed before invoice draft generation")
+    if body.due_date.tzinfo is None:
+        raise HTTPException(422, "Invoice due date must include a timezone")
+    existing = db.query(InvoiceRecord).filter_by(
+        org_id=org_id, workspace_id=period.workspace_id,
+        retainer_period_id=period.id,
+    ).with_for_update().first()
+    if existing:
+        return existing
+    contract = db.query(ContractRecord).filter_by(
+        id=period.contract_id, org_id=org_id, workspace_id=period.workspace_id,
+        status="executed",
+    ).with_for_update().first()
+    if contract is None:
+        raise HTTPException(409, "An executed contract is required for recurring invoice drafts")
+    terms = contract.terms_snapshot or {}
+    if terms.get("engagement_type") != "retainer":
+        raise HTTPException(409, "The linked contract is not a retainer")
+    fee_minor = int(terms.get("billing_amount_per_period_minor") or 0)
+    if fee_minor <= 0:
+        raise HTTPException(422, "Retainer contract has no positive recurring fee to invoice")
+    onboarding = db.query(ClientOnboarding.id).filter_by(
+        org_id=org_id, workspace_id=period.workspace_id,
+        contract_id=contract.id, project_id=period.project_id, status="active",
+    ).first()
+    if onboarding is None:
+        raise HTTPException(409, "Active contract onboarding is required for recurring invoice drafts")
+    billed = db.query(func.coalesce(func.sum(InvoiceRecord.amount_minor), 0)).filter(
+        InvoiceRecord.org_id == org_id,
+        InvoiceRecord.workspace_id == period.workspace_id,
+        InvoiceRecord.contract_id == contract.id,
+        InvoiceRecord.status.notin_(["rejected", "cancelled"]),
+    ).scalar() or 0
+    if fee_minor > contract.amount_minor - int(billed):
+        raise HTTPException(409, "Recurring invoice would exceed the remaining executed contract commitment")
+    invoice_number = f"RET-{contract.id[:8].upper()}-P{period.period_number:02d}"
+    collision = db.query(InvoiceRecord.id).filter_by(
+        org_id=org_id, workspace_id=period.workspace_id, invoice_number=invoice_number,
+    ).first()
+    if collision:
+        raise HTTPException(409, "Deterministic retainer invoice number is already assigned to another invoice")
+    overage_note = (
+        f" Recorded overage: {period.overage_minutes} minutes; this amount is not included and requires separate approval."
+        if period.overage_minutes else ""
+    )
+    item = InvoiceRecord(
+        org_id=org_id, workspace_id=period.workspace_id, client_id=contract.client_id,
+        contract_id=contract.id, project_id=period.project_id,
+        retainer_period_id=period.id, invoice_number=invoice_number,
+        title=f"Retainer service period {period.period_number}",
+        description=(
+            f"Recurring retainer fee for service period {period.period_number} "
+            f"({period.starts_at.isoformat()} to {period.ends_at.isoformat()})."
+            f"{overage_note}"
+        ),
+        line_items=[{
+            "description": f"Contracted recurring retainer fee — period {period.period_number}",
+            "amount_minor": fee_minor,
+        }],
+        amount_minor=fee_minor, currency=contract.currency,
+        due_date=body.due_date.astimezone(timezone.utc), created_by=p.user.id,
+    )
+    db.add(item)
+    db.flush()
+    _event(db, org_id, p.user.id, "finance.retainer_invoice_drafted", "invoice", item.id,
+           period.workspace_id, {"contract_id": contract.id, "retainer_period_id": period.id,
+                                 "amount_minor": fee_minor, "overage_minutes": period.overage_minutes})
+    _outbox(db, org_id, period.workspace_id, "finance.retainer_invoice_drafted", "invoice", item.id,
+            {"contract_id": contract.id, "retainer_period_id": period.id, "amount_minor": fee_minor})
+    db.commit()
+    db.refresh(item)
+    return item

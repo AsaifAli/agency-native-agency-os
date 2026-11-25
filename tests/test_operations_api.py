@@ -13,7 +13,7 @@ from app.models import (
     Role, User, Workspace, Task,
 )
 from app.domain_models import Project, Opportunity, Client
-from app.operations_models import ServicePlaybook, ServiceOffering, Proposal, ContractRecord, ClientOnboarding, OnboardingChecklistItem, InvoiceRecord, PaymentReceipt, ScopeChangeRequest, TimeEntry, ProjectCost
+from app.operations_models import ServicePlaybook, ServiceOffering, Proposal, ContractRecord, ClientOnboarding, OnboardingChecklistItem, InvoiceRecord, PaymentReceipt, ScopeChangeRequest, TimeEntry, ProjectCost, RetainerServicePeriod
 from app.operations_routes import router
 from app.telephony.models import OutboxEvent
 
@@ -104,6 +104,80 @@ def test_playbook_create_and_founder_activation(client):
     )
     assert activated.status_code == 200, activated.text
     assert activated.json()["version"] == 2
+
+
+def test_proposal_supports_one_time_and_retainer_engagement_terms(client):
+    org, ws = client.org_id, client.ws_id
+    base = {
+        "workspace_id": ws, "opportunity_id": client.opportunity_id,
+        "title": "Managed AI operations retainer", "service_line": "AI Engineering",
+        "scope_summary": "Ongoing operation, monitoring and improvement of the agreed AI workflows.",
+        "amount_minor": 950000, "currency": "INR",
+    }
+    invalid = client.post(f"/v1/orgs/{org}/operations/proposals", headers=headers(), json={
+        **base, "engagement_type": "retainer", "billing_frequency": "one_time",
+        "term_months": 6, "included_hours_per_period": 40,
+    })
+    assert invalid.status_code == 422
+    incomplete_period = client.post(f"/v1/orgs/{org}/operations/proposals", headers=headers(), json={
+        **base, "engagement_type": "retainer", "billing_frequency": "quarterly",
+        "term_months": 5, "included_hours_per_period": 40,
+    })
+    assert incomplete_period.status_code == 422
+    created = client.post(f"/v1/orgs/{org}/operations/proposals", headers=headers(), json={
+        **base, "engagement_type": "retainer", "billing_frequency": "monthly",
+        "term_months": 6, "included_hours_per_period": 40,
+        "rollover_hours": True, "support_response_hours": 8,
+        "auto_renew": False,
+    })
+    assert created.status_code == 201, created.text
+    payload = created.json()
+    assert payload["engagement_type"] == "retainer"
+    assert payload["billing_frequency"] == "monthly"
+    assert payload["term_months"] == 6
+    assert payload["included_hours_per_period"] == 40
+    assert payload["rollover_hours"] is True
+    assert payload["support_response_hours"] == 8
+    assert payload["auto_renew"] is False
+    one_time = client.post(f"/v1/orgs/{org}/operations/proposals", headers=headers(), json={
+        **base, "title": "One-time AI implementation",
+    })
+    assert one_time.status_code == 201, one_time.text
+    assert one_time.json()["engagement_type"] == "one_time"
+    assert one_time.json()["billing_frequency"] == "one_time"
+
+
+def test_proposal_snapshots_active_service_offering(client):
+    org, ws = client.org_id, client.ws_id
+    created = client.post(f"/v1/orgs/{org}/operations/service-catalog", headers=headers(), json={
+        "workspace_id": ws, "code": "ai-workflow-build", "name": "AI Workflow Build",
+        "service_line": "AI Engineering",
+        "description": "Design and implement a governed AI workflow for the client.",
+        "pricing_model": "fixed", "indicative_price_minor": 1250000, "currency": "INR",
+        "deliverables": ["Architecture", "Implementation"], "exclusions": ["Third-party fees"],
+    })
+    assert created.status_code == 201, created.text
+    offering = created.json()
+    activated = client.patch(
+        f"/v1/orgs/{org}/operations/service-catalog/{offering['id']}/status",
+        headers=headers(), json={"status": "active"},
+    )
+    assert activated.status_code == 200, activated.text
+    proposal = client.post(f"/v1/orgs/{org}/operations/proposals", headers=headers(), json={
+        "workspace_id": ws, "opportunity_id": client.opportunity_id,
+        "service_offering_id": offering["id"], "title": "AI workflow proposal",
+        "service_line": "Ignored when catalogue offering is selected",
+        "scope_summary": "Implement the agreed workflow and hand over the verified solution.",
+        "amount_minor": 1400000, "currency": "INR",
+    })
+    assert proposal.status_code == 201, proposal.text
+    payload = proposal.json()
+    assert payload["service_offering_id"] == offering["id"]
+    assert payload["service_line"] == "AI Engineering"
+    assert payload["deliverables"] == ["Architecture", "Implementation"]
+    assert payload["exclusions"] == ["Third-party fees"]
+    assert payload["service_offering_snapshot"]["version"] == 1
+    assert payload["service_offering_snapshot"]["indicative_price_minor"] == 1250000
 
 
 def test_proposal_requires_single_use_founder_pricing_approval(client):
@@ -314,17 +388,19 @@ def test_service_catalogue_draft_requires_founder_activation(client):
 
 
 
-def _create_approved_proposal_for_contract(client):
+def _create_approved_proposal_for_contract(client, engagement_terms=None):
+    proposal_payload = {
+        "workspace_id": client.ws_id, "opportunity_id": client.opportunity_id,
+        "title": "Signed AI workflow engagement", "service_line": "AI Engineering",
+        "scope_summary": "Design, implement and evaluate a governed AI workflow for the client.",
+        "deliverables": ["Workflow API", "Evaluation report"],
+        "assumptions": ["Client provides access"], "exclusions": ["Cloud subscription fees"],
+        "amount_minor": 1800000, "currency": "INR", "validity_days": 30,
+    }
+    proposal_payload.update(engagement_terms or {})
     response = client.post(
         "/v1/orgs/" + client.org_id + "/operations/proposals",
-        headers=headers(), json={
-            "workspace_id": client.ws_id, "opportunity_id": client.opportunity_id,
-            "title": "Signed AI workflow engagement", "service_line": "AI Engineering",
-            "scope_summary": "Design, implement and evaluate a governed AI workflow for the client.",
-            "deliverables": ["Workflow API", "Evaluation report"],
-            "assumptions": ["Client provides access"], "exclusions": ["Cloud subscription fees"],
-            "amount_minor": 1800000, "currency": "INR", "validity_days": 30,
-        },
+        headers=headers(), json=proposal_payload,
     )
     assert response.status_code == 201, response.text
     db = client.session_factory()
@@ -350,6 +426,35 @@ def _create_approved_proposal_for_contract(client):
     finally:
         db.close()
     return response.json()["id"]
+
+
+def test_contract_snapshots_retainer_commercial_terms(client):
+    proposal_id = _create_approved_proposal_for_contract(client, {
+        "engagement_type": "retainer", "billing_frequency": "monthly",
+        "term_months": 12, "included_hours_per_period": 60,
+        "rollover_hours": True, "support_response_hours": 4,
+        "auto_renew": False,
+    })
+    created = client.post(
+        "/v1/orgs/" + client.org_id + "/operations/contracts",
+        headers=headers(), json={
+            "workspace_id": client.ws_id, "proposal_id": proposal_id,
+            "contract_number": "AG-2026-RETAINER", "title": "Managed AI Services Retainer",
+        },
+    )
+    assert created.status_code == 201, created.text
+    terms = created.json()["terms_snapshot"]
+    assert terms["engagement_type"] == "retainer"
+    assert terms["billing_frequency"] == "monthly"
+    assert terms["term_months"] == 12
+    assert terms["billing_period_count"] == 12
+    assert terms["billing_amount_per_period_minor"] == 1800000
+    assert terms["amount_minor"] == 21600000
+    assert created.json()["amount_minor"] == 21600000
+    assert terms["included_hours_per_period"] == 60
+    assert terms["rollover_hours"] is True
+    assert terms["support_response_hours"] == 4
+    assert terms["auto_renew"] is False
 
 
 def test_contract_requires_approved_proposal_and_records_signed_evidence(client):
@@ -1369,3 +1474,112 @@ def test_outbox_health_denies_member_without_founder_authority(client):
     finally:
         client.app.dependency_overrides.pop(get_principal, None)
         db.close()
+
+def test_retainer_period_usage_rollover_and_closed_period_guard(client):
+    org, ws = client.org_id, client.ws_id
+    db = client.session_factory()
+    try:
+        proposal = Proposal(
+            org_id=org, workspace_id=ws, opportunity_id=client.opportunity_id,
+            title="Retainer", service_line="AI Engineering", scope_summary="Managed AI operations",
+            deliverables=[], assumptions=[], exclusions=[], amount_minor=100000,
+            currency="INR", validity_days=30, engagement_type="retainer",
+            billing_frequency="monthly", term_months=2, included_hours_per_period=10,
+            rollover_hours=True, support_response_hours=8, auto_renew=False,
+            status="approved", created_by=client.user_id,
+        )
+        db.add(proposal)
+        db.flush()
+        contract = ContractRecord(
+            org_id=org, workspace_id=ws, client_id=client.client_id, proposal_id=proposal.id,
+            contract_number="RET-001", title="Retainer", amount_minor=200000, currency="INR",
+            terms_snapshot={"engagement_type":"retainer","billing_frequency":"monthly",
+                            "billing_period_count":2,"billing_amount_per_period_minor":100000,"included_hours_per_period":10,
+                            "rollover_hours":True}, status="executed",
+            signed_reference="test-signed-evidence", signed_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            executed_by=client.user_id, executed_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            created_by=client.user_id,
+        )
+        db.add(contract)
+        db.flush()
+        db.add(ClientOnboarding(
+            org_id=org, workspace_id=ws, client_id=client.client_id,
+            contract_id=contract.id, project_id=client.project_id, status="active",
+            created_by=client.user_id,
+        ))
+        db.commit()
+        contract_id = contract.id
+    finally:
+        db.close()
+
+    invalid_period = client.post(f"/v1/orgs/{org}/operations/retainer-periods", headers=headers(), json={
+        "workspace_id":ws,"contract_id":contract_id,"project_id":client.project_id,
+        "period_number":1,"starts_at":"2026-01-01T00:00:00+00:00",
+        "ends_at":"2026-01-31T00:00:00+00:00",
+    })
+    assert invalid_period.status_code == 422
+
+    period_one = client.post(f"/v1/orgs/{org}/operations/retainer-periods", headers=headers(), json={
+        "workspace_id":ws,"contract_id":contract_id,"project_id":client.project_id,
+        "period_number":1,"starts_at":"2026-01-01T00:00:00+00:00",
+        "ends_at":"2026-02-01T00:00:00+00:00",
+    })
+    assert period_one.status_code == 201, period_one.text
+    period_id = period_one.json()["id"]
+    early_invoice = client.post(
+        f"/v1/orgs/{org}/operations/retainer-periods/{period_id}/invoice-draft",
+        headers=headers(), json={"due_date":"2026-02-08T00:00:00+00:00"},
+    )
+    assert early_invoice.status_code == 409
+
+    db = client.session_factory()
+    try:
+        db.add(TimeEntry(
+            org_id=org, workspace_id=ws, project_id=client.project_id,
+            user_id=client.user_id, description="Billable retainer work",
+            duration_minutes=12*60, billable=True, hourly_cost_minor=0,
+            started_at=datetime(2026, 1, 15, tzinfo=timezone.utc),
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    closed = client.post(
+        f"/v1/orgs/{org}/operations/retainer-periods/{period_id}/close",
+        headers=headers(),
+    )
+    assert closed.status_code == 200, closed.text
+    assert closed.json()["used_minutes"] == 720
+    assert closed.json()["overage_minutes"] == 120
+
+    invoice = client.post(
+        f"/v1/orgs/{org}/operations/retainer-periods/{period_id}/invoice-draft",
+        headers=headers(),
+        json={"due_date":"2026-02-08T00:00:00+00:00"},
+    )
+    assert invoice.status_code == 200, invoice.text
+    assert invoice.json()["amount_minor"] == 100000
+    assert invoice.json()["retainer_period_id"] == period_id
+    assert "overage" in invoice.json()["description"].lower()
+    duplicate_invoice = client.post(
+        f"/v1/orgs/{org}/operations/retainer-periods/{period_id}/invoice-draft",
+        headers=headers(),
+        json={"due_date":"2026-02-10T00:00:00+00:00"},
+    )
+    assert duplicate_invoice.status_code == 200, duplicate_invoice.text
+    assert duplicate_invoice.json()["id"] == invoice.json()["id"]
+
+    period_two = client.post(f"/v1/orgs/{org}/operations/retainer-periods", headers=headers(), json={
+        "workspace_id":ws,"contract_id":contract_id,"project_id":client.project_id,
+        "period_number":2,"starts_at":"2026-02-01T00:00:00+00:00",
+        "ends_at":"2026-03-01T00:00:00+00:00",
+    })
+    assert period_two.status_code == 201, period_two.text
+    assert period_two.json()["rollover_in_hours"] == 0
+
+    late_entry = client.post(f"/v1/orgs/{org}/operations/time-entries", headers=headers(), json={
+        "workspace_id":ws,"project_id":client.project_id,"description":"Late billable entry",
+        "duration_minutes":30,"billable":True,"hourly_cost_minor":0,
+        "started_at":"2026-01-20T00:00:00+00:00",
+    })
+    assert late_entry.status_code == 409
