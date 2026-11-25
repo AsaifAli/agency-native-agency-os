@@ -39,6 +39,7 @@ class MachineIdentity(Base):
 class AgentSession(Base):
     __tablename__ = "agent_sessions"
     __table_args__ = (
+        UniqueConstraint("org_id", "workspace_id", "id", name="uq_agent_session_scope_id"),
         ForeignKeyConstraint(["org_id", "workspace_id", "machine_identity_id"], ["machine_identities.org_id", "machine_identities.workspace_id", "machine_identities.id"], ondelete="CASCADE", name="fk_agent_session_identity_scope"),
         CheckConstraint("status IN ('active','cancelled','expired','closed')", name="ck_agent_session_status"),
         CheckConstraint("data_class IN ('synthetic','public','commercial','confidential','regulated')", name="ck_agent_session_data_class"),
@@ -56,3 +57,32 @@ class AgentSession(Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ToolInvocation(Base):
+    """Durable, idempotent record of a machine-initiated OS tool invocation."""
+    __tablename__ = "tool_invocations"
+    __table_args__ = (
+        UniqueConstraint("org_id", "workspace_id", "idempotency_key", name="uq_tool_invocation_scope_idempotency"),
+        ForeignKeyConstraint(["org_id", "workspace_id"], ["workspaces.org_id", "workspaces.id"], ondelete="CASCADE", name="fk_tool_invocation_workspace_scope"),
+        ForeignKeyConstraint(["org_id", "workspace_id", "machine_identity_id"], ["machine_identities.org_id", "machine_identities.workspace_id", "machine_identities.id"], ondelete="CASCADE", name="fk_tool_invocation_identity_scope"),
+        ForeignKeyConstraint(["org_id", "workspace_id", "session_id"], ["agent_sessions.org_id", "agent_sessions.workspace_id", "agent_sessions.id"], ondelete="CASCADE", name="fk_tool_invocation_session_scope"),
+        CheckConstraint("status IN ('succeeded','failed')", name="ck_tool_invocation_status"),
+        Index("ix_tool_invocation_scope_created", "org_id", "workspace_id", "created_at"),
+        Index("ix_tool_invocation_identity_tool", "machine_identity_id", "tool_key", "created_at"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    machine_identity_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    session_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    tool_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    tool_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_payload: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
