@@ -21,6 +21,12 @@ class FakeSession:
     def commit(self):
         self.committed = True
 
+    def execute(self, statement, params=None):
+        class Result:
+            def scalar_one(self):
+                return 0
+        return Result()
+
 
 class StopAfterWait:
     def __init__(self):
@@ -84,6 +90,8 @@ def test_run_worker_runs_startup_maintenance_and_waits_when_idle(
     recover = Mock(return_value=0)
     queue = Mock(return_value=0)
 
+    monkeypatch.setattr(runner, "list_worker_scopes", Mock(return_value=[("org-1", "workspace-1")]))
+    monkeypatch.setattr(runner, "scoped_worker_session_factory", lambda org_id, workspace_id, factory: factory)
     monkeypatch.setattr(runner, "promote_due_retries", promote)
     monkeypatch.setattr(
         runner,
@@ -93,8 +101,7 @@ def test_run_worker_runs_startup_maintenance_and_waits_when_idle(
     monkeypatch.setattr(runner, "queue_ready_delegations", queue)
     expire_sessions = Mock(return_value=0)
     monkeypatch.setattr(runner, "expire_due_agent_sessions", expire_sessions)
-    prune_browser_sessions = Mock(return_value=0)
-    monkeypatch.setattr(runner, "prune_expired_browser_sessions", prune_browser_sessions)
+
     monkeypatch.setattr(
         runner,
         "reconcile_outbox_events",
@@ -127,10 +134,13 @@ def test_run_worker_runs_startup_maintenance_and_waits_when_idle(
     assert len(sessions) == 5
     assert all(session.committed for session in sessions)
     expire_sessions.assert_called_once_with(sessions[2], limit=10)
-    prune_browser_sessions.assert_called_once_with(sessions[3], retention_days=30, limit=10)
+    assert sessions[3].committed  # outbox reconciliation
+    assert sessions[4].committed  # bounded SECURITY DEFINER browser-session retention
 
 
 def test_run_worker_propagates_processor_failure(monkeypatch):
+    monkeypatch.setattr(runner, "list_worker_scopes", Mock(return_value=[("org-1", "workspace-1")]))
+    monkeypatch.setattr(runner, "scoped_worker_session_factory", lambda org_id, workspace_id, factory: factory)
     monkeypatch.setattr(
         runner,
         "promote_due_retries",
@@ -143,7 +153,7 @@ def test_run_worker_propagates_processor_failure(monkeypatch):
     )
     monkeypatch.setattr(runner, "queue_ready_delegations", Mock(return_value=0))
     monkeypatch.setattr(runner, "expire_due_agent_sessions", Mock(return_value=0))
-    monkeypatch.setattr(runner, "prune_expired_browser_sessions", Mock(return_value=0))
+
     monkeypatch.setattr(
         runner,
         "reconcile_outbox_events",

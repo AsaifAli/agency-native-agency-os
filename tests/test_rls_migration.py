@@ -44,3 +44,25 @@ def test_machine_rls_context_is_workspace_scoped():
 def test_existing_database_role_bootstrap_transfers_old_object_ownership():
     source = (PATH.parents[2] / "docker/postgres/01-roles.sh").read_text()
     assert "REASSIGN OWNED BY agency_os TO agency_os_migrator" in source
+
+
+
+def test_worker_followup_migration_removes_bypass_and_scopes_attempts():
+    worker_migration = PATH.with_name(
+        "u1b2c3d4e5f6_worker_nobypassrls_scope.py"
+    ).read_text()
+    role_bootstrap = (PATH.parents[2] / "docker/postgres/01-roles.sh").read_text()
+
+    assert "worker_workspace_scopes" in worker_migration
+    assert "SECURITY DEFINER" in worker_migration
+    assert "execution_attempt_tenant_isolation" in worker_migration
+    assert "session_user" in worker_migration and "agency_os_worker" in worker_migration
+    assert "prune_expired_browser_sessions" in worker_migration
+    assert "REVOKE ALL ON TABLE public.users" in worker_migration
+    assert "REVOKE ALL ON TABLES FROM agency_os_worker" in worker_migration
+    assert "REVOKE ALL ON SEQUENCES FROM agency_os_worker" in worker_migration
+    assert "agency_os_worker" in role_bootstrap
+    assert "ALTER ROLE agency_os_worker" in role_bootstrap
+    assert "NOINHERIT NOBYPASSRLS;" in role_bootstrap
+    assert "ALTER ROLE agency_os_migrator" in role_bootstrap
+    assert "NOINHERIT BYPASSRLS;" in role_bootstrap

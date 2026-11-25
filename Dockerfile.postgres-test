@@ -9,7 +9,8 @@ RUN pip install --no-cache-dir -r requirements-dev.txt
 COPY alembic.ini .
 COPY migrations ./migrations
 COPY app ./app
+COPY docker ./docker
 COPY tests ./tests
 COPY pytest.ini .
 
-CMD ["python", "-m", "pytest", "-q", "tests/test_tenant_integrity_postgres.py", "tests/test_tenant_rls_postgres.py", "tests/test_worker_postgres.py"]
+CMD ["python", "-m", "pytest", "-q", "tests/test_tenant_integrity_postgres.py", "tests/test_tenant_rls_postgres.py", "tests/test_worker_postgres.py", "tests/test_worker_rls_postgres.py", "tests/test_rls_migration.py", "tests/test_worker_rls_context.py", "tests/test_worker_runner.py"]

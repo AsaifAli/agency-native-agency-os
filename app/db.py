@@ -63,8 +63,42 @@ def set_rls_context(db: Session, *, user_id: str | None = None,
                 {"name": f"agency_os.{key}", "value": value})
 
 
+def list_worker_scopes(session_factory=WorkerSessionLocal) -> list[tuple[str, str]]:
+    """Return the minimal org/workspace inventory required for fair worker polling.
+
+    PostgreSQL exposes this through a narrowly granted SECURITY DEFINER function;
+    the worker cannot list arbitrary tenant records through this operation.
+    """
+    with session_factory() as db:
+        rows = db.execute(text(
+            "SELECT org_id, workspace_id "
+            "FROM agency_os_private.worker_workspace_scopes()"
+        )).all()
+        db.commit()
+    return [(str(row[0]), str(row[1])) for row in rows]
+
+
+def scoped_worker_session_factory(
+    org_id: str,
+    workspace_id: str,
+    session_factory=WorkerSessionLocal,
+):
+    """Create sessions that reapply one exact workspace context per transaction."""
+    if not org_id or not workspace_id:
+        raise ValueError("Worker organization and workspace scope are required")
+
+    def create_scoped_session():
+        db = session_factory()
+        set_rls_context(
+            db, machine_org_id=org_id, machine_workspace_id=workspace_id
+        )
+        return db
+
+    return create_scoped_session
+
+
 def verify_postgres_role(database_engine, *, expected_bypassrls: bool, require_rls: bool) -> None:
-    """Fail closed unless API/worker connects with its designated PG role."""
+    """Fail closed unless API/worker connects with its designated PostgreSQL role."""
     if database_engine.dialect.name != "postgresql":
         raise RuntimeError("Production database role verification requires PostgreSQL")
     with database_engine.connect() as connection:
@@ -75,7 +109,7 @@ def verify_postgres_role(database_engine, *, expected_bypassrls: bool, require_r
             FROM pg_roles r WHERE r.rolname=current_user
         """)).mappings().one_or_none()
         if role is None or role["rolsuper"] or bool(role["rolbypassrls"]) != expected_bypassrls or role["owns_rls_tables"]:
-            expected = "non-owner BYPASSRLS worker" if expected_bypassrls else "non-owner NOBYPASSRLS API"
+            expected = "non-owner BYPASSRLS role" if expected_bypassrls else "non-owner NOBYPASSRLS API/worker"
             raise RuntimeError(f"PostgreSQL connection must use a {expected} role")
         if require_rls:
             count = connection.execute(text("""
