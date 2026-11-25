@@ -1,6 +1,7 @@
 """In-process service entry point shared by HTTP and Managed Agent custom tools."""
 import hashlib
 import json
+from typing import NoReturn
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -25,7 +26,7 @@ def _deny(
     status_code: int,
     message: str,
     redaction_counts: dict | None = None,
-) -> None:
+) -> NoReturn:
     # Roll back any uncommitted adapter work before writing the denial audit.
     db.rollback()
     record_event(
