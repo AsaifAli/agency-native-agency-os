@@ -28,7 +28,7 @@ Percentages are weighted engineering estimates, not automated metrics. The value
 | Security and governance | 60% | 40% | Merged baseline includes founder-only approvals, machine identity/session grants, DPG redaction and exact workforce tool grants. PR #47 candidate adds browser-session revocation/rotation/retention, JWT key overlap, 51 RLS policies, API/migrator/worker role split, route guards and log redaction; still unmerged and not live-verified. Remaining: worker BYPASSRLS removal, human workspace grants, PostgreSQL verification, secrets/egress controls and independent security review. |
 | Automation and execution reliability | 55% | 45% | Persisted executions/attempts, leases, heartbeat/recovery, retries, outbox and execution-scoped idempotent Claude tool callbacks. Remaining: integration-wide reconciliation, dead-letter operations, cancellation, worker load tests and operational alerts. |
 | Founder Console | 60% | 40% | Workforce, tasks, operations, approvals, CRM, proposals, contracts, onboarding, invoices, audit/monitoring, research/outreach and retainer page foundations. Remaining: integrated lifecycle views, tool/permission controls, finance and client-health views, accessible UX and end-to-end workflow polish. |
-| Verification and operations | 28% | 72% | PR #47 candidate: 364 backend tests passed, 5 PostgreSQL-only skipped; compileall, isolated PostgreSQL SQL rendering, Compose YAML and role-script syntax passed; frontend lint 0 errors/7 existing warnings and Next.js production build passed. Remaining: live PostgreSQL 16 migrations/concurrency, worker isolation, security scans/SBOM, backup restore, alerting, RPO/RTO and runbooks. |
+| Verification and operations | 28% | 72% | PR #47 candidate: 364 backend tests passed, 5 PostgreSQL-only skipped on the no-database run; follow-up PostgreSQL 17 run passed 368 tests with 1 RLS-only test skipped; compileall, isolated PostgreSQL SQL rendering, Compose YAML and role-script syntax passed; frontend lint 0 errors/7 existing warnings and Next.js production build passed. Remaining: live PostgreSQL 16 migrations/concurrency, worker isolation, security scans/SBOM, backup restore, alerting, RPO/RTO and runbooks. |
 | External integrations and configuration | 5% | 95% | Website intake is designed to be disabled until configured. Remaining: Claude production account/runtime, approved research sources, email/LinkedIn providers, telephony, object storage, secrets, webhook endpoints, domain/DNS and external legal/provider review. |
 
 ## Detailed delivery checklist
@@ -110,7 +110,8 @@ Percentages are weighted engineering estimates, not automated metrics. The value
 - [x] Durable execution records, attempts, leases, heartbeat and retry/recovery foundation.
 - [x] Transactional outbox foundation with versioned events.
 - [ ] Complete idempotency, deduplication, bounded retries, dead letters and reconciliation for every external adapter.
-- [ ] Worker concurrency, lease-expiry, cancellation and crash-recovery tests.
+- [x] PostgreSQL 17 integration tests for concurrent worker claims, expired execution-lease recovery, retry scheduling, attempt abandonment, audit persistence, outbox concurrent claims/recovery and outreach tenant-integrity constraints.
+- [ ] PostgreSQL 16 repeat, actual worker-process termination/restart, sustained load, cancellation and multi-replica deployment tests.
 - [ ] Event replay tooling with permission checks and audit.
 - [ ] Metrics, logs, traces, cost budgets, alert routing and operational dashboards.
 - [ ] Encrypted backups and a tested restore procedure; document RPO/RTO.
@@ -544,3 +545,14 @@ Additional review controls: identity/session locks follow revocation lock order;
 
 **Release decision: NO-GO.** The PR is a tested code candidate, not production approval. Restore the repository to private visibility now that the temporary public clone requirement is over; PR #47 remains available to authorized collaborators.
 
+
+
+## PostgreSQL worker reliability follow-up — 2026-11-26
+
+- [x] Added a PostgreSQL integration assertion for recovery of an execution whose worker lease expired after claim commit.
+- [x] Verified fresh Alembic migrations through the RLS migration on an isolated PostgreSQL 17 cluster.
+- [x] Verified worker concurrency/recovery, outbox concurrency/recovery and outreach tenant-integrity integration tests: **4 passed**.
+- [x] Full backend suite with the PostgreSQL integration database enabled: **368 passed, 1 skipped**. The skipped test is the separate NOBYPASSRLS RLS test; its app-role grant stage was not run in this environment. Python compilation and whitespace checks passed.
+- [ ] Repeat on PostgreSQL 16 and run the NOBYPASSRLS RLS test through the isolated harness; verify actual worker process termination/restart, sustained load, cancellation and multiple deployed worker replicas.
+
+**Evidence boundary:** PostgreSQL 17 local integration evidence does not replace the repository's PostgreSQL 16 target. RLS isolation, Docker Compose startup, actual worker process restart, sustained load, live providers and production readiness remain unverified.
