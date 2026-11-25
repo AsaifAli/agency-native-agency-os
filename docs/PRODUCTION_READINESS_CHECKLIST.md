@@ -2,7 +2,7 @@
 
 **Last reviewed:** 2026-11-25  
 **Tracking branch:** `main`  
-**Latest merged milestone:** [PR #36](https://github.com/AsaifAli/agency-native-agency-os/pull/36)  
+**Latest merged milestone:** [PR #40](https://github.com/AsaifAli/agency-native-agency-os/pull/40)  
 **Status:** Active development candidate — not a certification or release approval.
 
 ## Progress snapshot
@@ -336,3 +336,17 @@ A feature is **production-ready** only when implementation, authorization, tenan
 - [ ] Full Next.js lint, typecheck and production build remain unverified. The isolated environment has no frontend dependencies; `npm install` timed out, so no build success is claimed.
 - [x] PR #39 merged to `main` after review-finding fixes.
 - [ ] Full frontend dependency install, lint, TypeScript check and Next build remain pending; no successful full build is claimed.
+
+
+## Stabilization branch reconciliation — 2026-11-25
+
+- [x] Fetched and compared `origin/feature/agency-os-v5-stabilization` against current `main` at `20f57af4bff2409ea9721da3168f742cbc3da279`.
+- [x] Confirmed the branch has 32 commits on its side of the merge-base comparison, but its direct tree comparison against main would change 269 files with approximately 7,292 insertions and 18,811 deletions. This is not a safe merge candidate.
+- [x] Confirmed the signed website lead-intake route and its tests are already present on main with identical Git blob SHAs; the workforce console page is also identical.
+- [x] Confirmed main contains a more extensive workforce API implementation, including founder-governed capability activation/pause, runtime/data-class checks, delegation and orchestration-plan support. The branch's older route/model/test versions must not replace it.
+- [x] Confirmed main registers both website-intake and workforce routers. The current workforce API also explicitly blocks tool grants until the Agency OS MCP gateway exists.
+- [x] Decision: do not merge or rebase the stabilization branch wholesale and do not cherry-pick its historical commits without a fresh per-feature comparison. High-value workforce/intake capabilities are already present or superseded on main.
+- [ ] Keep the old branch as a reference until a separate, commit-by-commit audit is complete; no branch deletion, force-push or destructive cleanup was performed.
+- [ ] Continue implementation from current main. The MCP bridge remains a design-only milestone; its authenticated endpoint, session token, vault lifecycle and contract/isolation/recovery tests are still outstanding.
+
+**Validation boundary:** this was a Git-tree/source comparison through GitHub. No local tests, frontend build, PostgreSQL migration rehearsal or CI run was performed as part of this branch audit.
