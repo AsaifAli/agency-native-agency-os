@@ -140,6 +140,7 @@ def upgrade() -> None:
         TO agency_os_worker
     """)
     op.execute("GRANT USAGE ON SCHEMA agency_os_private TO agency_os_worker")
+    op.execute("GRANT EXECUTE ON FUNCTION agency_os_private.user_has_org_access(text, text) TO agency_os_worker")
 
 
 def downgrade() -> None:
