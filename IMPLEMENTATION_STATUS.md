@@ -298,3 +298,4 @@ Added production fail-closed configuration checks, Redis-backed request throttli
 ## 2026-11-25 — Authentik OIDC integration
 
 Added Authentik OIDC relying-party integration (Authlib, OIDC discovery, authorization code + PKCE S256, state/nonce), strict pre-provisioned-user linking by verified issuer/subject/email, unique OIDC subject migration, AES-GCM encrypted OIDC transaction cookie, HttpOnly session cookie, double-submit CSRF + Origin checks, CSRF bootstrap/current-user/logout endpoints and frontend credentialed requests. Added `docs/AUTHENTIK_SETUP.md`. Validation: OIDC/CSRF focused tests 35 passed; full backend suite 320 passed / 4 PostgreSQL-only skipped; compileall passed; Alembic single head `r8a2c4e6f901`. Live Authentik configuration, Authentik MFA assurance policy (`acr`), browser topology and PostgreSQL RLS remain unverified. Production remains NO-GO.
+
