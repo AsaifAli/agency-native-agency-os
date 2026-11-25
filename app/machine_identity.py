@@ -12,7 +12,7 @@ from app.security_models import AgentSession, MachineIdentity
 
 TOKEN_PREFIX = "aos_mi_"
 ALLOWED_SUBJECT_TYPES = {"agent", "worker", "service"}
-ALLOWED_DATA_CLASSES = {"synthetic", "public", "commercial", "confidential", "regulated"}
+ALLOWED_DATA_CLASSES = {"synthetic", "public"}
 
 @dataclass(frozen=True)
 class MachinePrincipal:
@@ -20,6 +20,10 @@ class MachinePrincipal:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+def _as_utc(value: datetime) -> datetime:
+    # SQLite drops timezone metadata for DateTime(timezone=True); normalize reads.
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 def _token_digest(secret: str) -> str:
     return hashlib.sha256(secret.encode("utf-8")).hexdigest()
@@ -41,7 +45,7 @@ def authenticate_machine_token(authorization: str | None, db: Session) -> Machin
     identity = db.query(MachineIdentity).filter(MachineIdentity.id == identity_id).first()
     if identity is None or identity.revoked_at is not None:
         raise HTTPException(401, "Invalid or revoked machine credential")
-    if identity.expires_at <= _utcnow():
+    if _as_utc(identity.expires_at) <= _utcnow():
         raise HTTPException(401, "Machine credential expired")
     if not hmac.compare_digest(identity.token_hash, _token_digest(secret)):
         raise HTTPException(401, "Invalid machine credential")
@@ -54,7 +58,8 @@ def get_machine_principal(authorization: str | None = Header(default=None), db: 
 def create_agent_session(db: Session, principal: MachinePrincipal, *, purpose: str, data_class: str, ttl_seconds: int) -> AgentSession:
     identity = principal.identity
     now = _utcnow()
-    if identity.revoked_at is not None or identity.expires_at <= now:
+    identity_expires_at = _as_utc(identity.expires_at)
+    if identity.revoked_at is not None or identity_expires_at <= now:
         raise HTTPException(401, "Machine credential is no longer active")
     if "sessions:create" not in identity.scopes:
         raise HTTPException(403, "Machine identity cannot create sessions")
@@ -66,7 +71,7 @@ def create_agent_session(db: Session, principal: MachinePrincipal, *, purpose: s
         raise HTTPException(422, "Session TTL must be between 60 and 86400 seconds")
     if not purpose or len(purpose.strip()) > 240:
         raise HTTPException(422, "A session purpose of at most 240 characters is required")
-    expires_at = min(now + timedelta(seconds=ttl_seconds), identity.expires_at)
+    expires_at = min(now + timedelta(seconds=ttl_seconds), identity_expires_at)
     if expires_at <= now:
         raise HTTPException(401, "Machine credential is expired")
     session = AgentSession(org_id=identity.org_id, workspace_id=identity.workspace_id, machine_identity_id=identity.id, purpose=purpose.strip(), data_class=data_class, status="active", created_at=now, last_seen_at=now, expires_at=expires_at)
@@ -82,13 +87,13 @@ def authorize_tool_session(db: Session, principal: MachinePrincipal, *, session_
     """
     identity = principal.identity
     now = _utcnow()
-    if identity.revoked_at is not None or identity.expires_at <= now:
+    if identity.revoked_at is not None or _as_utc(identity.expires_at) <= now:
         raise HTTPException(401, "Machine credential is no longer active")
     session = db.query(AgentSession).filter_by(id=session_id, org_id=identity.org_id, workspace_id=identity.workspace_id, machine_identity_id=identity.id).with_for_update().first()
     if session is None:
         raise HTTPException(404, "Session not found")
-    if session.status != "active" or session.expires_at <= now:
-        if session.status == "active" and session.expires_at <= now:
+    if session.status != "active" or _as_utc(session.expires_at) <= now:
+        if session.status == "active" and _as_utc(session.expires_at) <= now:
             session.status = "expired"
             session.ended_at = now
         raise HTTPException(409, "Session is not active")
