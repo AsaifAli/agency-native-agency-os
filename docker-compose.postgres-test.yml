@@ -48,6 +48,8 @@ services:
       - "-v"
       - "ON_ERROR_STOP=1"
       - "-c"
+      - "ALTER ROLE agency_os_worker NOBYPASSRLS"
+      - "-c"
       - "GRANT CONNECT ON DATABASE agency_os_worker_test TO agency_os_test_app"
       - "-c"
       - "GRANT USAGE ON SCHEMA public TO agency_os_test_app"
