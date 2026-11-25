@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import (
-    String, DateTime, Boolean, ForeignKey, Text, Enum, JSON,
+    String, DateTime, Boolean, ForeignKey, ForeignKeyConstraint, Text, Enum, JSON,
     UniqueConstraint, Index, CheckConstraint, func, true,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -90,6 +90,7 @@ class FounderAuthority(Base):
 
 class Workspace(Base):
     __tablename__ = "workspaces"
+    __table_args__ = (UniqueConstraint("org_id", "id", name="uq_workspaces_org_id"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -276,6 +277,11 @@ class Approval(Base):
             "org_id",
             "idempotency_key",
             name="uq_approval_org_idempotency",
+        ),
+        UniqueConstraint("org_id", "workspace_id", "id", name="uq_approvals_scope_id"),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id"], ["workspaces.org_id", "workspaces.id"],
+            ondelete="CASCADE", name="fk_approvals_workspace_scope",
         ),
     )
 
