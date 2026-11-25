@@ -1,6 +1,7 @@
 """Fail-closed machine-to-OS tool gateway for registered in-process adapters."""
 import hashlib
 import json
+from datetime import datetime, timezone
 from pydantic import BaseModel, Field, ValidationError
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
@@ -10,7 +11,7 @@ from app.data_protection import DataProtectionBlocked, protect_untrusted_payload
 from app.db import get_db
 from app.machine_identity import MachinePrincipal, authorize_tool_session, get_machine_principal
 from app.security_models import AgentSession, ToolInvocation
-from app.tool_registry import execute_tool, get_tool, list_tools, validate_tool_input
+from app.tool_registry import execute_tool, get_tool, list_tools, validate_tool_input, validate_tool_output
 
 router = APIRouter(tags=["machine-tools"])
 
@@ -113,7 +114,8 @@ def invoke_machine_tool(
 
     try:
         raw_result = execute_tool(db, spec, validated_input)
-        safe_result, output_report = protect_untrusted_payload(raw_result)
+        validated_result = validate_tool_output(spec, raw_result)
+        safe_result, output_report = protect_untrusted_payload(validated_result)
     except DataProtectionBlocked as exc:
         raise HTTPException(502, "Tool output blocked by data-protection policy") from exc
     except Exception as exc:
@@ -132,6 +134,7 @@ def invoke_machine_tool(
         request_payload=validated_input,
         result=safe_result,
         status="succeeded",
+        finished_at=datetime.now(timezone.utc),
     )
     db.add(invocation)
     db.flush()
