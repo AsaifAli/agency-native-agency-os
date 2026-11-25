@@ -221,3 +221,47 @@ def test_development_token_endpoint_remains_usable_without_browser_session():
     identity = client.get("/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert identity.status_code == 200
     assert identity.json()["email"] == "owner@test.local"
+
+
+def test_new_workspace_is_granted_to_creator_but_not_future_org_members():
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer dev:owner@test.local"}
+    org_id = _org_id()
+    created = client.post(
+        f"/v1/orgs/{org_id}/workspaces",
+        headers=headers,
+        json={"name": "Explicit grant test workspace"},
+    )
+    assert created.status_code == 201
+    workspace_id = created.json()["id"]
+
+    owner_workspaces = client.get(
+        f"/v1/orgs/{org_id}/workspaces", headers=headers
+    )
+    assert owner_workspaces.status_code == 200
+    assert workspace_id in {row["id"] for row in owner_workspaces.json()}
+
+    db = SessionLocal()
+    try:
+        viewer = User(email=f"workspace-viewer-{uuid.uuid4().hex}@test.local")
+        db.add(viewer)
+        db.flush()
+        db.add(Membership(org_id=org_id, user_id=viewer.id, role=Role.viewer))
+        db.commit()
+        viewer_email = viewer.email
+    finally:
+        db.close()
+
+    viewer_headers = {"Authorization": f"Bearer dev:{viewer_email}"}
+    viewer_workspaces = client.get(
+        f"/v1/orgs/{org_id}/workspaces", headers=viewer_headers
+    )
+    assert viewer_workspaces.status_code == 200
+    assert workspace_id not in {row["id"] for row in viewer_workspaces.json()}
+
+    denied = client.get(
+        f"/v1/orgs/{org_id}/agents",
+        params={"workspace_id": workspace_id},
+        headers=viewer_headers,
+    )
+    assert denied.status_code == 404
