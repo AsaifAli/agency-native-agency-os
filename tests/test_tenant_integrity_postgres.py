@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Approval, Organization, User, Workspace
-from app.domain_models import Contact, Lead
+from app.domain_models import Client, Contact, ContactActivity, Lead
 from app.outreach.models import (
     CommunicationBlock,
     CommunicationConsent,
@@ -54,8 +54,14 @@ def test_postgres_outreach_relations_enforce_org_workspace_integrity():
         db.add_all([workspace_a, workspace_b])
         db.flush()
 
-        contact_b = Contact(
+        client_b = Client(
             org_id=org_b.id, workspace_id=workspace_b.id,
+            name=f"Client B {suffix}", created_by=user.id,
+        )
+        db.add(client_b)
+        db.flush()
+        contact_b = Contact(
+            org_id=org_b.id, workspace_id=workspace_b.id, client_id=client_b.id,
             first_name="Contact", last_name="B", email=f"contact-{suffix}@example.test",
             created_by=user.id,
         )
@@ -79,8 +85,34 @@ def test_postgres_outreach_relations_enforce_org_workspace_integrity():
             created_by=user.id,
         )
         db.add(message_b)
+        lead_b = Lead(
+            org_id=org_b.id, workspace_id=workspace_b.id,
+            client_id=client_b.id, contact_id=contact_b.id,
+            company_name=f"Lead B {suffix}", created_by=user.id,
+        )
+        db.add_all([message_b, lead_b])
         db.flush()
 
+        rejected(Client(
+            org_id=org_a.id, workspace_id=workspace_b.id,
+            name="Wrong workspace client", created_by=user.id,
+        ))
+        rejected(Contact(
+            org_id=org_a.id, workspace_id=workspace_a.id, client_id=client_b.id,
+            first_name="Cross-tenant client", created_by=user.id,
+        ))
+        rejected(Lead(
+            org_id=org_a.id, workspace_id=workspace_a.id, client_id=client_b.id,
+            company_name="Cross-tenant client", created_by=user.id,
+        ))
+        rejected(Lead(
+            org_id=org_a.id, workspace_id=workspace_a.id, contact_id=contact_b.id,
+            company_name="Cross-tenant contact", created_by=user.id,
+        ))
+        rejected(ContactActivity(
+            org_id=org_a.id, workspace_id=workspace_a.id, contact_id=contact_b.id,
+            activity_type="note", subject="Cross-tenant activity", created_by=user.id,
+        ))
         rejected(Contact(
             org_id=org_a.id, workspace_id=workspace_b.id,
             first_name="Wrong workspace", created_by=user.id,
