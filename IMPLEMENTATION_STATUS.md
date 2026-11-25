@@ -133,3 +133,11 @@ Merged work includes PR #17 (contact timeline), PR #19 (leads/opportunities), PR
 - Added four independently authored Agency OS skills and a governed operating-loop design document in the integration PR. They remain disabled, tool-free and public/synthetic-only.
 - Candidate loops are documented, not scheduled or autonomous. No new provider tools, MCP grants, data classes or external side effects were enabled.
 - Remaining prerequisites: PR #30 security verification, complete tenant/DPG coverage, machine identities, session lifecycle, OS Tool Gateway, skill assignment authorization, durable loop runtime, independent gates and recovery tests.
+
+
+## Consolidation sprint update — 2026-11-25
+- PR #31 merged to main as `f8fc318cfece0dafb64a846d93fe7d78e64c5593`. It adds the governed operating model and four curated reference skills. They remain disabled, tool-free and restricted to public/synthetic data; the candidate loops are not active or scheduled.
+- PR #30 remains open. Its DPG boundary has been hardened for sanitized string-only metadata keys, post-redaction key collisions, finite numeric values and total serialized metadata size. Adversarial tests were added but not executed.
+- PR #30 PostgreSQL tenant-integrity migration and cross-tenant tests remain unverified. Do not apply the migration to a populated environment until isolated PostgreSQL 16 upgrade/downgrade and mismatch-preflight tests have been completed.
+- Next implementation priorities are complete tenant isolation, machine identities/session lifecycle, OS Tool Gateway, DPG coverage for files/RAG/tools, durable governed loops, and external integration/recovery evidence.
+- GitHub Actions reruns remain intentionally paused due account billing/runner allocation. No new test pass, deployment or production-readiness claim is made by this documentation update.
