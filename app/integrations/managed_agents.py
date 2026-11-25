@@ -242,7 +242,6 @@ class ManagedAgentsRuntime(AgentRuntime):
                 result = {"error": "TOOL_NOT_ENABLED", "message": "This tool is not enabled for the Agency OS agent."}
             elif not isinstance(payload, dict):
                 result = {"error": "INVALID_TOOL_INPUT", "message": "The tool input must be a JSON object."}
-                is_error = True
             elif request.execute_custom_tool is None:
                 result = {"error": "TOOL_EXECUTOR_UNAVAILABLE", "message": "The Agency OS tool executor is unavailable."}
                 is_error = True
