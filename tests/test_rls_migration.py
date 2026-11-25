@@ -59,6 +59,8 @@ def test_worker_followup_migration_removes_bypass_and_scopes_attempts():
     assert "session_user" in worker_migration and "agency_os_worker" in worker_migration
     assert "prune_expired_browser_sessions" in worker_migration
     assert "REVOKE ALL ON TABLE public.users" in worker_migration
+    assert "REVOKE ALL ON TABLES FROM agency_os_worker" in worker_migration
+    assert "REVOKE ALL ON SEQUENCES FROM agency_os_worker" in worker_migration
     assert "agency_os_worker" in role_bootstrap
     assert "ALTER ROLE agency_os_worker" in role_bootstrap
     assert "NOINHERIT NOBYPASSRLS;" in role_bootstrap
