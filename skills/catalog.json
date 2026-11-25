@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": "1.0.0",
+  "catalog_version": "1.1.0",
   "policy": {
     "default_enabled": false,
     "default_allowed_tools": [],
@@ -65,6 +65,18 @@
       "revision": "Discovery index; not pinned as executable source.",
       "license": "Not verified; discovery-only, no imported content.",
       "use": "Discovery and source-link lookup only. Never import or execute skills directly from the index."
+    },
+    "ainative-os": {
+      "repository": "https://github.com/impactbrussels/AINativeOS",
+      "revision": "49f975689c9141f9bea1164f8db68ce2745943fa",
+      "license": "CC-BY-4.0 for content; Apache-2.0 for code",
+      "use": "Reviewed as an architectural reference. Original Agency OS skills independently authored from loop engineering, agentic build discipline, connector least-privilege, evaluation and operational-learning concepts; no source files or scripts copied."
+    },
+    "founder-os": {
+      "repository": "https://github.com/impactbrussels/FounderOS",
+      "revision": "83067222c3d99b5afed2cb90c4c3dc301a4b0729",
+      "license": "CC-BY-4.0 for content; Apache-2.0 for code",
+      "use": "Reviewed as a founder operating-system reference. Original Agency OS skills independently authored from stage-aware triage, recurring review, advisor perspectives and evidence-backed learning concepts; no source files or scripts copied."
     }
   },
   "skills": [
@@ -454,6 +466,92 @@
         "quality-assurance-security",
         "infrastructure-it-operations",
         "human-resources-people-operations"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "agentic-build-loop",
+      "path": "agentic-build-loop/SKILL.md",
+      "category": "engineering",
+      "description": "Turn a bounded engineering objective into a reviewed specification, acceptance tests, implementation plan, maker-checker cycle, and verified change.",
+      "sources": [
+        "ainative-os"
+      ],
+      "recommended_departments": [
+        "ai-engineering",
+        "automation-integration",
+        "quality-assurance-security"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "operating-loop-design",
+      "path": "operating-loop-design/SKILL.md",
+      "category": "operations",
+      "description": "Design recurring agent workflows with explicit triggers, durable state, objective gates, budgets, hard stops, escalation and recovery before scheduling.",
+      "sources": [
+        "ainative-os",
+        "founder-os"
+      ],
+      "recommended_departments": [
+        "chief-of-staff",
+        "project-management-office",
+        "infrastructure-it-operations"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "connector-security-review",
+      "path": "connector-security-review/SKILL.md",
+      "category": "governance",
+      "description": "Review tools and connectors for provenance, blast radius, least privilege, data scope, prompt-injection exposure, approval gates and permission re-audit.",
+      "sources": [
+        "ainative-os"
+      ],
+      "recommended_departments": [
+        "quality-assurance-security",
+        "automation-integration",
+        "infrastructure-it-operations"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "operational-learning-capture",
+      "path": "operational-learning-capture/SKILL.md",
+      "category": "operations",
+      "description": "Convert completed work into scoped, evidence-backed lessons with provenance, confidence, review and controlled promotion into reusable agency knowledge.",
+      "sources": [
+        "ainative-os",
+        "founder-os"
+      ],
+      "recommended_departments": [
+        "chief-of-staff",
+        "project-management-office",
+        "quality-assurance-security"
       ],
       "review_status": "reviewed",
       "enabled": false,

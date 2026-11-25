@@ -126,3 +126,10 @@ Merged work includes PR #17 (contact timeline), PR #19 (leads/opportunities), PR
 
 - Added a unique optional retainer-period reference to invoice records. A closed period can now produce one idempotent recurring invoice draft for its contracted per-period fee; the draft links to the period and contract, reserves remaining contract commitment and includes an explicit note when usage overage exists. Overage is excluded from the invoice amount and requires separate approval. The existing invoice approval/issue-evidence lifecycle remains the only route toward issue; no invoice is sent.
 - Added Retainer Console invoice-draft creation and status visibility. The user must choose a due date; no schedule runner or autonomous invoice issuance is enabled.
+
+
+## External operating-model audit — 2026-11-25
+- Reviewed FounderOS and AI-Native OS at pinned public revisions; adopted only relevant operating patterns, not standalone runtimes or unreviewed executable assets.
+- Added four independently authored Agency OS skills and a governed operating-loop design document in the integration PR. They remain disabled, tool-free and public/synthetic-only.
+- Candidate loops are documented, not scheduled or autonomous. No new provider tools, MCP grants, data classes or external side effects were enabled.
+- Remaining prerequisites: PR #30 security verification, complete tenant/DPG coverage, machine identities, session lifecycle, OS Tool Gateway, skill assignment authorization, durable loop runtime, independent gates and recovery tests.

@@ -145,3 +145,14 @@ Percentages are weighted engineering estimates, not automated metrics. A partial
 
 ## Definition of production-grade
 A feature is **production-ready** only when implementation, authorization, tenant isolation, persistence, audit, failure recovery, tests, observability, retention and operational documentation are all evidenced. A schema, UI, action taxonomy or mocked adapter alone is a foundation, not a complete capability.
+
+
+### 9. Governed agent skills and operating loops — reference integration
+- [x] Audited FounderOS and AI-Native OS repository structures, selected skills, flows, loops, advisor patterns and dual-license model.
+- [x] Added four independently authored, pinned-provenance skills: agentic build loop, operating loop design, connector security review and operational learning capture.
+- [x] Kept all new skills disabled, public/synthetic-only and tool-free; no provider-side skills or runtime grants are enabled.
+- [x] Documented candidate Revenue, Delivery, founder-review and permission-review loops with explicit gates and hard stops.
+- [ ] Implement OS-owned skill assignment/version/expiry/revocation records with founder authorization and audit.
+- [ ] Implement OS Tool Gateway and machine identities before any skill can call tools.
+- [ ] Implement durable loop definitions, schedule/event triggers, budgets, recovery and independent evaluation before enabling loops.
+- [ ] Pilot one read-only public/synthetic loop under supervised manual operation before scheduling.
