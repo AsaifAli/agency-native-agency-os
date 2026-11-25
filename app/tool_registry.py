@@ -146,6 +146,7 @@ def managed_agent_custom_tool_definitions() -> list[dict]:
             "input_schema": spec.input_model.model_json_schema(),
         }
         for spec in TOOLS.values()
+        if not spec.requires_approval
     ]
 
 
