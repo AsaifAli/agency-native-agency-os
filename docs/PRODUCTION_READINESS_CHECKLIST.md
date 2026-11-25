@@ -214,7 +214,7 @@ A feature is **production-ready** only when implementation, authorization, tenan
 - [x] Added machine bearer authentication, founder revocation that cancels active sessions, and a fail-closed tool/session authorization primitive. Identity and session rows are locked during session creation and tool authorization to serialize with revocation.
 - [x] Added API and service regression coverage for one-time secret handling, invalid/expired/revoked credentials, founder-only issuance, data-class denial, session expiry bounds, tool scope enforcement and revocation cancellation.
 - [x] Added migration `n4a7c2e91b60` after `m3f9c2a7e514`; SQLite parent-schema upgrade, downgrade and re-upgrade rehearsal passed.
-- [x] Independent focused validation in the isolated reconciled candidate: 66 tests passed across machine identity (10), API (5), workforce (20), approvals (5), action policy (11), execution service (12) and outreach API (3). Python compile check passed before final lock hardening; focused machine-identity tests passed again after that hardening.
+- [x] Independent focused validation in the isolated reconciled candidate: 68 tests passed across machine identity (12), API (5), workforce (20), approvals (5), action policy (11), execution service (12) and outreach API (3). Python compile check passed after final lock hardening.
 - [ ] PostgreSQL 16 migration and foreign-key enforcement verification for `n4a7c2e91b60`.
 - [ ] Full backend suite on exact PR #34 head; local candidate validation is not the exact remote branch.
 - [ ] Implement actual Tool Registry and invocation records, input/output DPG at dispatch, approval and budget enforcement, sandboxed adapters, durable invocation outcomes and audit. The current `authorize_tool_session` function does not execute tools.
@@ -222,3 +222,6 @@ A feature is **production-ready** only when implementation, authorization, tenan
 - [ ] Do not provision production credentials or enable real agent tool access until the remaining gateway and PostgreSQL release gates pass.
 
 **Estimate policy:** The percentages above remain the previous evidence-backed snapshot and have not been recalculated for this candidate. This PR is implementation work, not a production-readiness or deployment approval.
+
+
+**Full-suite validation boundary:** A full `pytest -q tests` attempt in the isolated candidate timed out after reaching approximately 56% progress. Do not claim a full-suite pass. The focused test modules above completed in separate invocations and passed.
