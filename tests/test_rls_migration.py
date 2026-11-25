@@ -56,6 +56,7 @@ def test_worker_followup_migration_removes_bypass_and_scopes_attempts():
     assert "worker_workspace_scopes" in worker_migration
     assert "SECURITY DEFINER" in worker_migration
     assert "execution_attempt_tenant_isolation" in worker_migration
+    assert "session_user" in worker_migration and "agency_os_worker" in worker_migration
     assert "prune_expired_browser_sessions" in worker_migration
     assert "REVOKE ALL ON TABLE public.users" in worker_migration
     assert "agency_os_worker" in role_bootstrap
