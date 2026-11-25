@@ -67,6 +67,8 @@ Use a fixed safe search_path, revoke PUBLIC execution, grant only the API role w
 
 For every workspace-scoped table in the authoritative migration inventory, change the human branch of USING and WITH CHECK from organization membership to the workspace predicate. Keep org-only tables (for example memberships and other genuinely organization-wide records) governed by their intended organization-level policy. Keep machine predicates separate and exact-workspace scoped.
 
+For tables whose `workspace_id` is nullable (for example, an explicitly organization-wide record), define the null case deliberately: allow `workspace_id IS NULL` only under the intended organization-level predicate, and require the exact workspace predicate for every non-null workspace row. Never let a nullable column turn a workspace-scoped row into an organization-wide bypass. Inventory nullability per table before writing policies.
+
 The `workspaces` table needs command-specific policies:
 - SELECT: only workspaces for which the human has an active grant (plus the existing exact machine workspace path).
 - INSERT: organization member with the required workspace-creation role; the application must create the creator grant in the same transaction. Prefer a narrow database function if needed to make the invariant impossible to bypass.
@@ -87,7 +89,7 @@ Create centralized helpers with consistent semantics:
 - Membership invitation/provisioning that does not automatically grant all workspaces.
 - All workspace-scoped route families must call the centralized guard before reading or mutating workspace data. Resource-by-ID routes must not perform an unscoped read first; either require an explicit workspace identifier or use a narrowly scoped lookup that proves the grant before returning the row.
 
-Route families found during the initial audit include core workspace/bootstrap and execution routes in `app/main.py`; Revenue/Delivery in `app/domain_routes.py`; commercial and delivery operations in `app/operations_routes.py`; Outreach in `app/outreach/routes.py`; Workforce and orchestration in `app/workforce_routes.py`; Telephony in `app/telephony/routes.py`; and founder/security routes in `app/security_routes.py` and `app/revenue_research_routes.py`. The final implementation must build and test a complete endpoint inventory rather than relying on this initial list.
+Route families found during the initial audit include core workspace/bootstrap and execution routes in `app/main.py`; Revenue/Delivery in `app/domain_routes.py`; commercial and delivery operations in `app/operations_routes.py`; Outreach in `app/outreach/routes.py`; Workforce and orchestration in `app/workforce_routes.py`; Telephony in `app/telephony/routes.py`; and founder/security routes in `app/security_routes.py` and `app/revenue_research_routes.py`. The existing `tests/test_route_auth_inventory.py` proves that routes have an authentication boundary and that workspace routes reference a workspace identifier; it does **not** prove workspace authorization. Extend it to fail when any workspace-scoped route lacks the centralized workspace guard (or a documented, reviewed equivalent). The final implementation must build and test a complete endpoint inventory rather than relying on this initial list.
 
 ## Required regression and integration tests
 
