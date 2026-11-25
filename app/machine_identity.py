@@ -149,9 +149,17 @@ def expire_due_agent_sessions(db: Session, *, limit: int = 100) -> int:
         .limit(limit)
         .all()
     )
+    from app.session_credentials import revoke_session_credentials_for_session
+
     for session in rows:
         session.status = "expired"
         session.ended_at = now
+        revoke_session_credentials_for_session(
+            db,
+            session,
+            reason_code="SESSION_TTL_EXPIRED",
+            now=now,
+        )
         record_event(
             db, session.org_id, None, "agent_session.expired",
             "agent_session", session.id, session.workspace_id,
