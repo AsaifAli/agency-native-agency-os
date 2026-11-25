@@ -1,6 +1,7 @@
 """Live PostgreSQL tests for the NOBYPASSRLS worker workspace boundary."""
 import os
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -8,7 +9,8 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import sessionmaker
 
 from app.db import set_rls_context, verify_postgres_role
-from app.models import Membership, Organization, Role, Task, User, Workspace
+from app.models import AuditEvent, Membership, Organization, Role, Task, User, Workspace
+from app.security_models import BrowserSession
 
 ADMIN_URL = os.getenv("AGENCY_OS_TEST_RLS_ADMIN_DATABASE_URL")
 WORKER_URL = os.getenv("AGENCY_OS_TEST_RLS_WORKER_DATABASE_URL")
@@ -27,6 +29,10 @@ def test_worker_is_nobypassrls_and_scoped_to_one_workspace():
     user = User(email=f"worker-rls-{suffix}@example.test")
     org_a = Organization(name=f"Worker RLS A {suffix}")
     org_b = Organization(name=f"Worker RLS B {suffix}")
+    old_session = BrowserSession(
+        user_id=user.id, token_hash=(suffix[:64]).ljust(64, "a"),
+        expires_at=datetime.now(timezone.utc) - timedelta(days=31),
+    )
     try:
         verify_postgres_role(worker_engine, expected_bypassrls=False, require_rls=True)
         with Admin() as db:
@@ -38,6 +44,7 @@ def test_worker_is_nobypassrls_and_scoped_to_one_workspace():
             db.add_all([ws_a, ws_a_other, ws_b])
             db.flush()
             db.add(Membership(org_id=org_a.id, user_id=user.id, role=Role.owner))
+            db.add(old_session)
             db.add_all([
                 Task(org_id=org_a.id, workspace_id=ws_a.id, title="A visible", created_by=user.id),
                 Task(org_id=org_a.id, workspace_id=ws_a_other.id, title="A other hidden", created_by=user.id),
@@ -71,9 +78,24 @@ def test_worker_is_nobypassrls_and_scoped_to_one_workspace():
             with pytest.raises(DBAPIError):
                 db.execute(text("SELECT id FROM public.browser_sessions LIMIT 1"))
             db.rollback()
+
+        with Worker() as db:
+            deleted = db.execute(
+                text("SELECT agency_os_private.prune_expired_browser_sessions(30, 10)")
+            ).scalar_one()
+            assert deleted == 1
+            db.commit()
+
+        with Admin() as db:
+            assert db.query(BrowserSession).filter_by(id=old_session.id).count() == 0
+            assert db.query(AuditEvent).filter_by(
+                event_type="auth.browser_session_pruned", resource_id=old_session.id
+            ).count() == 1
     finally:
         with Admin() as db:
             db.query(Task).filter(Task.org_id.in_([org_a.id, org_b.id])).delete(synchronize_session=False)
+            db.query(AuditEvent).filter(AuditEvent.resource_id == old_session.id).delete(synchronize_session=False)
+            db.query(BrowserSession).filter(BrowserSession.id == old_session.id).delete(synchronize_session=False)
             db.query(Membership).filter(Membership.org_id == org_a.id).delete(synchronize_session=False)
             db.query(Workspace).filter(Workspace.org_id.in_([org_a.id, org_b.id])).delete(synchronize_session=False)
             db.query(Organization).filter(Organization.id.in_([org_a.id, org_b.id])).delete(synchronize_session=False)
