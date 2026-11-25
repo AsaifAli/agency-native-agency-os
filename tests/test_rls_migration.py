@@ -109,3 +109,19 @@ def test_workspace_authorization_migration_covers_every_workspace_owned_table():
         and table.name != "workspace_grants"
     }
     assert set(migration.WORKSPACE_TABLES) == expected
+
+
+def test_only_explicit_org_level_tables_allow_null_workspace_rows():
+    path = PATH.with_name("v2c4e6a8b0d2_human_workspace_authorization.py")
+    spec = importlib.util.spec_from_file_location("workspace_rls_nullable_migration", path)
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    nullable = {
+        table.name
+        for table in Base.metadata.sorted_tables
+        if "workspace_id" in table.c
+        and table.c.workspace_id.nullable
+        and table.name in migration.WORKSPACE_TABLES
+    }
+    assert nullable == set(migration.ORG_LEVEL_NULLABLE_WORKSPACE_TABLES)
