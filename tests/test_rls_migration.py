@@ -66,3 +66,14 @@ def test_worker_followup_migration_removes_bypass_and_scopes_attempts():
     assert "NOINHERIT NOBYPASSRLS;" in role_bootstrap
     assert "ALTER ROLE agency_os_migrator" in role_bootstrap
     assert "NOINHERIT BYPASSRLS;" in role_bootstrap
+
+
+def test_startup_rls_inventory_matches_all_migration_tables():
+    from app.db import REQUIRED_RLS_TABLES
+
+    expected = set(MIGRATION.ORG_TABLES) | {
+        "organizations",
+        "browser_sessions",
+        "execution_attempts",
+    }
+    assert REQUIRED_RLS_TABLES == expected
