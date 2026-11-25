@@ -17,7 +17,7 @@ Human organization membership currently grants access to all workspaces in that 
 | `agency_os_app` | API only | Non-owner, `NOBYPASSRLS` | All API queries are subject to tenant RLS |
 | `agency_os_worker` | Worker only | Non-owner, non-superuser, `BYPASSRLS` | Queue processing across organizations |
 
-The worker role can read/write across tenants by design so it can claim and process queued work. Keep it isolated to the worker process, with no public SQL interface. The API must not receive migrator or worker credentials.
+The worker role is non-superuser `NOBYPASSRLS`. Its code enumerates workspace identifiers through the private scope function and processes one workspace at a time with transaction-local RLS context. The scope function and browser-session retention function are the only cross-workspace SECURITY DEFINER entry points granted to the worker. The worker still has operational authority to process every workspace; PostgreSQL custom GUC context is defense-in-depth against missing predicates, not a boundary against arbitrary SQL execution under the worker credential. For isolation against a compromised worker credential, use per-tenant worker credentials or move all tenant data operations behind narrowly scoped database functions. The API must never receive migrator or worker credentials.
 
 ## Local Compose setup
 
@@ -67,7 +67,7 @@ This creates and deletes synthetic test rows. It verifies human cross-org read i
 
 - Apply all migrations on PostgreSQL 16 as `agency_os_migrator`.
 - Verify API role is non-superuser, NOBYPASSRLS, and owns no RLS tables.
-- Verify worker role is non-superuser, BYPASSRLS, and owns no RLS tables. This is a privileged residual risk, not a tenant-isolation claim; replace it with narrow security-definer queue operations and per-execution tenant context before production.
+- Verify worker role is non-superuser, NOBYPASSRLS, and owns no RLS tables. Verify the worker can enumerate only scope identifiers, cannot directly read browser sessions/users, and cannot read or write outside the active workspace context. Review the residual GUC-spoofing risk: the worker remains a cross-workspace operational principal, not a tenant-isolated process.
 - Run the live RLS test plus existing PostgreSQL tenant/worker concurrency tests.
 - Complete human workspace-level authorization design and route-by-route object authorization review.
 - Test OIDC, signed website intake, machine identity revocation, worker lease recovery, retention and backup restore.
