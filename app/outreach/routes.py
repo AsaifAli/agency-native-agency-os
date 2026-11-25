@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.auth import Principal, get_principal, has_founder_authority, require_founder_authority, require_membership, require_role
+from app.auth import Principal, get_principal, has_founder_authority, require_founder_authority, require_membership, require_role, require_workspace_access_from_context
 from app.db import get_db
 from app.models import Role, Workspace, Approval, ApprovalStatus
 from app.domain_models import Contact, Lead
@@ -27,8 +27,7 @@ WRITERS = {Role.owner, Role.admin, Role.operator}
 
 
 def _scope(db: Session, org_id: str, workspace_id: str) -> None:
-    if not db.query(Workspace.id).filter_by(id=workspace_id, org_id=org_id).first():
-        raise HTTPException(404, "Workspace not found")
+    require_workspace_access_from_context(org_id, workspace_id, db)
 
 
 def _read(org_id: str, workspace_id: str, p: Principal, db: Session) -> None:
@@ -423,6 +422,7 @@ def reject_message(
     if item is None:
         raise HTTPException(404, "Outbound message not found")
     require_founder_authority(db, org_id, p.user.id)
+    _scope(db, org_id, item.workspace_id)
     if item.status != "pending_approval" or item.approval_id != body.approval_id:
         raise HTTPException(409, "Outbound message is not awaiting this approval")
     approval = db.query(Approval).filter_by(

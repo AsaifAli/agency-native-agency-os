@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.auth import Principal, get_principal, require_founder_authority, require_membership, require_role
+from app.auth import Principal, get_principal, require_founder_authority, require_membership, require_role, require_workspace_access_from_context
 from app.config import settings
 from app.db import get_db
 from app.models import Role, Workspace, Task, Agent
@@ -27,10 +27,7 @@ WRITERS = {Role.owner, Role.admin, Role.operator}
 
 
 def _workspace(db: Session, org_id: str, workspace_id: str):
-    row = db.query(Workspace).filter_by(id=workspace_id, org_id=org_id).first()
-    if row is None:
-        raise HTTPException(404, "Workspace not found")
-    return row
+    return require_workspace_access_from_context(org_id, workspace_id, db)
 
 
 def _member(db: Session, org_id: str, workspace_id: str, member_id: str):
@@ -450,6 +447,7 @@ def create_delegation(org_id: str, body: DelegationCreate, db: Session = Depends
                       p: Principal = Depends(get_principal)):
     role = require_membership(org_id, p, db)
     require_role(role, WRITERS)
+    _workspace(db, org_id, body.workspace_id)
     if body.depends_on_ordinal is not None:
         raise HTTPException(422, "depends_on_ordinal is only valid inside an orchestration plan")
     row = _create_delegation(db, org_id, body, p.user.id)
@@ -554,6 +552,7 @@ def create_orchestration_plan(org_id: str, body: OrchestrationPlanCreate,
     """Persist a founder-authorized, structured work plan."""
     require_membership(org_id, p, db)
     require_founder_authority(db, org_id, p.user.id)
+    _workspace(db, org_id, body.workspace_id)
     try:
         summary, plan, root = _persist_orchestration_plan(
             db, org_id=org_id, body=body, actor_user_id=p.user.id

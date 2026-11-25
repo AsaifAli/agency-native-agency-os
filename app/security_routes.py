@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field, field_validator
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.auth import Principal, get_principal, require_founder_authority
+from app.auth import Principal, get_principal, require_founder_authority, require_workspace_access_from_context
 from app.audit import record_event
 from app.db import get_db
 from app.data_protection import DataProtectionBlocked, sanitize_text
@@ -78,9 +78,7 @@ def create_machine_identity(
     principal: Principal = Depends(get_principal),
 ):
     require_founder_authority(db, org_id, principal.user.id)
-    workspace = db.query(Workspace).filter_by(id=body.workspace_id, org_id=org_id).first()
-    if workspace is None:
-        raise HTTPException(404, "Workspace not found")
+    require_workspace_access_from_context(org_id, body.workspace_id, db)
     if body.subject_type == "agent":
         subject = db.query(Agent).filter_by(id=body.subject_id, org_id=org_id, workspace_id=body.workspace_id).first()
         if subject is None:
@@ -117,11 +115,15 @@ def create_machine_identity(
 
 @router.post("/v1/orgs/{org_id}/machine-identities/{identity_id}/revoke")
 def revoke_machine_identity(
-    org_id: str, identity_id: str, db: Session = Depends(get_db),
+    org_id: str, identity_id: str, workspace_id: str,
+    db: Session = Depends(get_db),
     principal: Principal = Depends(get_principal),
 ):
     require_founder_authority(db, org_id, principal.user.id)
-    identity = db.query(MachineIdentity).filter_by(id=identity_id, org_id=org_id).with_for_update().first()
+    require_workspace_access_from_context(org_id, workspace_id, db)
+    identity = db.query(MachineIdentity).filter_by(
+        id=identity_id, org_id=org_id, workspace_id=workspace_id
+    ).with_for_update().first()
     if identity is None:
         raise HTTPException(404, "Machine identity not found")
     if identity.revoked_at is None:

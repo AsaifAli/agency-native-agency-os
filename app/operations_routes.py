@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import (
     Principal, get_principal, has_founder_authority, require_founder_authority,
-    require_membership, require_role,
+    require_membership, require_role, require_workspace_access_from_context,
 )
 from app.db import get_db
 from app.models import Role, Workspace, Approval, ApprovalStatus, Execution, ExecutionStatus, Task, Agent
@@ -31,11 +31,11 @@ WRITERS = {Role.owner, Role.admin, Role.operator}
 
 
 def _workspace(db: Session, org_id: str, workspace_id: str) -> None:
-    if not db.query(Workspace.id).filter_by(id=workspace_id, org_id=org_id).first():
-        raise HTTPException(404, "Workspace not found")
+    require_workspace_access_from_context(org_id, workspace_id, db)
 
 
 def _project(db: Session, org_id: str, workspace_id: str, project_id: str) -> Project:
+    _workspace(db, org_id, workspace_id)
     item = db.query(Project).filter_by(
         id=project_id, org_id=org_id, workspace_id=workspace_id
     ).first()
@@ -762,9 +762,13 @@ def record_invoice_issued(
 @router.post("/invoices/{invoice_id}/reject", response_model=InvoiceOut)
 def reject_invoice(
     org_id: str, invoice_id: str, body: ContractReject,
+    workspace_id: str = Query(min_length=1),
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
-    item = db.query(InvoiceRecord).filter_by(id=invoice_id, org_id=org_id).with_for_update().first()
+    _workspace(db, org_id, workspace_id)
+    item = db.query(InvoiceRecord).filter_by(
+        id=invoice_id, org_id=org_id, workspace_id=workspace_id
+    ).with_for_update().first()
     if item is None:
         raise HTTPException(404, "Invoice not found")
     require_founder_authority(db, org_id, p.user.id)
@@ -1034,9 +1038,13 @@ def submit_onboarding_for_activation(
 @router.post("/onboardings/{onboarding_id}/reject-activation", response_model=OnboardingOut)
 def reject_onboarding_activation(
     org_id: str, onboarding_id: str, body: ContractReject,
+    workspace_id: str = Query(min_length=1),
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
-    item = db.query(ClientOnboarding).filter_by(id=onboarding_id, org_id=org_id).with_for_update().first()
+    _workspace(db, org_id, workspace_id)
+    item = db.query(ClientOnboarding).filter_by(
+        id=onboarding_id, org_id=org_id, workspace_id=workspace_id
+    ).with_for_update().first()
     if item is None:
         raise HTTPException(404, "Onboarding not found")
     require_founder_authority(db, org_id, p.user.id)
@@ -1253,9 +1261,13 @@ def submit_contract_for_approval(
 @router.post("/contracts/{contract_id}/record-execution", response_model=ContractOut)
 def record_contract_execution(
     org_id: str, contract_id: str, body: ContractExecutionEvidence,
+    workspace_id: str = Query(min_length=1),
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
-    item = db.query(ContractRecord).filter_by(id=contract_id, org_id=org_id).with_for_update().first()
+    _workspace(db, org_id, workspace_id)
+    item = db.query(ContractRecord).filter_by(
+        id=contract_id, org_id=org_id, workspace_id=workspace_id
+    ).with_for_update().first()
     if item is None:
         raise HTTPException(404, "Contract not found")
     require_founder_authority(db, org_id, p.user.id)
@@ -1287,9 +1299,13 @@ def record_contract_execution(
 @router.post("/contracts/{contract_id}/reject", response_model=ContractOut)
 def reject_contract(
     org_id: str, contract_id: str, body: ContractReject,
+    workspace_id: str = Query(min_length=1),
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
-    item = db.query(ContractRecord).filter_by(id=contract_id, org_id=org_id).with_for_update().first()
+    _workspace(db, org_id, workspace_id)
+    item = db.query(ContractRecord).filter_by(
+        id=contract_id, org_id=org_id, workspace_id=workspace_id
+    ).with_for_update().first()
     if item is None:
         raise HTTPException(404, "Contract not found")
     require_founder_authority(db, org_id, p.user.id)
@@ -1467,9 +1483,13 @@ def approve_proposal(
 @router.post("/proposals/{proposal_id}/reject", response_model=ProposalOut)
 def reject_proposal(
     org_id: str, proposal_id: str, body: ProposalDecision,
+    workspace_id: str = Query(min_length=1),
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
-    item = db.query(Proposal).filter_by(id=proposal_id, org_id=org_id).with_for_update().first()
+    _workspace(db, org_id, workspace_id)
+    item = db.query(Proposal).filter_by(
+        id=proposal_id, org_id=org_id, workspace_id=workspace_id
+    ).with_for_update().first()
     if item is None:
         raise HTTPException(404, "Proposal not found")
     require_founder_authority(db, org_id, p.user.id)
@@ -1578,9 +1598,13 @@ def approve_scope_change(
 @router.post("/scope-changes/{change_id}/reject", response_model=ScopeChangeOut)
 def reject_scope_change(
     org_id: str, change_id: str, body: ScopeChangeReject,
+    workspace_id: str = Query(min_length=1),
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
-    item = db.query(ScopeChangeRequest).filter_by(id=change_id, org_id=org_id).with_for_update().first()
+    _workspace(db, org_id, workspace_id)
+    item = db.query(ScopeChangeRequest).filter_by(
+        id=change_id, org_id=org_id, workspace_id=workspace_id
+    ).with_for_update().first()
     if item is None:
         raise HTTPException(404, "Scope change not found")
     require_founder_authority(db, org_id, p.user.id)
@@ -1831,17 +1855,19 @@ def agent_performance(
 @router.get("/outbox-health")
 def outbox_health(
     org_id: str,
+    workspace_id: str = Query(min_length=1),
     db: Session = Depends(get_db),
     p: Principal = Depends(get_principal),
 ):
-    """Founder-only, organization-scoped outbox operational summary."""
+    """Founder-only, workspace-scoped outbox operational summary."""
     require_founder_authority(db, org_id, p.user.id)
+    _workspace(db, org_id, workspace_id)
 
     now = datetime.now(timezone.utc)
 
     status_rows = (
         db.query(OutboxEvent.status, func.count(OutboxEvent.id))
-        .filter(OutboxEvent.org_id == org_id)
+        .filter(OutboxEvent.org_id == org_id, OutboxEvent.workspace_id == workspace_id)
         .group_by(OutboxEvent.status)
         .all()
     )
@@ -1851,6 +1877,7 @@ def outbox_health(
         db.query(func.min(OutboxEvent.created_at))
         .filter(
             OutboxEvent.org_id == org_id,
+            OutboxEvent.workspace_id == workspace_id,
             OutboxEvent.status == "pending",
         )
         .scalar()
@@ -1860,6 +1887,7 @@ def outbox_health(
         db.query(func.count(OutboxEvent.id))
         .filter(
             OutboxEvent.org_id == org_id,
+            OutboxEvent.workspace_id == workspace_id,
             OutboxEvent.status == "pending",
             OutboxEvent.attempts > 0,
         )
@@ -1870,6 +1898,7 @@ def outbox_health(
         db.query(func.count(OutboxEvent.id))
         .filter(
             OutboxEvent.org_id == org_id,
+            OutboxEvent.workspace_id == workspace_id,
             OutboxEvent.status == "processing",
             OutboxEvent.lease_expires_at.is_not(None),
             OutboxEvent.lease_expires_at <= now,
@@ -1888,6 +1917,7 @@ def outbox_health(
 
     return {
         "organization_id": org_id,
+        "workspace_id": workspace_id,
         "observed_at": now.isoformat(),
         "pending_count": counts.get("pending", 0),
         "oldest_pending_age_seconds": oldest_age,

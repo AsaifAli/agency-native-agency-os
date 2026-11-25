@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 from sqlalchemy import (
     String, DateTime, Boolean, ForeignKey, ForeignKeyConstraint, Text, Enum, JSON,
-    UniqueConstraint, Index, CheckConstraint, func, true,
+    UniqueConstraint, Index, CheckConstraint, func, true, text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db import Base
@@ -98,6 +98,35 @@ class Workspace(Base):
     org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
+class WorkspaceGrant(Base):
+    """Auditable, independently revocable human access to one workspace."""
+    __tablename__ = "workspace_grants"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id"],
+            ["workspaces.org_id", "workspaces.id"],
+            ondelete="CASCADE",
+            name="fk_workspace_grants_workspace_org",
+        ),
+        UniqueConstraint("id", "org_id", "workspace_id", name="uq_workspace_grants_scope_id"),
+        Index(
+            "uq_workspace_grants_active", "org_id", "workspace_id", "user_id",
+            unique=True,
+            postgresql_where=text("revoked_at IS NULL"),
+            sqlite_where=text("revoked_at IS NULL"),
+        ),
+        Index("ix_workspace_grants_user_active", "user_id", "revoked_at"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    granted_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 class Agent(Base):
     __tablename__ = "agents"

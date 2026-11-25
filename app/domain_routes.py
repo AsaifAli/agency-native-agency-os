@@ -5,7 +5,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.auth import get_principal, has_founder_authority, require_membership, require_role, require_founder_authority, Principal
+from app.auth import get_principal, has_founder_authority, require_membership, require_role, require_founder_authority, require_workspace_access_from_context, Principal
 from app.db import get_db
 from app.models import Role
 from app.audit import record_event
@@ -23,12 +23,11 @@ WRITERS = {Role.owner, Role.admin, Role.operator}
 
 
 def _workspace(db: Session, org_id: str, workspace_id: str) -> None:
-    from app.models import Workspace
-    if not db.query(Workspace.id).filter_by(id=workspace_id, org_id=org_id).first():
-        raise HTTPException(404, "Workspace not found")
+    require_workspace_access_from_context(org_id, workspace_id, db)
 
 
 def _scoped_parent(db: Session, model, *, object_id: str, org_id: str, workspace_id: str, label: str):
+    _workspace(db, org_id, workspace_id)
     item = db.query(model).filter_by(
         id=object_id, org_id=org_id, workspace_id=workspace_id
     ).first()
@@ -400,6 +399,7 @@ def review_outreach_draft(
     if item is None:
         raise HTTPException(404, "Outreach draft not found")
     require_founder_authority(db, org_id, p.user.id)
+    _workspace(db, org_id, item.workspace_id)
     if item.status != "draft":
         raise HTTPException(409, "Only an unreviewed draft can be reviewed")
     item.status = "approved_draft" if body.decision == "approve_draft" else "rejected"

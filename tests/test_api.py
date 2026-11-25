@@ -7,7 +7,7 @@ from app.main import app
 from app.db import Base, engine, SessionLocal
 from app.models import (
     User, Organization, Membership, Workspace, Role,
-    Agent, Task, DataClass, AuditEvent, Execution, ExecutionStatus,
+    Agent, Task, DataClass, AuditEvent, Execution, ExecutionStatus, WorkspaceGrant,
 )
 from app.config import settings
 from app.worker.processor import process_one_execution
@@ -20,7 +20,11 @@ def setup_module():
     org = Organization(name="Test Org")
     db.add_all([user, org]); db.flush()
     db.add(Membership(org_id=org.id, user_id=user.id, role=Role.owner))
-    db.add(Workspace(id="ws-test", org_id=org.id, name="Test Workspace"))
+    db.add(Workspace(id="ws-test", org_id=org.id, name="Test Workspace", created_by=user.id))
+    db.flush()
+    db.add(WorkspaceGrant(
+        org_id=org.id, workspace_id="ws-test", user_id=user.id, granted_by=user.id,
+    ))
     db.commit()
     db.close()
 
@@ -217,3 +221,65 @@ def test_development_token_endpoint_remains_usable_without_browser_session():
     identity = client.get("/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert identity.status_code == 200
     assert identity.json()["email"] == "owner@test.local"
+
+
+def test_new_workspace_is_granted_to_creator_but_not_future_org_members():
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer dev:owner@test.local"}
+    org_id = _org_id()
+    created = client.post(
+        f"/v1/orgs/{org_id}/workspaces",
+        headers=headers,
+        json={"name": "Explicit grant test workspace"},
+    )
+    assert created.status_code == 201
+    workspace_id = created.json()["id"]
+
+    owner_workspaces = client.get(
+        f"/v1/orgs/{org_id}/workspaces", headers=headers
+    )
+    assert owner_workspaces.status_code == 200
+    assert workspace_id in {row["id"] for row in owner_workspaces.json()}
+
+    db = SessionLocal()
+    try:
+        viewer = User(email=f"workspace-viewer-{uuid.uuid4().hex}@test.local")
+        db.add(viewer)
+        db.flush()
+        db.add(Membership(org_id=org_id, user_id=viewer.id, role=Role.viewer))
+        db.commit()
+        viewer_email = viewer.email
+    finally:
+        db.close()
+
+    viewer_headers = {"Authorization": f"Bearer dev:{viewer_email}"}
+    viewer_workspaces = client.get(
+        f"/v1/orgs/{org_id}/workspaces", headers=viewer_headers
+    )
+    assert viewer_workspaces.status_code == 200
+    assert workspace_id not in {row["id"] for row in viewer_workspaces.json()}
+
+    denied = client.get(
+        f"/v1/orgs/{org_id}/agents",
+        params={"workspace_id": workspace_id},
+        headers=viewer_headers,
+    )
+    assert denied.status_code == 404
+
+
+def test_organization_owner_without_founder_authority_cannot_change_workspace_grants():
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer dev:owner@test.local"}
+    org_id = _org_id()
+    denied_grant = client.post(
+        f"/v1/orgs/{org_id}/workspaces/ws-test/grants",
+        params={"user_id": "someone-else"},
+        headers=headers,
+    )
+    assert denied_grant.status_code == 403
+
+    denied_revoke = client.delete(
+        f"/v1/orgs/{org_id}/workspaces/ws-test/grants/someone-else",
+        headers=headers,
+    )
+    assert denied_revoke.status_code == 403

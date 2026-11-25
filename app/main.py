@@ -20,6 +20,7 @@ from app.workforce_service import initialize_workforce
 from app.auth import (
     get_principal,
     require_membership,
+    require_workspace_access_from_context,
     require_role,
     require_founder_authority,
     has_founder_authority,
@@ -40,6 +41,7 @@ from app.models import (
     ExecutionAttempt,
     ExecutionStatus,
     Membership,
+    WorkspaceGrant,
 )
 from app.schemas import (
     WorkspaceCreate,
@@ -314,15 +316,7 @@ def health(db: Session = Depends(get_db)):
 
 
 def workspace_in_org(db: Session, org_id: str, workspace_id: str):
-    workspace = db.query(Workspace).filter_by(
-        id=workspace_id,
-        org_id=org_id,
-    ).first()
-
-    if not workspace:
-        raise HTTPException(404, "Workspace not found")
-
-    return workspace
+    return require_workspace_access_from_context(org_id, workspace_id, db)
 
 
 # ---------------------------------------------------------------------------
@@ -362,7 +356,18 @@ def list_workspaces(
 
     return (
         db.query(Workspace)
-        .filter_by(org_id=org_id)
+        .join(
+            WorkspaceGrant,
+            (WorkspaceGrant.org_id == Workspace.org_id)
+            & (WorkspaceGrant.workspace_id == Workspace.id),
+        )
+        .filter(
+            Workspace.org_id == org_id,
+            WorkspaceGrant.org_id == org_id,
+            WorkspaceGrant.user_id == p.user.id,
+            WorkspaceGrant.revoked_at.is_(None),
+        )
+        .order_by(Workspace.created_at.asc(), Workspace.id.asc())
         .all()
     )
 
@@ -384,10 +389,29 @@ def create_workspace(
     workspace = Workspace(
         org_id=org_id,
         name=body.name,
+        created_by=p.user.id,
     )
 
     db.add(workspace)
     db.flush()
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(
+            text("SELECT agency_os_private.grant_workspace_access(:org_id, :workspace_id, :user_id, :actor_id)"),
+            {"org_id": org_id, "workspace_id": workspace.id,
+             "user_id": p.user.id, "actor_id": p.user.id},
+        )
+    else:
+        grant = WorkspaceGrant(
+            org_id=org_id, workspace_id=workspace.id, user_id=p.user.id,
+            granted_by=p.user.id,
+        )
+        db.add(grant)
+        db.flush()
+        record_event(
+            db, org_id, p.user.id, "workspace.access_granted",
+            "workspace_grant", grant.id, workspace.id,
+            {"user_id": p.user.id},
+        )
 
     record_event(
         db,
@@ -403,6 +427,92 @@ def create_workspace(
     db.refresh(workspace)
 
     return workspace
+
+
+@app.post("/v1/orgs/{org_id}/workspaces/{workspace_id}/grants")
+def create_workspace_grant(
+    org_id: str, workspace_id: str, user_id: str,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    require_membership(org_id, p, db)
+    require_founder_authority(db, org_id, p.user.id)
+    if db.get_bind().dialect.name != "postgresql":
+        workspace = db.query(Workspace).filter_by(org_id=org_id, id=workspace_id).first()
+        if workspace is None:
+            raise HTTPException(404, "Workspace not found")
+    target = db.query(User).filter_by(id=user_id, active=True).first()
+    if target is None or not db.query(Membership.id).filter_by(
+        org_id=org_id, user_id=user_id
+    ).first():
+        raise HTTPException(404, "Active organization member not found")
+    try:
+        if db.get_bind().dialect.name == "postgresql":
+            grant_id = db.execute(
+                text("SELECT agency_os_private.grant_workspace_access(:org_id, :workspace_id, :user_id, :actor_id)"),
+                {"org_id": org_id, "workspace_id": workspace_id,
+                 "user_id": user_id, "actor_id": p.user.id},
+            ).scalar_one()
+        else:
+            existing = db.query(WorkspaceGrant).filter_by(
+                org_id=org_id, workspace_id=workspace_id, user_id=user_id,
+                revoked_at=None,
+            ).first()
+            if existing:
+                grant_id = existing.id
+            else:
+                grant = WorkspaceGrant(
+                    org_id=org_id, workspace_id=workspace_id, user_id=user_id,
+                    granted_by=p.user.id,
+                )
+                db.add(grant)
+                db.flush()
+                grant_id = grant.id
+                record_event(db, org_id, p.user.id, "workspace.access_granted",
+                             "workspace_grant", grant.id, workspace_id,
+                             {"user_id": user_id})
+        db.commit()
+        return {"workspace_id": workspace_id, "user_id": user_id,
+                "grant_id": grant_id, "status": "active"}
+    except Exception:
+        db.rollback()
+        raise
+
+
+@app.delete("/v1/orgs/{org_id}/workspaces/{workspace_id}/grants/{user_id}")
+def revoke_workspace_grant(
+    org_id: str, workspace_id: str, user_id: str,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    require_membership(org_id, p, db)
+    require_founder_authority(db, org_id, p.user.id)
+    if db.get_bind().dialect.name != "postgresql":
+        workspace = db.query(Workspace).filter_by(org_id=org_id, id=workspace_id).first()
+        if workspace is None:
+            raise HTTPException(404, "Workspace not found")
+    try:
+        if db.get_bind().dialect.name == "postgresql":
+            revoked = db.execute(
+                text("SELECT agency_os_private.revoke_workspace_access(:org_id, :workspace_id, :user_id, :actor_id)"),
+                {"org_id": org_id, "workspace_id": workspace_id,
+                 "user_id": user_id, "actor_id": p.user.id},
+            ).scalar_one()
+        else:
+            grant = db.query(WorkspaceGrant).filter_by(
+                org_id=org_id, workspace_id=workspace_id, user_id=user_id,
+                revoked_at=None,
+            ).with_for_update().first()
+            revoked = grant is not None
+            if grant is not None:
+                grant.revoked_at = datetime.now(timezone.utc)
+                record_event(db, org_id, p.user.id, "workspace.access_revoked",
+                             "workspace_grant", grant.id, workspace_id,
+                             {"user_id": user_id})
+        db.commit()
+        return {"workspace_id": workspace_id, "user_id": user_id,
+                "status": "revoked" if revoked else "not_active"}
+    except Exception:
+        db.rollback()
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -575,6 +685,7 @@ def create_execution_endpoint(
 ):
     role = require_membership(org_id, p, db)
     require_role(role, {Role.owner, Role.admin, Role.operator})
+    workspace_in_org(db, org_id, body.workspace_id)
 
     try:
         execution = create_execution(
@@ -718,7 +829,7 @@ def get_execution_trace(
 )
 def list_approvals(
     org_id: str,
-    workspace_id: str | None = None,
+    workspace_id: str,
     db: Session = Depends(get_db),
     p: Principal = Depends(get_principal),
 ):
@@ -728,11 +839,8 @@ def list_approvals(
     ):
         raise HTTPException(403, "Insufficient permission to view approval requests")
 
-    query = db.query(Approval).filter_by(org_id=org_id)
-
-    if workspace_id:
-        workspace_in_org(db, org_id, workspace_id)
-        query = query.filter_by(workspace_id=workspace_id)
+    workspace_in_org(db, org_id, workspace_id)
+    query = db.query(Approval).filter_by(org_id=org_id, workspace_id=workspace_id)
 
     return (
         query
@@ -825,12 +933,14 @@ def decide_approval(
     org_id: str,
     approval_id: str,
     body: ApprovalDecision,
+    workspace_id: str,
     db: Session = Depends(get_db),
     p: Principal = Depends(get_principal),
 ):
     # Membership proves organization access; founder authority is a separate grant.
     require_membership(org_id, p, db)
     require_founder_authority(db, org_id, p.user.id)
+    workspace_in_org(db, org_id, workspace_id)
 
     if body.decision == ApprovalStatus.pending:
         raise HTTPException(
@@ -843,6 +953,7 @@ def decide_approval(
         .filter_by(
             id=approval_id,
             org_id=org_id,
+            workspace_id=workspace_id,
         )
         .with_for_update()
         .first()
@@ -891,16 +1002,18 @@ def decide_approval(
 )
 def list_audit(
     org_id: str,
+    workspace_id: str,
     limit: int = 100,
     db: Session = Depends(get_db),
     p: Principal = Depends(get_principal),
 ):
     role = require_membership(org_id, p, db)
     require_role(role, {Role.owner, Role.admin, Role.reviewer})
+    workspace_in_org(db, org_id, workspace_id)
 
     return (
         db.query(AuditEvent)
-        .filter_by(org_id=org_id)
+        .filter_by(org_id=org_id, workspace_id=workspace_id)
         .order_by(AuditEvent.created_at.desc())
         .limit(min(limit, 500))
         .all()

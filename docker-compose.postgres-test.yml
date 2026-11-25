@@ -58,13 +58,25 @@ services:
       - "-c"
       - "GRANT EXECUTE ON FUNCTION agency_os_private.user_has_org_access(text, text) TO agency_os_test_app"
       - "-c"
+      - "GRANT EXECUTE ON FUNCTION agency_os_private.user_has_workspace_access(text, text, text) TO agency_os_test_app"
+      - "-c"
       - "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO agency_os_test_app"
       - "-c"
       - "GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO agency_os_test_app"
       - "-c"
+      - "REVOKE ALL ON TABLE public.workspace_grants FROM agency_os_test_app"
+      - "-c"
+      - "GRANT SELECT ON TABLE public.workspace_grants TO agency_os_test_app"
+      - "-c"
+      - "GRANT EXECUTE ON FUNCTION agency_os_private.grant_workspace_access(text, text, text, text) TO agency_os_test_app"
+      - "-c"
+      - "GRANT EXECUTE ON FUNCTION agency_os_private.revoke_workspace_access(text, text, text, text) TO agency_os_test_app"
+      - "-c"
       - "GRANT USAGE ON SCHEMA agency_os_private TO agency_os_worker"
       - "-c"
       - "GRANT EXECUTE ON FUNCTION agency_os_private.user_has_org_access(text, text) TO agency_os_worker"
+      - "-c"
+      - "GRANT EXECUTE ON FUNCTION agency_os_private.user_has_workspace_access(text, text, text) TO agency_os_worker"
       - "-c"
       - "GRANT EXECUTE ON FUNCTION agency_os_private.worker_workspace_scopes() TO agency_os_worker"
       - "-c"
@@ -80,6 +92,9 @@ services:
       dockerfile: Dockerfile.postgres-test
     environment:
       APP_ENV: test
+      DATABASE_URL: sqlite:///./test_agency_os.db
+      DEV_AUTH_ENABLED: "true"
+      MOCK_RUNTIME_ENABLED: "true"
       AGENCY_OS_TEST_DATABASE_URL: postgresql+psycopg://agency_os:local-only-test-admin-password@postgres-test:5432/agency_os_worker_test
       AGENCY_OS_TEST_RLS_ADMIN_DATABASE_URL: postgresql+psycopg://agency_os:local-only-test-admin-password@postgres-test:5432/agency_os_worker_test
       AGENCY_OS_TEST_RLS_DATABASE_URL: postgresql+psycopg://agency_os_test_app:local-only-test-app-password@postgres-test:5432/agency_os_worker_test

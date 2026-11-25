@@ -115,6 +115,7 @@ REQUIRED_RLS_TABLES = frozenset({
     "scope_change_requests", "service_offerings", "service_playbooks", "tasks",
     "time_entries", "tool_invocations", "workforce_capabilities",
     "workforce_members", "workforce_positions", "workforce_units", "workspaces",
+    "workspace_grants",
     "organizations", "browser_sessions", "execution_attempts",
 })
 
