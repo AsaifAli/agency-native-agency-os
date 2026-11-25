@@ -91,6 +91,8 @@ def test_run_worker_runs_startup_maintenance_and_waits_when_idle(
         recover,
     )
     monkeypatch.setattr(runner, "queue_ready_delegations", queue)
+    expire_sessions = Mock(return_value=0)
+    monkeypatch.setattr(runner, "expire_due_agent_sessions", expire_sessions)
     monkeypatch.setattr(
         runner,
         "reconcile_outbox_events",
@@ -122,6 +124,7 @@ def test_run_worker_runs_startup_maintenance_and_waits_when_idle(
     assert stop_event.waited_for == [0.5]
     assert len(sessions) == 4
     assert all(session.committed for session in sessions)
+    expire_sessions.assert_called_once_with(sessions[2], limit=10)
 
 
 def test_run_worker_propagates_processor_failure(monkeypatch):
