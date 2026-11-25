@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import DBAPIError
 from app.db import set_rls_context, verify_postgres_role
 from app.models import AuditEvent, FounderAuthority, Membership, Organization, Role, Task, User, Workspace, WorkspaceGrant
-from app.security_models import BrowserSession
+from app.security_models import BrowserSession, MachineIdentity
 
 ADMIN_URL = os.getenv("AGENCY_OS_TEST_RLS_ADMIN_DATABASE_URL")
 APP_URL = os.getenv("AGENCY_OS_TEST_RLS_DATABASE_URL")
@@ -198,5 +198,80 @@ def test_postgres_workspace_grant_functions_require_authority_and_audit_changes(
                 db.query(Organization).filter_by(id=org.id).delete(synchronize_session=False)
                 db.query(User).filter(User.id.in_([founder.id, member.id, outsider.id])).delete(synchronize_session=False)
                 db.commit()
+        app_engine.dispose()
+        admin_engine.dispose()
+
+
+def test_postgres_machine_identity_lookup_is_exact_and_precedes_workspace_scope():
+    admin_engine = create_engine(ADMIN_URL, pool_pre_ping=True)
+    app_engine = create_engine(APP_URL, pool_size=1, max_overflow=0, pool_pre_ping=True)
+    Admin = sessionmaker(bind=admin_engine, expire_on_commit=False)
+    App = sessionmaker(bind=app_engine, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    org = Organization(name=f"Machine lookup org {suffix}")
+    user = User(email=f"machine-lookup-{suffix}@example.test")
+    try:
+        with Admin() as db:
+            db.add_all([org, user])
+            db.flush()
+            workspace_a = Workspace(org_id=org.id, name="Machine lookup A", created_by=user.id)
+            workspace_b = Workspace(org_id=org.id, name="Machine lookup B", created_by=user.id)
+            db.add_all([workspace_a, workspace_b])
+            db.flush()
+            identity_a = MachineIdentity(
+                org_id=org.id, workspace_id=workspace_a.id, name="Identity A",
+                subject_type="service", subject_id=user.id,
+                token_hash=f"a{suffix}"[:64].ljust(64, "a"), token_prefix="a",
+                scopes=[], allowed_data_classes=["synthetic"],
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+                created_by_user_id=user.id,
+            )
+            identity_b = MachineIdentity(
+                org_id=org.id, workspace_id=workspace_b.id, name="Identity B",
+                subject_type="service", subject_id=user.id,
+                token_hash=f"b{suffix}"[:64].ljust(64, "b"), token_prefix="b",
+                scopes=[], allowed_data_classes=["synthetic"],
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+                created_by_user_id=user.id,
+            )
+            db.add_all([identity_a, identity_b])
+            db.commit()
+
+        with App() as db:
+            # Authentication starts with only the opaque identity ID. Org and
+            # workspace context are deliberately not known until this lookup.
+            set_rls_context(db, machine_identity_lookup_id=identity_a.id)
+            visible = db.query(MachineIdentity).all()
+            assert [row.id for row in visible] == [identity_a.id]
+            db.commit()
+
+            # The lookup-only context must not authorize mutation.
+            set_rls_context(db, machine_identity_lookup_id=identity_a.id)
+            changed = db.query(MachineIdentity).filter_by(id=identity_a.id).update(
+                {"last_used_at": datetime.now(timezone.utc)},
+                synchronize_session=False,
+            )
+            assert changed == 0
+            db.rollback()
+
+            # After credential verification, exact machine scope permits only
+            # that identity's workspace and normal last-used bookkeeping.
+            set_rls_context(
+                db, machine_org_id=org.id, machine_workspace_id=workspace_a.id
+            )
+            assert [row.id for row in db.query(MachineIdentity).all()] == [identity_a.id]
+            changed = db.query(MachineIdentity).filter_by(id=identity_a.id).update(
+                {"last_used_at": datetime.now(timezone.utc)},
+                synchronize_session=False,
+            )
+            assert changed == 1
+            db.commit()
+    finally:
+        with Admin() as db:
+            db.query(MachineIdentity).filter(MachineIdentity.org_id == org.id).delete(synchronize_session=False)
+            db.query(Workspace).filter(Workspace.org_id == org.id).delete(synchronize_session=False)
+            db.query(Organization).filter(Organization.id == org.id).delete(synchronize_session=False)
+            db.query(User).filter(User.id == user.id).delete(synchronize_session=False)
+            db.commit()
         app_engine.dispose()
         admin_engine.dispose()
