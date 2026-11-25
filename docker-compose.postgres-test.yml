@@ -24,8 +24,8 @@ services:
       context: .
       dockerfile: Dockerfile.postgres-test
     environment:
-      DATABASE_URL: postgresql+psycopg://agency_os:local-only-test-admin-password@postgres-test:5432/agency_os_worker_test
-      MIGRATION_DATABASE_URL: postgresql+psycopg://agency_os:local-only-test-admin-password@postgres-test:5432/agency_os_worker_test
+      DATABASE_URL: postgresql+psycopg://agency_os_migrator:local-only-test-migrator-password@postgres-test:5432/agency_os_worker_test
+      MIGRATION_DATABASE_URL: postgresql+psycopg://agency_os_migrator:local-only-test-migrator-password@postgres-test:5432/agency_os_worker_test
       APP_ENV: test
     command: ["alembic", "upgrade", "head"]
     depends_on:
