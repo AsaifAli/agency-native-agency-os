@@ -31,7 +31,7 @@
 
 ## 3. AI runtime
 
-**Code status:** Mock runtime and a constrained Managed Agents adapter exist. Live account, environment and provider compatibility are not validated; Claude Agent SDK fallback and OS MCP gateway are not implemented.
+**Code status:** Mock runtime and a constrained Managed Agents adapter exist. The target delegation split and phased Managed Agents multiagent plan are documented in `docs/CLAUDE_DELEGATION_AND_OS_CONTROL_BOUNDARY.md`. Live account, environment and provider compatibility are not validated; child-execution correlation/reconciliation, Claude Agent SDK fallback and OS MCP gateway are not implemented.
 
 - [ ] Confirm Anthropic account/project, billing and Managed Agents availability.
 - [ ] Create a dedicated non-production environment with minimal permissions and restricted egress.
@@ -94,7 +94,9 @@ These are **not** external setup tasks and cannot be closed by entering credenti
 - [x] Authentik OIDC code path, verified issuer/subject account binding, HttpOnly session cookie and CSRF protection are implemented.
 - [ ] Live OIDC/JWKS/MFA assurance (`acr`/`amr`), token revocation and actual browser session lifecycle verification.
 - [ ] Data Protection Gateway, PII minimization/redaction and retention/deletion implementation.
-- [ ] OS MCP gateway and narrowly scoped tools for agents.
+- [ ] Implement Claude-side MCP adapter(s) over authenticated OS Tool Gateway actions; keep OS policy and audit authoritative.
+- [ ] Implement child-execution persistence/correlation, per-child budgets, cancellation and provider-event reconciliation before enabling Managed Agents subagents or dynamic workflows.
+- [ ] Pilot predefined Claude specialists and read-only dynamic workflows on synthetic/public data; keep inline agents disabled until least-privilege is proven.
 - [ ] Outbound email dispatch, sender registry, consent provenance, suppression, reply/opt-out/bounce stop, idempotency and audit.
 - [ ] CRM relationship activities/timeline, source evidence and duplicate review/merge workflow.
 - [ ] Proposal/estimate/SOW and contract approval lifecycle.

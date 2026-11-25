@@ -108,3 +108,4 @@ This repository is a substantial development foundation, **not a production-read
 - [Authentik OIDC setup and configuration](docs/AUTHENTIK_SETUP.md)
 - [External setup checklist](docs/EXTERNAL_SETUP_CHECKLIST.md)
 - [Production readiness checklist](docs/PRODUCTION_READINESS_CHECKLIST.md)
+- [Claude delegation and OS control boundary](docs/CLAUDE_DELEGATION_AND_OS_CONTROL_BOUNDARY.md)
