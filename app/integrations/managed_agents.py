@@ -179,6 +179,37 @@ class ManagedAgentsRuntime(AgentRuntime):
             )
         return enabled
 
+    @staticmethod
+    def _waiting_for_custom_tool_resume(events: list[dict]) -> bool:
+        idle_events = [event for event in events if event.get("type") == "session.status_idle"]
+        if not idle_events:
+            return False
+        stop_reason = idle_events[-1].get("stop_reason", {})
+        if not isinstance(stop_reason, dict) or stop_reason.get("type") != "requires_action":
+            return False
+        event_ids = stop_reason.get("event_ids") or []
+        if not isinstance(event_ids, list) or not event_ids:
+            return False
+        by_id = {
+            event.get("id"): event
+            for event in events
+            if isinstance(event.get("id"), str)
+        }
+        answered = {
+            event.get("custom_tool_use_id")
+            for event in events
+            if event.get("type") == "user.custom_tool_result"
+        }
+        # Wait for the provider to resume after our custom-tool results. Unknown
+        # event IDs may not have reached the paginated history yet; built-in/MCP
+        # tool events are not auto-confirmed and remain review-required.
+        return all(
+            event_id in answered
+            or event_id not in by_id
+            or by_id[event_id].get("type") == "agent.custom_tool_use"
+            for event_id in event_ids
+        )
+
     def _process_custom_tool_events(
         self,
         client: httpx.Client,
@@ -425,6 +456,9 @@ class ManagedAgentsRuntime(AgentRuntime):
                     stop_type = stop_reason.get("type") if isinstance(stop_reason, dict) else None
                     if stop_type == "end_turn":
                         return self._extract_result(events, session_id)
+                    if stop_type == "requires_action" and self._waiting_for_custom_tool_resume(events):
+                        self.sleep(self.config.claude_managed_poll_interval_seconds)
+                        continue
                     if stop_type in {"requires_action", "budget_reached", "refusal", "retries_exhausted"}:
                         return self._extract_result(events, session_id)
                     raise RuntimeManualReviewRequired(
