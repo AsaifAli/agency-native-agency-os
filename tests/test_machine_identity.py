@@ -971,3 +971,46 @@ def test_mcp_sdk_server_builds_when_official_dependency_is_installed(monkeypatch
     mcp_app, authenticated_app = create_mcp_gateway()
     assert mcp_app.router is not None
     assert callable(authenticated_app)
+
+
+def test_session_expiry_sweep_revokes_mcp_credentials(security_client):
+    from app.machine_identity import authenticate_machine_token, expire_due_agent_sessions
+    from app.session_credentials import issue_session_credential
+    from app.security_models import MachineSessionCredential
+
+    issued, session_id, _headers = _issue_tool_session(security_client)
+    db = security_client.factory()
+    try:
+        principal = authenticate_machine_token("Bearer " + issued["token"], db)
+        credential = issue_session_credential(db, principal, session_id=session_id, ttl_seconds=300)
+        session = db.get(AgentSession, session_id)
+        session.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.commit()
+        assert expire_due_agent_sessions(db, limit=10) == 1
+        db.commit()
+        stored = db.get(MachineSessionCredential, credential.credential_id)
+        assert session.status == "expired"
+        assert stored.revoked_at is not None
+        assert stored.revocation_reason == "SESSION_TTL_EXPIRED"
+    finally:
+        db.close()
+
+
+def test_session_credential_expiry_is_enforced(security_client):
+    from app.machine_identity import authenticate_machine_token
+    from app.session_credentials import issue_session_credential, authenticate_session_credential
+    from app.security_models import MachineSessionCredential
+
+    issued, session_id, _headers = _issue_tool_session(security_client)
+    db = security_client.factory()
+    try:
+        principal = authenticate_machine_token("Bearer " + issued["token"], db)
+        credential = issue_session_credential(db, principal, session_id=session_id, ttl_seconds=300)
+        stored = db.get(MachineSessionCredential, credential.credential_id)
+        stored.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.commit()
+        with pytest.raises(HTTPException) as exc:
+            authenticate_session_credential(db, "Bearer " + credential.token)
+        assert exc.value.status_code == 401
+    finally:
+        db.close()
