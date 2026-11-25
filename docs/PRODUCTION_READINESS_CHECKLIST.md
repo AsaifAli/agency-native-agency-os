@@ -1,9 +1,9 @@
 # Agency OS Production Readiness Checklist
 
 **Last reviewed:** 2026-11-25  
-**Tracking branch:** `feature/engagement-models-agentic-workflows`  
-**Current integration PR:** [#28](https://github.com/AsaifAli/agency-native-agency-os/pull/28)  
-**Status:** Working estimate — not a certification or release approval.
+**Tracking branch:** `feature/machine-identity-session-gateway`  
+**Current integration PR:** [#34](https://github.com/AsaifAli/agency-native-agency-os/pull/34)  
+**Status:** Active development candidate — not a certification or release approval.
 
 ## Progress snapshot
 
@@ -133,7 +133,7 @@ Percentages are weighted engineering estimates, not automated metrics. A partial
 - [ ] Use one deliberate CI validation cycle when the branch is ready; do not merge if required jobs fail.
 - [ ] If Actions quota is exhausted, use an approved local or alternate CI environment and preserve the exact logs/artifacts as evidence.
 
-## Current PR #28 release gate
+## Historical PR #28 release gate (superseded by merged PR #29)
 - [ ] Confirm migration graph has one head and PostgreSQL upgrade succeeds from main.
 - [ ] Run backend tests, including new research/outreach and retainer period tests.
 - [ ] Run frontend TypeScript check and production build.
@@ -204,3 +204,21 @@ A feature is **production-ready** only when implementation, authorization, tenan
 
 
 **Merge status:** PR #33 is merged. The migration is in main but is not approved for application to populated production data until the isolated PostgreSQL 16 migration and mismatch-preflight tests pass.
+
+
+## Latest implementation update — 2026-11-25 (PR #34 candidate)
+
+- [x] PR #33 tenant-integrity and DPG hardening is merged to main as `09d23d90b258c55331367f94096bc6906cdce249`. Its outreach/CRM constraints and execution DPG coverage are implemented; PostgreSQL 16 and exact-main full-suite verification remain pending.
+- [x] Added workspace-scoped machine identity records for agent, worker and service subjects, with founder-only issuance/revocation, high-entropy one-time credentials, SHA-256 digest storage, expiry, explicit scopes and synthetic/public-only data grants.
+- [x] Added durable agent session records bound by composite organization/workspace/identity foreign key; session TTL is bounded to 60 seconds–24 hours and cannot outlive the identity.
+- [x] Added machine bearer authentication, founder revocation that cancels active sessions, and a fail-closed tool/session authorization primitive. Identity and session rows are locked during session creation and tool authorization to serialize with revocation.
+- [x] Added API and service regression coverage for one-time secret handling, invalid/expired/revoked credentials, founder-only issuance, data-class denial, session expiry bounds, tool scope enforcement and revocation cancellation.
+- [x] Added migration `n4a7c2e91b60` after `m3f9c2a7e514`; SQLite parent-schema upgrade, downgrade and re-upgrade rehearsal passed.
+- [x] Independent focused validation in the isolated reconciled candidate: 66 tests passed across machine identity (10), API (5), workforce (20), approvals (5), action policy (11), execution service (12) and outreach API (3). Python compile check passed before final lock hardening; focused machine-identity tests passed again after that hardening.
+- [ ] PostgreSQL 16 migration and foreign-key enforcement verification for `n4a7c2e91b60`.
+- [ ] Full backend suite on exact PR #34 head; local candidate validation is not the exact remote branch.
+- [ ] Implement actual Tool Registry and invocation records, input/output DPG at dispatch, approval and budget enforcement, sandboxed adapters, durable invocation outcomes and audit. The current `authorize_tool_session` function does not execute tools.
+- [ ] Implement scheduled session expiry/retention cleanup, artifact cleanup, cancellation propagation and recovery.
+- [ ] Do not provision production credentials or enable real agent tool access until the remaining gateway and PostgreSQL release gates pass.
+
+**Estimate policy:** The percentages above remain the previous evidence-backed snapshot and have not been recalculated for this candidate. This PR is implementation work, not a production-readiness or deployment approval.
