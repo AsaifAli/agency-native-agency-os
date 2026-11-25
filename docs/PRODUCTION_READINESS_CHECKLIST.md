@@ -245,7 +245,7 @@ A feature is **production-ready** only when implementation, authorization, tenan
 - [ ] Expand the registry with approved Revenue/Delivery tools only after per-tool data policies, approval consumption, budgets, async execution/outbox, cancellation/reconciliation and end-to-end isolation tests exist.
 - [ ] Add session expiry scheduler, retention/deletion, artifact cleanup and operational recovery.
 
-**Current gateway boundary:** only `system.health.read` is executable. This PR does not enable client-data tools, provider-side MCP, arbitrary shell/network access, outbound communications, payments or other side effects. It is a secure invocation foundation, not yet the complete autonomous Revenue/Delivery toolset.
+**Current gateway boundary:** `system.health.read` and public-only `revenue.lead.research.capture` are executable. Research capture creates a founder-review draft; it does not create contacts or send outreach. Provider-side MCP, built-in toolsets, arbitrary shell/network access, outbound communications, payments and other side effects remain disabled. This is the first controlled Revenue write capability, not the complete autonomous Revenue/Delivery toolset.
 
 
 ## Session lifecycle worker update — 2026-11-25
