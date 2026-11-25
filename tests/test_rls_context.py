@@ -41,3 +41,28 @@ def test_postgres_role_verification_fails_closed_for_non_postgres_engine():
             verify_postgres_role(engine, expected_bypassrls=False, require_rls=True)
     finally:
         engine.dispose()
+
+
+def test_required_rls_inventory_covers_every_tenant_table_and_execution_attempts():
+    from app.db import REQUIRED_RLS_TABLES
+
+    assert len(REQUIRED_RLS_TABLES) == 52
+    assert {
+        "organizations",
+        "workspaces",
+        "memberships",
+        "founder_authorities",
+        "browser_sessions",
+        "machine_identities",
+        "agent_sessions",
+        "executions",
+        "execution_attempts",
+        "tool_invocations",
+        "outbox_events",
+    }.issubset(REQUIRED_RLS_TABLES)
+
+
+def test_required_rls_inventory_has_no_duplicate_table_names():
+    from app.db import REQUIRED_RLS_TABLES
+
+    assert len(REQUIRED_RLS_TABLES) == len(set(REQUIRED_RLS_TABLES))
