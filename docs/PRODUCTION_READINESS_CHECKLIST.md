@@ -301,3 +301,26 @@ A feature is **production-ready** only when implementation, authorization, tenan
 - [ ] Founder UI for draft review/promotion and actual public-source research connectors remain outstanding. The tool stores source references supplied by an agent and does not independently verify them.
 - [ ] Further Revenue/Delivery tools, client-data eligibility, approval/budget integration, external adapters, retention/deletion and recovery remain outstanding.
 - [ ] No production deployment or external outreach was performed.
+
+
+## Current continuation checkpoint — 2026-11-25
+
+### Founder research review UI — PR #37
+- [x] PR #37 adds the Founder Console `/research-drafts` page, workspace/status filters, evidence/source display, approve/reject notes and explicit CRM promotion.
+- [x] The UI keeps approval and CRM promotion as separate founder actions; it does not create contacts or send outreach.
+- [ ] Frontend dependency installation, TypeScript check and production build remain unverified.
+- [ ] Latest PR #37 Actions run (run `45630633706`) did not execute job steps; both jobs are marked failed and the account billing/spending-limit block must be resolved before CI can provide evidence.
+- [ ] Do not merge PR #37 until frontend validation is completed in an available local/alternate runner or CI is restored. The branch is reported mergeable, but mergeability is not test evidence.
+
+### Claude Managed Agents OS tool bridge — design
+- [x] Audited the current Tool Registry, REST gateway, machine identity/session model and Managed Agents adapter.
+- [x] Documented the OS-owned MCP bridge, session-bound credential, per-call authorization, DPG, idempotency, vault lifecycle, recovery and acceptance tests in `docs/CLAUDE_MANAGED_AGENTS_TOOL_BRIDGE.md`.
+- [ ] Add session-bound bearer credentials (digest-only persistence, expiry/revocation, exact session scope).
+- [ ] Implement an authenticated HTTPS Streamable HTTP MCP endpoint backed by the existing shared Tool Gateway service.
+- [ ] Keep provider-side tools disabled by default; expose only explicit, OS-approved MCP tool names.
+- [ ] Add per-session Claude vault credential provisioning and cleanup/reconciliation; never expose the machine identity's reusable credential to Claude.
+- [ ] Integrate provider MCP connection/auth error events into OS execution failure/review states.
+- [ ] Complete unit, MCP contract, PostgreSQL 16, cross-workspace isolation, duplicate-call, crash-recovery and synthetic end-to-end tests before enabling.
+- [ ] First pilot is limited to `system.health.read` and public-only `revenue.lead.research.capture`; no CRM promotion, contacts, outbound dispatch, payments or production actions.
+
+**Current verified boundary:** The main branch has a REST Tool Gateway, not an MCP server. The Managed Agents adapter intentionally rejects provider MCP/tools. This continuation adds the design only; no provider tools have been enabled and no runtime code or production configuration has changed.
