@@ -88,7 +88,8 @@ def invoke_machine_tool(
         data_class=session.data_class,
     )
     canonical_request = json.dumps(
-        {"tool_key": spec.key, "version": spec.version, "input": validated_input},
+        {"identity_id": identity.id, "session_id": session.id,
+         "tool_key": spec.key, "version": spec.version, "input": validated_input},
         sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
     )
     request_hash = hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()
