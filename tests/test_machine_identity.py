@@ -902,3 +902,33 @@ def test_mcp_server_rejects_write_tools_until_os_approval_adapter_exists(securit
         assert exc.value.status_code == 403
     finally:
         db.close()
+
+
+def test_mcp_credential_schema_has_composite_session_identity_foreign_key():
+    from app.security_models import AgentSession, MachineSessionCredential
+    from app.models import Execution
+
+    session_scope = next(
+        item for item in AgentSession.__table__.constraints
+        if item.name == "uq_agent_session_identity_scope_id"
+    )
+    credential_fk = next(
+        item for item in MachineSessionCredential.__table__.constraints
+        if item.name == "fk_machine_session_credential_session_identity_scope"
+    )
+    execution_fk = next(
+        item for item in Execution.__table__.constraints
+        if item.name == "fk_execution_machine_session_scope"
+    )
+    assert [column.name for column in session_scope.columns] == [
+        "org_id", "workspace_id", "machine_identity_id", "id",
+    ]
+    assert [column.name for column in credential_fk.columns] == [
+        "org_id", "workspace_id", "machine_identity_id", "session_id",
+    ]
+    assert [element.column.name for element in credential_fk.elements] == [
+        "org_id", "workspace_id", "machine_identity_id", "id",
+    ]
+    assert [element.column.name for element in execution_fk.elements] == [
+        "org_id", "workspace_id", "id",
+    ]
