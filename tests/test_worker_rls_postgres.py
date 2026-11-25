@@ -29,10 +29,7 @@ def test_worker_is_nobypassrls_and_scoped_to_one_workspace():
     user = User(email=f"worker-rls-{suffix}@example.test")
     org_a = Organization(name=f"Worker RLS A {suffix}")
     org_b = Organization(name=f"Worker RLS B {suffix}")
-    old_session = BrowserSession(
-        user_id=user.id, token_hash=(suffix[:64]).ljust(64, "a"),
-        expires_at=datetime.now(timezone.utc) - timedelta(days=31),
-    )
+    old_session = None
     try:
         verify_postgres_role(worker_engine, expected_bypassrls=False, require_rls=True)
         with Admin() as db:
@@ -43,6 +40,10 @@ def test_worker_is_nobypassrls_and_scoped_to_one_workspace():
             ws_b = Workspace(org_id=org_b.id, name="Worker B")
             db.add_all([ws_a, ws_a_other, ws_b])
             db.flush()
+            old_session = BrowserSession(
+                user_id=user.id, token_hash=(suffix[:64]).ljust(64, "a"),
+                expires_at=datetime.now(timezone.utc) - timedelta(days=31),
+            )
             db.add(Membership(org_id=org_a.id, user_id=user.id, role=Role.owner))
             db.add(old_session)
             db.add_all([
@@ -94,8 +95,9 @@ def test_worker_is_nobypassrls_and_scoped_to_one_workspace():
     finally:
         with Admin() as db:
             db.query(Task).filter(Task.org_id.in_([org_a.id, org_b.id])).delete(synchronize_session=False)
-            db.query(AuditEvent).filter(AuditEvent.resource_id == old_session.id).delete(synchronize_session=False)
-            db.query(BrowserSession).filter(BrowserSession.id == old_session.id).delete(synchronize_session=False)
+            if old_session is not None:
+                db.query(AuditEvent).filter(AuditEvent.resource_id == old_session.id).delete(synchronize_session=False)
+                db.query(BrowserSession).filter(BrowserSession.id == old_session.id).delete(synchronize_session=False)
             db.query(Membership).filter(Membership.org_id == org_a.id).delete(synchronize_session=False)
             db.query(Workspace).filter(Workspace.org_id.in_([org_a.id, org_b.id])).delete(synchronize_session=False)
             db.query(Organization).filter(Organization.id.in_([org_a.id, org_b.id])).delete(synchronize_session=False)
