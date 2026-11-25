@@ -19,6 +19,9 @@ SPEC.loader.exec_module(MIGRATION)
 def test_rls_migration_covers_every_model_table_with_org_id():
     expected = {t.name: "workspace_id" in {c.name for c in t.columns}
         for t in Base.metadata.sorted_tables if "org_id" in {c.name for c in t.columns}}
+    # workspace_grants is introduced by the follow-up authorization migration;
+    # the original migration remains an immutable historical baseline.
+    expected.pop("workspace_grants")
     assert MIGRATION.ORG_TABLES == expected
 
 
@@ -76,4 +79,19 @@ def test_startup_rls_inventory_matches_all_migration_tables():
         "browser_sessions",
         "execution_attempts",
     }
-    assert REQUIRED_RLS_TABLES == expected
+    assert REQUIRED_RLS_TABLES == expected | {"workspace_grants"}
+
+
+def test_workspace_authorization_migration_uses_exact_grants_and_audited_functions():
+    path = PATH.with_name("v2c4e6a8b0d2_human_workspace_authorization.py")
+    source = path.read_text()
+    assert "user_has_workspace_access" in source
+    assert "workspace_grants" in source
+    assert "revoked_at IS NULL" in source
+    assert "grant_workspace_access" in source and "revoke_workspace_access" in source
+    assert "workspace.access_granted" in source and "workspace.access_revoked" in source
+    assert "agency_os.machine_workspace_id" in source
+    assert "workspace_id IS NULL" in source
+    assert "workspace_id IS NOT NULL" in source
+    assert "agency_os_migrator" in source
+    assert "REVOKE ALL ON FUNCTION" in source
