@@ -792,3 +792,113 @@ def test_founder_close_session_route_revokes_mcp_token(security_client):
             authenticate_session_credential(db, "Bearer " + credential.token)
     finally:
         db.close()
+
+
+def test_mcp_auth_middleware_requires_valid_session_token_and_host(security_client):
+    from starlette.responses import JSONResponse
+    from starlette.testclient import TestClient
+    from app.machine_identity import authenticate_machine_token
+    from app.session_credentials import issue_session_credential
+    from app.mcp_auth import SessionBearerAuthMiddleware, get_mcp_request_context
+
+    issued, session_id, _headers = _issue_tool_session(security_client)
+    db = security_client.factory()
+    try:
+        principal = authenticate_machine_token("Bearer " + issued["token"], db)
+        credential = issue_session_credential(db, principal, session_id=session_id, ttl_seconds=300)
+    finally:
+        db.close()
+
+    async def downstream(scope, receive, send):
+        context = get_mcp_request_context()
+        await JSONResponse({"session_id": context.session_id})(scope, receive, send)
+
+    app = SessionBearerAuthMiddleware(
+        downstream,
+        session_factory=security_client.factory,
+        requests_per_minute=120,
+        max_concurrent_requests=2,
+        allowed_hosts=["api.example.test"],
+        allowed_origins=[],
+    )
+    client = TestClient(app, base_url="https://api.example.test")
+    missing = client.post("/", json={})
+    assert missing.status_code == 401
+    valid = client.post("/", headers={"Authorization": "Bearer " + credential.token}, json={})
+    assert valid.status_code == 200
+    assert valid.json()["session_id"] == session_id
+    wrong_host = client.post(
+        "/",
+        headers={
+            "Authorization": "Bearer " + credential.token,
+            "Host": "attacker.example.test",
+        },
+        json={},
+    )
+    assert wrong_host.status_code == 403
+
+
+def test_mcp_tool_listing_and_dispatch_are_scoped_and_read_only(security_client):
+    from app.machine_identity import authenticate_machine_token
+    from app.session_credentials import issue_session_credential, authenticate_session_credential
+    from app.mcp_tools import list_session_tools, call_session_tool
+
+    issued, session_id, _headers = _issue_tool_session(security_client)
+    db = security_client.factory()
+    try:
+        principal = authenticate_machine_token("Bearer " + issued["token"], db)
+        credential = issue_session_credential(db, principal, session_id=session_id, ttl_seconds=300)
+        context = authenticate_session_credential(db, "Bearer " + credential.token)
+        listed = list_session_tools(
+            db,
+            context,
+            enabled_tool_keys=["system.health.read", "revenue.lead.research.capture"],
+        )
+        assert [item["name"] for item in listed] == ["system.health.read"]
+
+        first = call_session_tool(
+            db,
+            context,
+            tool_name="system.health.read",
+            arguments={},
+            request_id="mcp-request-1",
+            enabled_tool_keys=["system.health.read", "revenue.lead.research.capture"],
+        )
+        replay = call_session_tool(
+            db,
+            context,
+            tool_name="system.health.read",
+            arguments={},
+            request_id="mcp-request-1",
+            enabled_tool_keys=["system.health.read", "revenue.lead.research.capture"],
+        )
+        assert first["result"] == {"service": "agency-os-api", "database": "ok"}
+        assert replay["id"] == first["id"]
+        assert replay["replayed"] is True
+    finally:
+        db.close()
+
+
+def test_mcp_server_rejects_write_tools_until_os_approval_adapter_exists(security_client):
+    from app.machine_identity import authenticate_machine_token
+    from app.session_credentials import issue_session_credential, authenticate_session_credential
+    from app.mcp_tools import call_session_tool
+
+    issued, session_id, _headers = _issue_research_session(security_client)
+    db = security_client.factory()
+    try:
+        principal = authenticate_machine_token("Bearer " + issued["token"], db)
+        credential = issue_session_credential(db, principal, session_id=session_id, ttl_seconds=300)
+        context = authenticate_session_credential(db, "Bearer " + credential.token)
+        with pytest.raises(HTTPException) as exc:
+            call_session_tool(
+                db,
+                context,
+                tool_name="revenue.lead.research.capture",
+                arguments=_research_payload(),
+                request_id="mcp-write-attempt",
+                enabled_tool_keys=["revenue.lead.research.capture"],
+            )
+        assert exc.value.status_code == 403
+    finally:
+        db.close()
