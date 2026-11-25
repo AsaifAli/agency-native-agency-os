@@ -119,7 +119,7 @@ def upgrade() -> None:
     op.execute("""
         GRANT EXECUTE ON FUNCTION
             agency_os_private.user_has_workspace_access(text, text, text)
-        TO agency_os_app
+        TO agency_os_app, agency_os_worker
     """)
 
     # Grant and revoke are SECURITY DEFINER transactions. The actor argument
