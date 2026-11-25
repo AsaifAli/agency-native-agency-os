@@ -213,6 +213,8 @@ class ManagedAgentsRuntime(AgentRuntime):
         events: list[dict],
         request: ExecutionRequest,
         enabled_tools: dict[str, str],
+        *,
+        max_calls: int,
     ) -> int:
         answered = {
             event.get("custom_tool_use_id")
@@ -230,9 +232,9 @@ class ManagedAgentsRuntime(AgentRuntime):
             ):
                 pending_by_id[event_id] = event
         pending = list(pending_by_id.values())
-        if len(pending) > 10:
+        if len(pending) > min(10, max_calls):
             raise RuntimeManualReviewRequired(
-                "Managed Agent exceeded the per-poll custom tool call limit."
+                "Managed Agent exceeded the bounded custom tool call limit."
             )
 
         processed = 0
@@ -465,14 +467,15 @@ class ManagedAgentsRuntime(AgentRuntime):
                         "Claude Managed Agents reported a session error."
                     )
                 processed = self._process_custom_tool_events(
-                    client, session_id, events, request, enabled_tools
+                    client,
+                    session_id,
+                    events,
+                    request,
+                    enabled_tools,
+                    max_calls=50 - tool_calls_processed,
                 )
                 if processed:
                     tool_calls_processed += processed
-                    if tool_calls_processed > 50:
-                        raise RuntimeManualReviewRequired(
-                            "Managed Agent exceeded the per-session custom tool call limit."
-                        )
                     self.sleep(self.config.claude_managed_poll_interval_seconds)
                     continue
 
