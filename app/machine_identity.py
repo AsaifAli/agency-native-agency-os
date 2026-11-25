@@ -85,7 +85,7 @@ def create_agent_session(db: Session, principal: MachinePrincipal, *, purpose: s
     if not purpose or len(purpose.strip()) > 240:
         raise HTTPException(422, "A session purpose of at most 240 characters is required")
     try:
-        safe_purpose, _ = sanitize_text(purpose.strip())
+        safe_purpose, redaction_counts = sanitize_text(purpose.strip())
     except DataProtectionBlocked as exc:
         raise HTTPException(422, "Session purpose blocked by data-protection policy") from exc
     if not safe_purpose:
@@ -101,6 +101,13 @@ def create_agent_session(db: Session, principal: MachinePrincipal, *, purpose: s
     )
     db.add(session)
     db.flush()
+    record_event(
+        db, identity.org_id, None, "agent_session.created",
+        "agent_session", session.id, identity.workspace_id,
+        {"machine_identity_id": identity.id,
+         "data_class": session.data_class,
+         "purpose_redaction_counts": redaction_counts},
+    )
     return session
 
 def authorize_tool_session(db: Session, principal: MachinePrincipal, *, session_id: str, tool_key: str, data_class: str) -> AgentSession:
