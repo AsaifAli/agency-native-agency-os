@@ -200,4 +200,7 @@ A feature is **production-ready** only when implementation, authorization, tenan
 - [ ] PostgreSQL 16 migration and tenant-insert suite remains pending; SQLite is useful evidence but does not replace PostgreSQL validation.
 - [ ] Full backend suite on the exact remote PR head remains pending.
 
-**Validation note:** the local validation copy used the PR's current DPG, worker processor, focused regression tests and migration against the reconciled candidate base. Results are not claimed as CI results or as a full exact-head test run. PR #33 is 15 commits ahead / 0 behind and mergeable at the latest GitHub comparison. CI is supplementary, not a development blocker.
+**Validation note:** the local validation copy used the PR's current DPG, worker processor, focused regression tests and migration against the reconciled candidate base. Results are not claimed as CI results or as a full exact-head test run. PR #33 was merged to main as `09d23d90b258c55331367f94096bc6906cdce249`. CI is supplementary, not a development blocker.
+
+
+**Merge status:** PR #33 is merged. The migration is in main but is not approved for application to populated production data until the isolated PostgreSQL 16 migration and mismatch-preflight tests pass.
