@@ -51,6 +51,17 @@ def _run_maintenance(
     return promoted_count, recovered_count, queued_delegations
 
 
+def _run_session_maintenance(
+    session_factory: SessionFactory,
+    batch_size: int,
+) -> int:
+    """Expire due machine sessions in a separate committed maintenance transaction."""
+    with session_factory() as db:
+        expired_count = expire_due_agent_sessions(db, limit=batch_size)
+        db.commit()
+    return expired_count
+
+
 def _run_outbox_maintenance(
     session_factory: SessionFactory,
     *,
