@@ -20,7 +20,6 @@ class ExecutionRequest:
     task_description: str = ""
     external_run_id: str | None = None
     persist_external_run_id: Callable[[str], None] | None = None
-    machine_session_id: str | None = None
     execute_custom_tool: Callable[[str, dict, str], dict] | None = None
     request_metadata: dict = field(default_factory=dict)
 
