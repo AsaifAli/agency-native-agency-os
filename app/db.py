@@ -1,37 +1,90 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy import create_engine, event, text
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import settings
 
 
-is_sqlite = settings.database_url.startswith("sqlite")
 
-if is_sqlite:
-    connect_args = {
-        "check_same_thread": False,
-        "timeout": settings.db_connect_timeout_seconds,
+def _make_engine(database_url: str):
+    sqlite = database_url.startswith("sqlite")
+    args = (
+        {"check_same_thread": False, "timeout": settings.db_connect_timeout_seconds}
+        if sqlite else {
+            "connect_timeout": settings.db_connect_timeout_seconds,
+            "options": f"-c statement_timeout={settings.db_statement_timeout_ms} -c lock_timeout={settings.db_lock_timeout_ms}",
+        }
+    )
+    return create_engine(database_url, pool_pre_ping=True,
+        pool_timeout=settings.db_pool_timeout_seconds, connect_args=args)
+
+
+engine = _make_engine(settings.database_url)
+worker_engine = _make_engine(settings.database_url)
+
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+WorkerSessionLocal = sessionmaker(bind=worker_engine, autoflush=False, autocommit=False)
+
+# Trusted administrative commands use this URL only when explicitly supplied.
+import os
+_admin_url = os.environ.get("MIGRATION_DATABASE_URL")
+admin_engine = _make_engine(_admin_url) if _admin_url else engine
+AdminSessionLocal = sessionmaker(bind=admin_engine, autoflush=False, autocommit=False)
+
+_RLS_KEYS = ("user_id", "machine_org_id", "machine_workspace_id", "machine_identity_lookup_id", "browser_session_token_hash")
+
+
+def _apply_rls_context(session: Session, transaction, connection) -> None:
+    context = session.info.get("agency_os_rls_context")
+    if not context or connection.dialect.name != "postgresql":
+        return
+    for key in _RLS_KEYS:
+        connection.execute(text("SELECT set_config(:name, :value, true)"),
+            {"name": f"agency_os.{key}", "value": context[key]})
+
+
+event.listen(Session, "after_begin", _apply_rls_context)
+
+
+def set_rls_context(db: Session, *, user_id: str | None = None,
+    machine_org_id: str | None = None, machine_workspace_id: str | None = None,
+    machine_identity_lookup_id: str | None = None,
+    browser_session_token_hash: str | None = None) -> None:
+    """Set transaction-local tenant identity and reapply it after commits."""
+    context = {
+        "user_id": user_id or "", "machine_org_id": machine_org_id or "",
+        "machine_workspace_id": machine_workspace_id or "",
+        "machine_identity_lookup_id": machine_identity_lookup_id or "",
+        "browser_session_token_hash": browser_session_token_hash or "",
     }
-else:
-    connect_args = {
-        "connect_timeout": settings.db_connect_timeout_seconds,
-        "options": (
-            f"-c statement_timeout={settings.db_statement_timeout_ms} "
-            f"-c lock_timeout={settings.db_lock_timeout_ms}"
-        ),
-    }
+    db.info["agency_os_rls_context"] = context
+    if db.get_bind().dialect.name == "postgresql":
+        for key, value in context.items():
+            db.execute(text("SELECT set_config(:name, :value, true)"),
+                {"name": f"agency_os.{key}", "value": value})
 
-engine = create_engine(
-    settings.database_url,
-    pool_pre_ping=True,
-    pool_timeout=settings.db_pool_timeout_seconds,
-    connect_args=connect_args,
-)
 
-SessionLocal = sessionmaker(
-    bind=engine,
-    autoflush=False,
-    autocommit=False,
-)
+def verify_postgres_role(database_engine, *, expected_bypassrls: bool, require_rls: bool) -> None:
+    """Fail closed unless API/worker connects with its designated PG role."""
+    if database_engine.dialect.name != "postgresql":
+        raise RuntimeError("Production database role verification requires PostgreSQL")
+    with database_engine.connect() as connection:
+        role = connection.execute(text("""
+            SELECT r.rolsuper, r.rolbypassrls,
+                EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+                    WHERE n.nspname='public' AND c.relrowsecurity AND c.relowner=r.oid) owns_rls_tables
+            FROM pg_roles r WHERE r.rolname=current_user
+        """)).mappings().one_or_none()
+        if role is None or role["rolsuper"] or bool(role["rolbypassrls"]) != expected_bypassrls or role["owns_rls_tables"]:
+            expected = "non-owner BYPASSRLS worker" if expected_bypassrls else "non-owner NOBYPASSRLS API"
+            raise RuntimeError(f"PostgreSQL connection must use a {expected} role")
+        if require_rls:
+            count = connection.execute(text("""
+                SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+                WHERE n.nspname='public' AND c.relrowsecurity
+                  AND c.relforcerowsecurity AND c.relname IN ('organizations','memberships','workspaces','tasks','executions','clients','leads','browser_sessions')
+            """)).scalar_one()
+            if count != 8:
+                raise RuntimeError("PostgreSQL tenant RLS migration is missing or incomplete")
 
 
 class Base(DeclarativeBase):

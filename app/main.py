@@ -1,4 +1,5 @@
 
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import secrets
 
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text, or_
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.db import get_db
+from app.db import engine, get_db, set_rls_context, verify_postgres_role
 from app.rate_limit import RedisRateLimitMiddleware
 from app.csrf import CookieCSRFMiddleware
 from app.session import EncryptedSessionMiddleware
@@ -80,10 +81,18 @@ from app.execution_service import (
 )
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if settings.app_env.lower() == "production":
+        if settings.process_role != "api":
+            raise RuntimeError("API process must use PROCESS_ROLE=api in production")
+        verify_postgres_role(engine, expected_bypassrls=False, require_rls=True)
+    yield
+
+
 app = FastAPI(
-    title="Agency OS API",
-    version="0.1.0",
-    description="Founder-controlled Agency OS foundation",
+    title="Agency OS API", version="0.1.0",
+    description="Founder-controlled Agency OS foundation", lifespan=lifespan,
 )
 
 configure_oidc()
@@ -136,6 +145,7 @@ async def authentik_callback(request: Request, db: Session = Depends(get_db)):
 
     issuer = settings.oidc_issuer
     user = link_provisioned_user(db, issuer, subject, email)
+    set_rls_context(db, user_id=user.id)
 
     memberships = db.query(Membership).filter_by(user_id=user.id).all()
     for membership in memberships:
@@ -198,6 +208,7 @@ def authentik_logout(
     if token:
         session = revoke_browser_session(db, token)
         if session is not None:
+            set_rls_context(db, user_id=session.user_id)
             memberships = db.query(Membership).filter_by(user_id=session.user_id).all()
             for membership in memberships:
                 record_event(
@@ -224,6 +235,7 @@ def refresh_browser_session(
     old_session, new_session, new_token = rotate_browser_session(
         db, token, ttl_seconds=settings.oidc_session_ttl_seconds
     )
+    set_rls_context(db, user_id=old_session.user_id)
     memberships = db.query(Membership).filter_by(user_id=old_session.user_id).all()
     for membership in memberships:
         record_event(
@@ -239,6 +251,16 @@ def refresh_browser_session(
         max_age=settings.oidc_session_ttl_seconds, httponly=True,
         secure=secure, samesite="none" if secure else "lax", path="/",
     )
+    # The double-submit CSRF cookie shares the browser-session lifetime. Extend
+    # its expiry whenever the authenticated session rotates, without changing
+    # the token held in the browser's in-memory request helper.
+    csrf_token = request.cookies.get(settings.oidc_csrf_cookie_name)
+    if csrf_token:
+        response.set_cookie(
+            settings.oidc_csrf_cookie_name, csrf_token,
+            max_age=settings.oidc_session_ttl_seconds, httponly=False,
+            secure=secure, samesite="none" if secure else "lax", path="/",
+        )
     response.headers["Cache-Control"] = "no-store"
     return {"status": "refreshed"}
 

@@ -7,10 +7,14 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 from fastapi import HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import User
+from app.db import set_rls_context
+from app.models import Membership, User
+from app.audit import record_event
+from app.jwt_keys import decode_jwt, encode_jwt
 from app.security_models import BrowserSession
 
 
@@ -28,12 +32,8 @@ def _token_hash(jti: str) -> str:
 
 def _decode_claims(token: str) -> dict:
     try:
-        claims = jwt.decode(
-            token,
-            settings.jwt_secret,
-            algorithms=["HS256"],
-            issuer=settings.jwt_issuer,
-            audience="agency-os-api",
+        claims = decode_jwt(
+            token, issuer=settings.jwt_issuer, audience="agency-os-api",
             options={"require": ["sub", "iss", "aud", "exp", "iat", "jti"]},
             leeway=30,
         )
@@ -51,18 +51,14 @@ def issue_browser_session(db: Session, user: User, *, ttl_seconds: int) -> str:
     now = _utcnow()
     jti = secrets.token_urlsafe(32)
     expires_at = now + timedelta(seconds=ttl_seconds)
-    token = jwt.encode(
-        {
-            "sub": user.email.lower(),
-            "iss": settings.jwt_issuer,
-            "aud": "agency-os-api",
-            "iat": now,
-            "exp": expires_at,
-            "jti": jti,
-        },
-        settings.jwt_secret,
-        algorithm="HS256",
-    )
+    token = encode_jwt({
+        "sub": user.email.lower(),
+        "iss": settings.jwt_issuer,
+        "aud": "agency-os-api",
+        "iat": now,
+        "exp": expires_at,
+        "jti": jti,
+    })
     db.add(
         BrowserSession(
             user_id=user.id,
@@ -76,7 +72,9 @@ def issue_browser_session(db: Session, user: User, *, ttl_seconds: int) -> str:
 
 def authenticate_browser_session(db: Session, token: str) -> BrowserSession:
     claims = _decode_claims(token)
-    session = db.query(BrowserSession).filter_by(token_hash=_token_hash(claims["jti"])).first()
+    token_hash = _token_hash(claims["jti"])
+    set_rls_context(db, browser_session_token_hash=token_hash)
+    session = db.query(BrowserSession).filter_by(token_hash=token_hash).first()
     now = _utcnow()
     if (
         session is None
@@ -84,6 +82,7 @@ def authenticate_browser_session(db: Session, token: str) -> BrowserSession:
         or _aware(session.expires_at) <= now
     ):
         raise HTTPException(401, "Invalid or revoked browser session")
+    set_rls_context(db, user_id=session.user_id)
     return session
 
 
@@ -93,10 +92,13 @@ def revoke_browser_session(db: Session, token: str) -> BrowserSession | None:
         claims = _decode_claims(token)
     except HTTPException:
         return None
-    session = db.query(BrowserSession).filter_by(token_hash=_token_hash(claims["jti"])).first()
+    token_hash = _token_hash(claims["jti"])
+    set_rls_context(db, browser_session_token_hash=token_hash)
+    session = db.query(BrowserSession).filter_by(token_hash=token_hash).first()
     if session is None or session.revoked_at is not None:
         return None
     session.revoked_at = _utcnow()
+    set_rls_context(db, user_id=session.user_id)
     return session
 
 
@@ -110,9 +112,11 @@ def rotate_browser_session(
     together before returning the replacement cookie to the browser.
     """
     claims = _decode_claims(token)
+    token_hash = _token_hash(claims["jti"])
+    set_rls_context(db, browser_session_token_hash=token_hash)
     old_session = (
         db.query(BrowserSession)
-        .filter_by(token_hash=_token_hash(claims["jti"]))
+        .filter_by(token_hash=token_hash)
         .with_for_update()
         .first()
     )
@@ -129,6 +133,45 @@ def rotate_browser_session(
         raise HTTPException(401, "Unknown, inactive, or revoked user session")
 
     old_session.revoked_at = now
+    set_rls_context(db, user_id=old_session.user_id)
     new_token = issue_browser_session(db, user, ttl_seconds=ttl_seconds)
     new_session = authenticate_browser_session(db, new_token)
     return old_session, new_session, new_token
+
+
+def prune_expired_browser_sessions(
+    db: Session, *, retention_days: int = 30, limit: int = 500
+) -> int:
+    """Delete bounded expired/revoked sessions after the configured retention window.
+
+    Audit a metadata-only deletion event per organization before removing each
+    row. Caller owns the transaction; worker uses the dedicated maintenance role.
+    """
+    if not 1 <= retention_days <= 3650:
+        raise ValueError("retention_days must be between 1 and 3650")
+    if not 1 <= limit <= 1000:
+        raise ValueError("limit must be between 1 and 1000")
+    cutoff = _utcnow() - timedelta(days=retention_days)
+    rows = (
+        db.query(BrowserSession)
+        .filter(or_(
+            BrowserSession.expires_at <= cutoff,
+            BrowserSession.revoked_at <= cutoff,
+        ))
+        .order_by(BrowserSession.created_at.asc(), BrowserSession.id.asc())
+        .with_for_update(skip_locked=True)
+        .limit(limit)
+        .all()
+    )
+    for session in rows:
+        org_ids = [row[0] for row in db.query(Membership.org_id).filter_by(user_id=session.user_id).all()]
+        for org_id in org_ids:
+            record_event(
+                db, org_id, None, "auth.browser_session_pruned",
+                "browser_session", session.id,
+                payload={"reason_code": "SESSION_RETENTION_ELAPSED"},
+            )
+        db.delete(session)
+    if rows:
+        db.flush()
+    return len(rows)

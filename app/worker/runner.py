@@ -7,9 +7,10 @@ from typing import Callable
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.db import SessionLocal
+from app.db import WorkerSessionLocal
 from app.worker.processor import process_one_execution
 from app.machine_identity import expire_due_agent_sessions
+from app.browser_sessions import prune_expired_browser_sessions
 from app.outbox_handlers import OUTBOX_HANDLERS
 from app.outbox_service import dispatch_outbox_batch, reconcile_outbox_events
 from app.worker_service import (
@@ -62,6 +63,17 @@ def _run_session_maintenance(
     return expired_count
 
 
+def _run_browser_session_retention(session_factory: SessionFactory, batch_size: int) -> int:
+    """Prune a bounded batch of expired browser sessions and audit the deletion."""
+    with session_factory() as db:
+        deleted = prune_expired_browser_sessions(
+            db, retention_days=settings.browser_session_retention_days,
+            limit=min(batch_size, 1000),
+        )
+        db.commit()
+    return deleted
+
+
 def _run_outbox_maintenance(
     session_factory: SessionFactory,
     *,
@@ -93,7 +105,7 @@ def _run_outbox_maintenance(
 def run_worker(
     stop_event: Event,
     worker_id: str,
-    session_factory: SessionFactory = SessionLocal,
+    session_factory: SessionFactory = WorkerSessionLocal,
     processor: ExecutionProcessor = process_one_execution,
     lease_seconds: int | None = None,
     poll_interval_seconds: float | None = None,
@@ -176,6 +188,12 @@ def run_worker(
             )
             if expired_sessions:
                 logger.info("Expired agent sessions: count=%s", expired_sessions)
+
+            pruned_browser_sessions = _run_browser_session_retention(
+                session_factory=session_factory, batch_size=maintenance_batch_size,
+            )
+            if pruned_browser_sessions:
+                logger.info("Pruned retained browser sessions: count=%s", pruned_browser_sessions)
 
             published, retried, dead_lettered, requeued = _run_outbox_maintenance(
                 session_factory=session_factory,

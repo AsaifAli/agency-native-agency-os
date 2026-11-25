@@ -6,7 +6,7 @@ administrative shell with access to the configured Agency OS database.
 import argparse
 import sys
 
-from app.db import SessionLocal
+from app.db import AdminSessionLocal
 from app.models import FounderAuthority, Organization, User
 
 
@@ -25,7 +25,7 @@ def main() -> int:
     if args.confirm.strip().lower() != email:
         parser.error("--confirm must exactly match --email")
 
-    db = SessionLocal()
+    db = AdminSessionLocal()
     try:
         org = db.query(Organization).filter_by(id=args.org_id).first()
         user = db.query(User).filter_by(email=email, active=True).first()

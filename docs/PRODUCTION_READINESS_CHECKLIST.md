@@ -1,9 +1,9 @@
 # Agency OS Production Readiness Checklist
 
-**Last reviewed:** 2026-11-25
+**Last reviewed:** 2026-11-26
 **Tracking branch:** `main` (PR #45 merged); `security/predeploy-20-point-audit` (PR #47 open draft)
 **Latest merged milestone:** [PR #45](https://github.com/AsaifAli/agency-native-agency-os/pull/45)
-**Status:** PR #45 is merged. PR #47 remains an open draft. Persistent browser-session revocation and atomic rotation are published on the PR #47 branch but remain unmerged and unverified on PostgreSQL 16. PostgreSQL RLS, live identity/MFA verification and other release gates remain. Not a certification or release approval.
+**Status:** PR #45 is merged. PR #47 remains an open draft. The security branch now includes persistent session revocation/rotation/retention, frontend refresh, JWT key overlap, PostgreSQL RLS candidate with separate API/worker/migrator roles, route authorization guards, log redaction and OIDC URL validation. These changes remain unmerged; RLS has not been applied or tested on live PostgreSQL 16. Not a certification or release approval.
 
 ## Progress snapshot
 
@@ -422,7 +422,8 @@ Additional review controls: identity/session locks follow revocation lock order;
 - [x] Production frontend build passes and generates all 31 static pages; build worker count constrained to one to avoid EAGAIN in cloud environments.
 - [x] Backend full suite: 296 passed, 4 PostgreSQL-only tests skipped.
 - [ ] Production identity provider/session lifecycle and MFA still not implemented; no password auth should be added without selecting the identity architecture.
-- [ ] PostgreSQL 16 RLS and non-owner runtime role still not implemented or verified.
+- [x] Added PostgreSQL RLS migration covering all current org-scoped model tables, transaction-local human/machine context, non-owner NOBYPASSRLS API role, isolated BYPASSRLS worker role and migration-role separation.
+- [ ] Apply and verify the RLS migration on PostgreSQL 16; run live cross-tenant, machine-workspace and pooled-connection tests. Human workspace membership is not yet a separate grant model.
 - [ ] Redis integration/load tests, trusted-proxy setup, SSRF egress controls, complete route authorization review, log redaction, secret-history scan and deployment/restore review remain.
 
 **Security release decision remains NO-GO** until identity/MFA and PostgreSQL RLS are implemented and verified. Full evidence is in `docs/PRE_DEPLOY_SECURITY_AUDIT_20_POINT.md`.
@@ -457,7 +458,8 @@ Additional review controls: identity/session locks follow revocation lock order;
 - [ ] Implement and verify PostgreSQL 16 RLS with a non-owner/non-BYPASSRLS application role, transaction-local tenant context and pooled-connection isolation tests.
 - [ ] Implement durable Claude child-execution correlation, per-child budgets and exact grants, cancellation and provider-event reconciliation before enabling multiagent or side-effecting workflows.
 - [ ] Complete live Authentik OIDC/JWKS/ACR and browser cookie verification.
-- [ ] Complete remaining route authorization, SSRF egress, log redaction, secret-history and backup/restore gates.
+- [x] Added route authorization inventory guard, central Python log redaction, JWT current/previous key IDs, frontend session refresh, bounded browser-session retention and OIDC issuer URL validation.
+- [ ] Complete nested-object BOLA review, network-level egress/DNS controls, live MFA/ACR verification, secret-history scan and backup/restore gates.
 
 **Evidence boundary:** GitHub source review and PR metadata were available. The cloud development workspace could not establish TLS to GitHub, so no source code was modified and no tests were rerun during this continuation. Existing test counts above are historical branch evidence, not fresh verification.
 
@@ -505,3 +507,24 @@ Additional review controls: identity/session locks follow revocation lock order;
 - [x] Added 3 focused tests covering email/phone redaction, API-key and bearer-secret replacement, exception traceback scrubbing and structured-extra redaction.
 - [x] Full backend suite after the update: **335 passed, 4 PostgreSQL-only skipped**; compileall and `git diff --check` passed.
 - [ ] Verify deployed Uvicorn/worker logging configuration, third-party/provider/proxy logs, log retention and alerting. This code cannot sanitize logs emitted outside the configured Python process.
+
+
+## 2026-11-26 — PostgreSQL RLS, session lifecycle and authorization hardening candidate
+
+- [x] Added migration `t0a1b2c3d4e5_postgresql_tenant_row_level_security.py`. It covers all **49 current model tables with `org_id`, `organizations`, and user/token-scoped `browser_sessions` (51 policies)**, enables and FORCEs RLS, and installs a restricted `SECURITY DEFINER` membership predicate owned by `agency_os_migrator`.
+- [x] Added transaction-local RLS context binding/reapplication in `app/db.py`; human auth sets user context, machine auth first scopes identity lookup then exact org/workspace context, signed website intake binds its configured org/workspace after signature validation, and browser sessions are limited to the authenticated user or exact presented token digest.
+- [x] Split database roles in Compose: `agency_os_app` is non-owner/NOBYPASSRLS, `agency_os_worker` is non-owner/non-superuser/BYPASSRLS for cross-tenant queue processing, and `agency_os_migrator` is non-superuser/BYPASSRLS and owns migrations. API/worker containers do not receive the migration credential. Role attributes are checked at production startup.
+- [x] Added `docs/POSTGRES_RLS_OPERATIONS.md`, role bootstrap script and separate `.env.example` / `.env.runtime.example` files. Existing volumes require running the idempotent role bootstrap script before migration; no volume reset is required.
+- [x] Added live PostgreSQL RLS test `tests/test_tenant_rls_postgres.py` for cross-org reads/writes, machine workspace scope and pooled connection context cleanup. It is currently skipped because no PostgreSQL test database is configured.
+- [x] Static RLS coverage test ensures every current SQLAlchemy model table with `org_id` is listed in the policy migration. PostgreSQL-only test remains required before merge.
+- [x] Added JWT `kid` allowlisting with a current/previous key overlap and legacy no-`kid` decode path; production validates key ID and previous key length.
+- [x] Added frontend proactive browser session refresh every 15 minutes and on tab visibility return; API helper also refreshes before requests. Dev bearer override bypasses cookie refresh.
+- [x] Added bounded browser-session retention cleanup with metadata-only audit events; worker prunes rows after `BROWSER_SESSION_RETENTION_DAYS` (default 30).
+- [x] Hardened production OIDC issuer URL validation against HTTP, localhost/private IP literals, embedded credentials, query/fragment and non-standard ports. DNS rebinding and egress firewall policy remain infrastructure controls.
+- [x] Extended route inventory tests to require membership/role/founder checks on all `{org_id}` routes and explicit use of `{workspace_id}` on workspace routes. This is structural coverage, not complete nested-object BOLA proof.
+- [ ] Human workspace membership/assignment model remains unimplemented: human org membership currently allows all workspaces in that org. Machine identities are constrained to their exact workspace by RLS.
+- [ ] Worker DB role currently has `BYPASSRLS` to support global queue claiming and outbox maintenance. It is a separate non-superuser credential/process, but is not a strict tenant boundary; replace broad bypass with narrow queue-claim/ack functions and per-execution tenant context before production.
+- [ ] No PostgreSQL server or Docker daemon was available in the Box. RLS SQL was rendered for the isolated revision range; it was not applied to PostgreSQL 16. The full historical offline migration chain is blocked by a pre-existing migration that requires live bind inspection.
+- [ ] Verify migration on PostgreSQL 16, role attributes/ownership, API startup and worker startup, pool reuse, populated-schema upgrade/downgrade and concurrent session refresh. Replace worker `BYPASSRLS` with narrowly scoped queue functions before production.
+
+**Release decision: NO-GO.** This candidate materially closes code-level gaps but is not production approved. External Authentik MFA, PostgreSQL 16 verification, egress restrictions, nested-object authorization, secret-history review and backup/restore remain outstanding.

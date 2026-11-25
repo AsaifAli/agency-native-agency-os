@@ -6,7 +6,8 @@ from app.config import Settings
 def production_settings(**overrides):
     values = {
         "app_env": "production",
-        "database_url": "postgresql+psycopg://agency_os:strong-password-that-is-long-enough-32chars@db.example.com/agency_os",
+        "database_url": "postgresql+psycopg://agency_os_app:strong-password-that-is-long-enough-32chars@db.example.com/agency_os",
+        "process_role": "api",
         "redis_url": "rediss://redis.example.com:6379/0",
         "jwt_secret": "a" * 64,
         "dev_auth_enabled": False,
@@ -100,3 +101,43 @@ def test_production_requires_https_oidc_redirect_and_frontend():
         Settings(**production_settings(oidc_redirect_uri="http://api.example.com/v1/auth/callback"))
     with pytest.raises(ValidationError, match="OIDC_FRONTEND_URL"):
         Settings(**production_settings(oidc_frontend_url="http://console.example.com"))
+
+
+def test_production_rejects_worker_role_for_api_process():
+    with pytest.raises(ValidationError, match="API PROCESS_ROLE"):
+        Settings(**production_settings(database_url="postgresql+psycopg://agency_os_worker:strong-password-that-is-long-enough-32chars@db.example.com/agency_os"))
+
+def test_production_rejects_api_role_for_worker_process():
+    with pytest.raises(ValidationError, match="Worker PROCESS_ROLE"):
+        Settings(**production_settings(process_role="worker"))
+
+def test_production_accepts_worker_process_with_dedicated_worker_role():
+    config = Settings(**production_settings(process_role="worker", database_url="postgresql+psycopg://agency_os_worker:strong-password-that-is-long-enough-32chars@db.example.com/agency_os"))
+    assert config.process_role == "worker"
+
+def test_migration_process_does_not_require_runtime_provider_secrets():
+    config = Settings(app_env="production", process_role="migration", database_url="postgresql+psycopg://agency_os_migrator:strong-password-that-is-long-enough-32chars@db.example.com/agency_os")
+    assert config.process_role == "migration"
+
+
+@pytest.mark.parametrize("issuer", [
+    "http://auth.example.com/",
+    "https://localhost/",
+    "https://127.0.0.1/",
+    "https://169.254.169.254/",
+    "https://auth.example.com:8443/",
+    "https://user:pass@auth.example.com/",
+    "https://auth.example.com/?next=https://example.com",
+])
+def test_production_rejects_untrusted_oidc_issuer_urls(issuer):
+    with pytest.raises(ValidationError, match="OIDC_ISSUER"):
+        Settings(**production_settings(oidc_issuer=issuer))
+
+
+def test_production_rejects_short_previous_jwt_secret():
+    with pytest.raises(ValidationError, match="JWT_PREVIOUS_SECRET"):
+        Settings(**production_settings(jwt_previous_secret="short"))
+
+def test_production_rejects_duplicate_jwt_key_ids_during_rotation():
+    with pytest.raises(ValidationError, match="JWT_PREVIOUS_KEY_ID"):
+        Settings(**production_settings(jwt_previous_secret="p" * 64, jwt_previous_key_id="key-current"))

@@ -49,3 +49,42 @@ def test_every_registered_api_route_has_an_explicit_auth_boundary():
                 missing.append(f"{method} {route.path}")
 
     assert not missing, "Routes without an auth dependency or explicit public allowlist: " + ", ".join(sorted(missing))
+
+
+def test_organization_routes_include_an_explicit_membership_or_role_check():
+    import ast
+    import inspect
+
+    required_checks = {
+        "require_membership",
+        "require_role",
+        "require_founder_authority",
+    }
+    missing = []
+    for route in app.routes:
+        if not isinstance(route, APIRoute) or "{org_id}" not in route.path:
+            continue
+        tree = ast.parse(inspect.getsource(route.endpoint))
+        calls = {
+            node.func.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        }
+        if not calls.intersection(required_checks):
+            missing.append(f"{','.join(sorted(route.methods or []))} {route.path}")
+    assert not missing, "Organization routes without an explicit membership/role check: " + ", ".join(sorted(missing))
+
+
+def test_workspace_routes_reference_the_workspace_identifier():
+    import ast
+    import inspect
+
+    missing = []
+    for route in app.routes:
+        if not isinstance(route, APIRoute) or "{workspace_id}" not in route.path:
+            continue
+        tree = ast.parse(inspect.getsource(route.endpoint))
+        names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+        if "workspace_id" not in names:
+            missing.append(f"{','.join(sorted(route.methods or []))} {route.path}")
+    assert not missing, "Workspace routes that do not use their workspace identifier: " + ", ".join(sorted(missing))

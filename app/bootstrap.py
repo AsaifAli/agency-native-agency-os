@@ -1,5 +1,5 @@
 import argparse
-from app.db import SessionLocal
+from app.db import AdminSessionLocal
 from app.models import Organization, User, Membership, FounderAuthority, Workspace, Role
 
 def main():
@@ -7,7 +7,7 @@ def main():
     parser.add_argument("--email", required=True)
     parser.add_argument("--org-name", required=True)
     args = parser.parse_args()
-    db = SessionLocal()
+    db = AdminSessionLocal()
     try:
         email = args.email.lower()
         user = db.query(User).filter_by(email=email).first()

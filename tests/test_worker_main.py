@@ -19,7 +19,7 @@ def test_main_handles_shutdown_signal_and_disposes_engine(monkeypatch):
         signal_registration,
     )
     monkeypatch.setattr(worker_main, "run_worker", run_worker)
-    monkeypatch.setattr(worker_main.engine, "dispose", dispose)
+    monkeypatch.setattr(worker_main.worker_engine, "dispose", dispose)
     monkeypatch.setattr(
         worker_main.socket,
         "gethostname",
@@ -58,7 +58,7 @@ def test_main_disposes_engine_when_worker_fails(monkeypatch):
         Mock(side_effect=RuntimeError("simulated failure")),
     )
     dispose = Mock()
-    monkeypatch.setattr(worker_main.engine, "dispose", dispose)
+    monkeypatch.setattr(worker_main.worker_engine, "dispose", dispose)
 
     with pytest.raises(RuntimeError, match="simulated failure"):
         worker_main.main()

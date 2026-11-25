@@ -1,3 +1,5 @@
+from typing import Literal
+import ipaddress
 from pydantic import Field, model_validator
 from urllib.parse import urlparse
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -8,8 +10,12 @@ class Settings(BaseSettings):
 
     app_env: str = "development"
     database_url: str = "sqlite:///./agency_os.db"
+    process_role: Literal["api", "worker", "migration"] = "api"
     redis_url: str = "redis://localhost:6379/0"
     jwt_secret: str = "unsafe-development-secret-change-me"
+    jwt_key_id: str = "key-current"
+    jwt_previous_secret: str | None = None
+    jwt_previous_key_id: str = "key-previous"
     jwt_issuer: str = "agency-os"
     dev_auth_enabled: bool = True
     mock_runtime_enabled: bool = False
@@ -32,6 +38,7 @@ class Settings(BaseSettings):
     oidc_state_cookie_name: str = "agency_os_oidc_state"
     oidc_csrf_cookie_name: str = "agency_os_csrf"
     oidc_session_ttl_seconds: int = Field(default=1800, ge=300, le=43200)
+    browser_session_retention_days: int = Field(default=30, ge=1, le=3650)
 
     db_connect_timeout_seconds: int = Field(default=5, ge=1, le=60)
     db_pool_timeout_seconds: int = Field(default=5, ge=1, le=300)
@@ -80,7 +87,7 @@ class Settings(BaseSettings):
                 "OUTBOX_MAX_RETRY_SECONDS must be greater than or equal "
                 "to OUTBOX_BASE_RETRY_SECONDS"
             )
-        if self.app_env.lower() == "production":
+        if self.app_env.lower() == "production" and self.process_role != "migration":
             errors = []
             if self.dev_auth_enabled:
                 errors.append("DEV_AUTH_ENABLED must be false in production")
@@ -88,9 +95,20 @@ class Settings(BaseSettings):
                 errors.append("MOCK_RUNTIME_ENABLED must be false in production")
             if len(self.jwt_secret) < 64 or self.jwt_secret == "unsafe-development-secret-change-me":
                 errors.append("JWT_SECRET must be a secret-manager supplied value of at least 64 characters")
+            if not self.jwt_key_id or len(self.jwt_key_id) > 64 or not self.jwt_key_id.replace("-", "").replace("_", "").isalnum():
+                errors.append("JWT_KEY_ID must be a short alphanumeric key identifier")
+            if self.jwt_previous_secret:
+                if len(self.jwt_previous_secret) < 64:
+                    errors.append("JWT_PREVIOUS_SECRET must be at least 64 characters during key rotation")
+                if not self.jwt_previous_key_id or self.jwt_previous_key_id == self.jwt_key_id:
+                    errors.append("JWT_PREVIOUS_KEY_ID must be non-empty and differ from JWT_KEY_ID")
             if not self.database_url.startswith(("postgresql://", "postgresql+psycopg://")):
                 errors.append("DATABASE_URL must use PostgreSQL in production")
             db_password = urlparse(self.database_url).password
+            if self.process_role == "api" and urlparse(self.database_url).username == "agency_os_worker":
+                errors.append("API PROCESS_ROLE cannot use the BYPASSRLS worker database role")
+            if self.process_role == "worker" and urlparse(self.database_url).username == "agency_os_app":
+                errors.append("Worker PROCESS_ROLE must use the dedicated BYPASSRLS worker database role")
             if not db_password or len(db_password) < 32 or db_password.lower() in {"change-me", "password", "postgres", "local-only-change-me"}:
                 errors.append("DATABASE_URL must contain a strong, unique database password in production")
             if not self.redis_url.startswith("rediss://"):
@@ -100,6 +118,32 @@ class Settings(BaseSettings):
                 errors.append("CORS_ORIGINS must contain only explicit HTTPS origins in production")
             if not self.rate_limit_enabled:
                 errors.append("RATE_LIMIT_ENABLED must be true in production")
+            if self.oidc_issuer:
+                issuer = urlparse(self.oidc_issuer)
+                issuer_host = (issuer.hostname or "").lower().rstrip(".")
+                issuer_invalid = (
+                    issuer.scheme != "https" or not issuer_host
+                    or bool(issuer.username or issuer.password)
+                    or bool(issuer.query or issuer.fragment)
+                    or issuer_host in {"localhost", "localhost.localdomain"}
+                    or issuer_host.endswith((".localhost", ".local", ".internal", ".test"))
+                )
+                try:
+                    issuer_port = issuer.port
+                    issuer_ip = ipaddress.ip_address(issuer_host)
+                except ValueError:
+                    issuer_ip = None
+                    try:
+                        issuer_port = issuer.port
+                    except ValueError:
+                        issuer_invalid = True
+                        issuer_port = None
+                if issuer_ip is not None and not issuer_ip.is_global:
+                    issuer_invalid = True
+                if issuer_port not in (None, 443):
+                    issuer_invalid = True
+                if issuer_invalid:
+                    errors.append("OIDC_ISSUER must be a public HTTPS issuer without credentials, query, fragment or non-standard port")
             if not (self.oidc_issuer and self.oidc_client_id and self.oidc_client_secret and self.oidc_state_secret and self.oidc_redirect_uri and self.oidc_frontend_url and self.oidc_required_acr):
                 errors.append("OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, OIDC_STATE_SECRET, OIDC_REDIRECT_URI, OIDC_FRONTEND_URL and OIDC_REQUIRED_ACR are required in production")
             if len(self.oidc_state_secret) < 64:

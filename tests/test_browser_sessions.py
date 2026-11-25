@@ -17,6 +17,7 @@ from app.browser_sessions import (
     issue_browser_session,
     revoke_browser_session,
     rotate_browser_session,
+    prune_expired_browser_sessions,
 )
 
 
@@ -218,6 +219,9 @@ def test_refresh_endpoint_rotates_cookie_and_audits_replacement(browser_db):
         assert refreshed.status_code == 200
         new_token = client.cookies.get(settings.oidc_session_cookie_name, domain="testserver.local", path="/")
         assert new_token and new_token != old_token
+        csrf_set_cookie = next(value for key, value in refreshed.headers.multi_items() if key.lower() == "set-cookie" and value.startswith(f"{settings.oidc_csrf_cookie_name}="))
+        assert "csrf-refresh-value" in csrf_set_cookie
+        assert f"Max-Age={settings.oidc_session_ttl_seconds}" in csrf_set_cookie
         assert client.get("/v1/auth/me").status_code == 200
 
         client.cookies.set(settings.oidc_session_cookie_name, old_token, domain="testserver.local", path="/")
@@ -228,3 +232,30 @@ def test_refresh_endpoint_rotates_cookie_and_audits_replacement(browser_db):
         assert events[0].payload["replacement_session_id"]
     finally:
         app.dependency_overrides.pop(get_db, None)
+
+
+def test_browser_session_retention_prunes_old_rows_and_audits_deletion(browser_db):
+    db, user = browser_db
+    now = datetime.now(timezone.utc)
+    old = BrowserSession(user_id=user.id, token_hash="a" * 64, expires_at=now - timedelta(days=31))
+    recent = BrowserSession(user_id=user.id, token_hash="b" * 64, expires_at=now - timedelta(days=2))
+    active = BrowserSession(user_id=user.id, token_hash="c" * 64, expires_at=now + timedelta(days=2))
+    old_revoked = BrowserSession(user_id=user.id, token_hash="d" * 64,
+        expires_at=now + timedelta(days=10), revoked_at=now - timedelta(days=31))
+    db.add_all([old, recent, active, old_revoked]); db.commit()
+
+    assert prune_expired_browser_sessions(db, retention_days=30, limit=10) == 2
+    db.commit()
+    remaining = {row.id for row in db.query(BrowserSession).all()}
+    assert remaining == {recent.id, active.id}
+    events = db.query(AuditEvent).filter_by(event_type="auth.browser_session_pruned").all()
+    assert {event.resource_id for event in events} == {old.id, old_revoked.id}
+    assert all(event.payload["reason_code"] == "SESSION_RETENTION_ELAPSED" for event in events)
+
+
+def test_browser_session_retention_rejects_unbounded_or_invalid_limits(browser_db):
+    db, _ = browser_db
+    with pytest.raises(ValueError, match="retention_days"):
+        prune_expired_browser_sessions(db, retention_days=0)
+    with pytest.raises(ValueError, match="limit"):
+        prune_expired_browser_sessions(db, limit=0)
