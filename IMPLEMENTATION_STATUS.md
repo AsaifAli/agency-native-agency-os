@@ -126,3 +126,12 @@ Merged work includes PR #17 (contact timeline), PR #19 (leads/opportunities), PR
 
 - Added a unique optional retainer-period reference to invoice records. A closed period can now produce one idempotent recurring invoice draft for its contracted per-period fee; the draft links to the period and contract, reserves remaining contract commitment and includes an explicit note when usage overage exists. Overage is excluded from the invoice amount and requires separate approval. The existing invoice approval/issue-evidence lifecycle remains the only route toward issue; no invoice is sent.
 - Added Retainer Console invoice-draft creation and status visibility. The user must choose a due date; no schedule runner or autonomous invoice issuance is enabled.
+
+
+## Consolidated Revenue/Delivery integration — PR #29 merged (2026-11-25)
+- PR #29 merged the previously overlapping PR #25, #26 and #28 feature work into main commit `c14b8720f3288d65d2f9add2235a31defcb54096`.
+- Outbound email governance is available as draft, founder approval and internal queue state only. No provider dispatch or signed provider webhook is enabled.
+- Source-backed research and founder-reviewed outreach drafts are available at `/research-outreach`; governed outbound communication controls are at `/outreach`.
+- Proposal drafts combine immutable service-catalogue snapshots with one-time/retainer engagement terms. Retainer service periods and recurring invoice drafts are founder-governed; no automatic renewal, invoice sending or payment collection is enabled.
+- The feature migration graph has one merge head, `l2e8a0b6d549`. The fresh PostgreSQL migration and worker concurrency evidence, frontend checks and 209-pass backend suite were recorded against the reconciled local tree before remote publication; exact-commit CI remains unverified because GitHub could not allocate runners.
+- Follow-on hardening is focused on database-enforced organization/workspace relationship integrity, then the Data Protection Gateway and OS tool gateway. The OS remains a development foundation, not a production-ready or fully autonomous deployment.

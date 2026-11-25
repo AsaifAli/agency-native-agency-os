@@ -133,10 +133,12 @@ Percentages are weighted engineering estimates, not automated metrics. A partial
 - [ ] Use one deliberate CI validation cycle when the branch is ready; do not merge if required jobs fail.
 - [ ] If Actions quota is exhausted, use an approved local or alternate CI environment and preserve the exact logs/artifacts as evidence.
 
-## Current PR #28 release gate
-- [ ] Confirm migration graph has one head and PostgreSQL upgrade succeeds from main.
-- [ ] Run backend tests, including new research/outreach and retainer period tests.
-- [ ] Run frontend TypeScript check and production build.
+## Post-merge hardening gates
+- [x] Consolidated revenue feature migrations are merged under one Alembic head (`l2e8a0b6d549`); fresh PostgreSQL upgrade to that head was verified before publication.
+- [ ] Apply and verify the follow-on tenant-integrity migration (`m3f9c2a7e514`) after its PR is reviewed and merged.
+- [x] Reconciled local backend suite: 209 passed, 3 PostgreSQL-only skips; isolated PostgreSQL worker tests: 3 passed.
+- [ ] Run the new PostgreSQL tenant-integrity regression test against the follow-on migration.
+- [x] Reconciled local frontend lint, TypeScript check and Next.js production build passed before PR #29 publication.
 - [ ] Test retainer period closeout under PostgreSQL transaction locking.
 - [ ] Test organization/workspace isolation for every new endpoint.
 - [ ] Confirm no send/dispatch, payment, renewal or external call side effect exists.
@@ -145,3 +147,11 @@ Percentages are weighted engineering estimates, not automated metrics. A partial
 
 ## Definition of production-grade
 A feature is **production-ready** only when implementation, authorization, tenant isolation, persistence, audit, failure recovery, tests, observability, retention and operational documentation are all evidenced. A schema, UI, action taxonomy or mocked adapter alone is a foundation, not a complete capability.
+
+
+## 2026-11-25 post-merge status
+- PR #29 consolidated and merged the work from PRs #25, #26 and #28. Those three source PRs were closed as superseded; their commits and discussions remain available.
+- Main commit: `c14b8720f3288d65d2f9add2235a31defcb54096`.
+- The 209-pass SQLite suite, 3 PostgreSQL worker tests, PostgreSQL migration to `l2e8a0b6d549`, frontend lint/typecheck/build and zero-vulnerability npm audit were run against the reconciled local tree before remote publication. They are not fresh exact-commit CI evidence.
+- GitHub Actions runner allocation remains blocked by account billing. Development is continuing without repeated reruns; required production verification remains open.
+- Outbound messages remain internal queue records. No provider send adapter or signed provider webhook is enabled.
