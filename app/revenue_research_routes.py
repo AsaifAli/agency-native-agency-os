@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.auth import Principal, get_principal, require_founder_authority
+from app.auth import Principal, get_principal, require_founder_authority, require_workspace_access_from_context
 from app.audit import record_event
 from app.data_protection import DataProtectionBlocked, sanitize_text
 from app.db import get_db
