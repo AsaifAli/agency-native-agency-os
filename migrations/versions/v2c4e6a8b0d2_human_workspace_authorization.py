@@ -290,8 +290,8 @@ def upgrade() -> None:
             )
         )
     """)
+    op.execute("REVOKE ALL ON TABLE public.workspace_grants FROM agency_os_app")
     op.execute("GRANT SELECT ON public.workspace_grants TO agency_os_app")
-    op.execute("REVOKE INSERT, UPDATE, DELETE ON public.workspace_grants FROM agency_os_app")
 
     # Workspace reads are exact-grant scoped. Creation remains membership/role
     # gated by the API and creator-grant insertion is atomic with that request.
