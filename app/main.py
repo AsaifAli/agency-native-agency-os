@@ -356,7 +356,11 @@ def list_workspaces(
 
     return (
         db.query(Workspace)
-        .join(WorkspaceGrant, WorkspaceGrant.workspace_id == Workspace.id)
+        .join(
+            WorkspaceGrant,
+            (WorkspaceGrant.org_id == Workspace.org_id)
+            & (WorkspaceGrant.workspace_id == Workspace.id),
+        )
         .filter(
             Workspace.org_id == org_id,
             WorkspaceGrant.org_id == org_id,
