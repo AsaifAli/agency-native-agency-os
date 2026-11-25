@@ -80,7 +80,7 @@ def invoke_registered_tool(
     try:
         safe_input, input_report = protect_untrusted_payload(payload)
     except DataProtectionBlocked as exc:
-        _deny(db, org_id=org_id, workspace_id=workspace_id, identity_id=identity_id, tool_key=spec.key, reason_code="INPUT_DATA_PROTECTION_BLOCKED", status_code=422, message="Tool invocation was denied by OS policy.")
+        _deny(db, org_id=org_id, workspace_id=workspace_id, identity_id=identity_id, tool_key=spec.key, reason_code="INPUT_DATA_PROTECTION_BLOCKED", status_code=422, message="Tool input blocked by data-protection policy.")
     try:
         validated_input = validate_tool_input(spec, safe_input)
     except ValidationError as exc:
@@ -123,9 +123,9 @@ def invoke_registered_tool(
             identity=identity, idempotency_key=idempotency_key,
         )
         validated_result = validate_tool_output(spec, raw_result)
-        safe_result, output_report = protect_untrusted_payload(validated_result)
+        safe_result, output_report = protect_untrusted_payload(validated_result, trusted_internal_id_keys={"id", "draft_id", "lead_id", "research_record_id"})
     except DataProtectionBlocked as exc:
-        _deny(db, org_id=org_id, workspace_id=workspace_id, identity_id=identity_id, tool_key=spec.key, reason_code="OUTPUT_DATA_PROTECTION_BLOCKED", status_code=502, message="Tool invocation was denied by OS policy.", redaction_counts=input_report.redaction_counts)
+        _deny(db, org_id=org_id, workspace_id=workspace_id, identity_id=identity_id, tool_key=spec.key, reason_code="OUTPUT_DATA_PROTECTION_BLOCKED", status_code=502, message="Tool output blocked by data-protection policy.", redaction_counts=input_report.redaction_counts)
     except ValidationError:
         _deny(db, org_id=org_id, workspace_id=workspace_id, identity_id=identity_id, tool_key=spec.key, reason_code="OUTPUT_SCHEMA_INVALID", status_code=502, message="Tool invocation was denied by OS policy.", redaction_counts=input_report.redaction_counts)
     except Exception as exc:
