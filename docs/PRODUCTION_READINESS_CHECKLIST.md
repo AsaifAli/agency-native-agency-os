@@ -461,7 +461,7 @@ Additional review controls: identity/session locks follow revocation lock order;
 - [x] Added route authorization inventory guard, central Python log redaction, JWT current/previous key IDs, frontend session refresh, bounded browser-session retention and OIDC issuer URL validation.
 - [ ] Complete nested-object BOLA review, network-level egress/DNS controls, live MFA/ACR verification, secret-history scan and backup/restore gates.
 
-**Evidence boundary:** GitHub source review and PR metadata were available. The cloud development workspace could not establish TLS to GitHub, so no source code was modified and no tests were rerun during this continuation. Existing test counts above are historical branch evidence, not fresh verification.
+**Evidence boundary at the 2026-11-25 review checkpoint:** GitHub source review and PR metadata were available, but the then-current cloud development workspace could not establish TLS to GitHub. That limitation was resolved in the 2026-11-26 Upstash Box session; see the subsequent validation/publish record below.
 
 
 ## Repository history reconciliation — 2026-11-25
@@ -528,3 +528,19 @@ Additional review controls: identity/session locks follow revocation lock order;
 - [ ] Verify migration on PostgreSQL 16, role attributes/ownership, API startup and worker startup, pool reuse, populated-schema upgrade/downgrade and concurrent session refresh. Replace worker `BYPASSRLS` with narrowly scoped queue functions before production.
 
 **Release decision: NO-GO.** This candidate materially closes code-level gaps but is not production approved. External Authentik MFA, PostgreSQL 16 verification, egress restrictions, nested-object authorization, secret-history review and backup/restore remain outstanding.
+
+
+## 2026-11-26 — Candidate validation and publication
+
+- [x] Continued the existing `security/predeploy-20-point-audit` branch and published the candidate commit to PR #47 via the connected GitHub integration: `91be00406c0be9a7b4a83cbab665df399fa7b3f6`. PR #47 remains open and draft; no merge was performed.
+- [x] Backend suite on the candidate: **364 passed, 5 skipped**. All skips require live PostgreSQL test URLs (tenant integrity, RLS, and worker concurrency/recovery).
+- [x] Python `compileall`, `git diff --check`, Compose YAML parsing and executable Postgres role-bootstrap shell syntax passed.
+- [x] Alembic reports one head, `t0a1b2c3d4e5`; isolated PostgreSQL SQL rendering generated all 51 RLS policies. This is SQL-generation evidence, not a live migration.
+- [x] Frontend ESLint completed with 0 errors and 7 existing hook-dependency warnings; Next.js production build passed and generated 31 static routes.
+- [x] Added regression coverage for the development-token endpoint so the persistent browser-session enforcement does not break the explicit non-production token flow.
+- [x] Fixed CSRF cookie lifetime renewal during browser-session refresh and added an endpoint assertion.
+- [ ] PostgreSQL 16 application/integration, populated database upgrade/downgrade, role ownership, pool reuse, worker cross-tenant isolation and concurrent refresh remain unverified.
+- [ ] No GitHub Actions workflows were triggered due the account's constrained Actions allowance.
+
+**Release decision: NO-GO.** The PR is a tested code candidate, not production approval. Restore the repository to private visibility now that the temporary public clone requirement is over; PR #47 remains available to authorized collaborators.
+
