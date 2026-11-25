@@ -397,10 +397,17 @@ def create_workspace(
              "user_id": p.user.id, "actor_id": p.user.id},
         )
     else:
-        db.add(WorkspaceGrant(
+        grant = WorkspaceGrant(
             org_id=org_id, workspace_id=workspace.id, user_id=p.user.id,
             granted_by=p.user.id,
-        ))
+        )
+        db.add(grant)
+        db.flush()
+        record_event(
+            db, org_id, p.user.id, "workspace.access_granted",
+            "workspace_grant", grant.id, workspace.id,
+            {"user_id": p.user.id},
+        )
 
     record_event(
         db,
