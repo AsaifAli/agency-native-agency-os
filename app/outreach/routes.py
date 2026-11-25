@@ -422,6 +422,7 @@ def reject_message(
     if item is None:
         raise HTTPException(404, "Outbound message not found")
     require_founder_authority(db, org_id, p.user.id)
+    _scope(db, org_id, item.workspace_id)
     if item.status != "pending_approval" or item.approval_id != body.approval_id:
         raise HTTPException(409, "Outbound message is not awaiting this approval")
     approval = db.query(Approval).filter_by(
