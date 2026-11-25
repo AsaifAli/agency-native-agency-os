@@ -46,7 +46,7 @@ def test_postgres_role_verification_fails_closed_for_non_postgres_engine():
 def test_required_rls_inventory_covers_every_tenant_table_and_execution_attempts():
     from app.db import REQUIRED_RLS_TABLES
 
-    assert len(REQUIRED_RLS_TABLES) == 52
+    assert len(REQUIRED_RLS_TABLES) == 53
     assert {
         "organizations",
         "workspaces",

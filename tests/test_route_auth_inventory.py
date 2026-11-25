@@ -108,6 +108,7 @@ def test_workspace_scoped_routes_use_the_centralized_grant_guard():
         "require_workspace_access_from_context",
     }
     grant_admin_routes = {"create_workspace_grant", "revoke_workspace_grant"}
+    workspace_collection_routes = {"list_workspaces"}
     missing = []
     for route in app.routes:
         if not isinstance(route, APIRoute):
@@ -129,6 +130,12 @@ def test_workspace_scoped_routes_use_the_centralized_grant_guard():
             for node in ast.walk(tree)
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
         }
+        if route.endpoint.__name__ in workspace_collection_routes:
+            # Collection endpoints cannot accept one workspace_id; they must
+            # filter the result set by the caller's active workspace grants.
+            assert "WorkspaceGrant" in names
+            assert "user_id" in attributes
+            continue
         if route.endpoint.__name__ in grant_admin_routes:
             assert "require_founder_authority" in calls
             continue
