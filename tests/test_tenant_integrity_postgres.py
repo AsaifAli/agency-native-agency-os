@@ -84,7 +84,6 @@ def test_postgres_outreach_relations_enforce_org_workspace_integrity():
             recipient=contact_b.email, subject="Tenant B", body="Synthetic test message",
             created_by=user.id,
         )
-        db.add(message_b)
         lead_b = Lead(
             org_id=org_b.id, workspace_id=workspace_b.id,
             client_id=client_b.id, contact_id=contact_b.id,
