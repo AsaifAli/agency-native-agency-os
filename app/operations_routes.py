@@ -1598,9 +1598,13 @@ def approve_scope_change(
 @router.post("/scope-changes/{change_id}/reject", response_model=ScopeChangeOut)
 def reject_scope_change(
     org_id: str, change_id: str, body: ScopeChangeReject,
+    workspace_id: str = Query(min_length=1),
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
-    item = db.query(ScopeChangeRequest).filter_by(id=change_id, org_id=org_id).with_for_update().first()
+    _workspace(db, org_id, workspace_id)
+    item = db.query(ScopeChangeRequest).filter_by(
+        id=change_id, org_id=org_id, workspace_id=workspace_id
+    ).with_for_update().first()
     if item is None:
         raise HTTPException(404, "Scope change not found")
     require_founder_authority(db, org_id, p.user.id)
