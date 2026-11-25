@@ -35,6 +35,7 @@ export default function ResearchDraftsPage() {
   const [status, setStatus] = useState<DraftStatus>("pending_review");
   const [drafts, setDrafts] = useState<ResearchDraft[]>([]);
   const [draftsKey, setDraftsKey] = useState("");
+  const [completedErrorKey, setCompletedErrorKey] = useState("");
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [pendingActionIds, setPendingActionIds] = useState<Set<string>>(() => new Set());
@@ -43,7 +44,7 @@ export default function ResearchDraftsPage() {
   const viewKeyRef = useRef(viewKey);
   viewKeyRef.current = viewKey;
   const visibleDrafts = draftsKey === viewKey ? drafts : [];
-  const viewLoading = loading || (!!workspaceId && draftsKey !== viewKey);
+  const viewLoading = loading || (!!workspaceId && draftsKey !== viewKey && completedErrorKey !== viewKey);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -69,6 +70,7 @@ export default function ResearchDraftsPage() {
     const generation = ++requestGeneration.current;
     setLoading(true);
     setError("");
+    setCompletedErrorKey("");
     try {
       const result = await api<{ items: ResearchDraft[] }>(
         `/v1/orgs/${orgId()}/workspaces/${encodeURIComponent(workspaceId)}/lead-research-drafts?status=${status}&limit=100`,
@@ -76,10 +78,12 @@ export default function ResearchDraftsPage() {
       if (requestGeneration.current === generation && viewKeyRef.current === requestKey) {
         setDrafts(result.items);
         setDraftsKey(requestKey);
+        setCompletedErrorKey("");
       }
     } catch (err) {
       if (requestGeneration.current === generation && viewKeyRef.current === requestKey) {
         setError((err as Error).message);
+        setCompletedErrorKey(requestKey);
       }
     } finally {
       if (requestGeneration.current === generation && viewKeyRef.current === requestKey) {
@@ -97,12 +101,16 @@ export default function ResearchDraftsPage() {
 
   async function reviewDraft(draft: ResearchDraft, decision: "approve" | "reject") {
     if (pendingActionIds.has(draft.id)) return;
+    const actionViewKey = viewKeyRef.current;
+    const actionWorkspaceId = workspaceId;
     setPendingActionIds((current) => new Set(current).add(draft.id));
-    setError("");
-    setNotice("");
+    if (viewKeyRef.current === actionViewKey) {
+      setError("");
+      setNotice("");
+    }
     try {
       await api(
-        `/v1/orgs/${orgId()}/workspaces/${encodeURIComponent(workspaceId)}/lead-research-drafts/${draft.id}/review`,
+        `/v1/orgs/${orgId()}/workspaces/${encodeURIComponent(actionWorkspaceId)}/lead-research-drafts/${draft.id}/review`,
         {
           method: "POST",
           body: JSON.stringify({
@@ -111,10 +119,12 @@ export default function ResearchDraftsPage() {
           }),
         },
       );
-      setNotice(decision === "approve" ? "Research approved. CRM promotion is still a separate action." : "Research rejected.");
-      await loadDrafts();
+      if (viewKeyRef.current === actionViewKey) {
+        setNotice(decision === "approve" ? "Research approved. CRM promotion is still a separate action." : "Research rejected.");
+        await loadDrafts();
+      }
     } catch (err) {
-      setError((err as Error).message);
+      if (viewKeyRef.current === actionViewKey) setError((err as Error).message);
     } finally {
       setPendingActionIds((current) => {
         const next = new Set(current);
@@ -126,18 +136,24 @@ export default function ResearchDraftsPage() {
 
   async function promoteDraft(draft: ResearchDraft) {
     if (pendingActionIds.has(draft.id)) return;
+    const actionViewKey = viewKeyRef.current;
+    const actionWorkspaceId = workspaceId;
     setPendingActionIds((current) => new Set(current).add(draft.id));
-    setError("");
-    setNotice("");
+    if (viewKeyRef.current === actionViewKey) {
+      setError("");
+      setNotice("");
+    }
     try {
       const result = await api<{ lead_id: string; replayed: boolean }>(
-        `/v1/orgs/${orgId()}/workspaces/${encodeURIComponent(workspaceId)}/lead-research-drafts/${draft.id}/promote`,
+        `/v1/orgs/${orgId()}/workspaces/${encodeURIComponent(actionWorkspaceId)}/lead-research-drafts/${draft.id}/promote`,
         { method: "POST" },
       );
-      setNotice(`Promoted to CRM lead ${result.lead_id}.`);
-      await loadDrafts();
+      if (viewKeyRef.current === actionViewKey) {
+        setNotice(`Promoted to CRM lead ${result.lead_id}.`);
+        await loadDrafts();
+      }
     } catch (err) {
-      setError((err as Error).message);
+      if (viewKeyRef.current === actionViewKey) setError((err as Error).message);
     } finally {
       setPendingActionIds((current) => {
         const next = new Set(current);

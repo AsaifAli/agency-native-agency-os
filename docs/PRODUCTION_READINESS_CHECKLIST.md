@@ -326,11 +326,11 @@ A feature is **production-ready** only when implementation, authorization, tenan
 **Current verified boundary:** The main branch has a REST Tool Gateway, not an MCP server. The Managed Agents adapter intentionally rejects provider MCP/tools. This continuation adds the design only; no provider tools have been enabled and no runtime code or production configuration has changed.
 
 
-## Founder research review UI — 2026-11-25 (PR #37 candidate)
+## Founder research review UI — 2026-11-25 (PR #39)
 
-- [x] Added `/research-drafts` to the Founder Console and sidebar navigation.
+- [x] Added `/research-drafts` to the Founder Console and sidebar navigation in PR #39.
 - [x] Added workspace/status filtering, evidence and source-reference display, fit/confidence scores, review notes, approve/reject actions and explicit CRM promotion for approved drafts.
 - [x] UI explains that source URLs are agent-supplied and unverified, and that no contact or outreach action occurs.
 - [x] TSX syntax parsing passed for the new page and updated sidebar.
 - [ ] Full Next.js lint, typecheck and production build remain unverified. The isolated environment has no frontend dependencies; `npm install` timed out, so no build success is claimed.
-- [ ] Merge PR #37 only after a full frontend dependency install, lint, TypeScript check and Next build pass.
+- [ ] Merge PR #39 only after a full frontend dependency install, lint, TypeScript check and Next build pass.

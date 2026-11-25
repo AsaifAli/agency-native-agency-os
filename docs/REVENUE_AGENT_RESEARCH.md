@@ -45,7 +45,7 @@ All three routes require Founder Authority in the target organization. Promotion
 
 ## Remaining work
 
-- [x] Founder review and promotion UI added at `/research-drafts` in PR #37; frontend build verification remains pending.
+- [x] Founder review and promotion UI added at `/research-drafts` in PR #39; frontend build verification remains pending.
 - Add approved public-source research connectors/agent workflows; this tool itself does not browse or verify sources.
 - Add broader company deduplication across different source references.
 - Add client-specific data policy and runtime eligibility before any commercial/client data is admitted.
