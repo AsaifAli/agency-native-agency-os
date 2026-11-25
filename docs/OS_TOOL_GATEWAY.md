@@ -23,8 +23,9 @@ The OS Tool Gateway is the only intended path for machine identities to invoke A
 | Key | Version | Risk | Behavior |
 |---|---|---|---|
 | `system.health.read` | `1.0.0` | Read-only | Executes `SELECT 1` and returns API/database health; does not access client records |
+| `revenue.lead.research.capture` | `1.0.0` | Write draft | Saves public-source company research for founder review; does not create a CRM lead/contact or send outreach |
 
-This initial tool is deliberately narrow. It proves the controlled invocation path without exposing business records or enabling external side effects.
+The health tool proves the controlled invocation path without exposing business records. The Revenue research tool accepts only public-source evidence, writes a pending-review draft, and requires an explicit Founder Authority review followed by a separate promotion action before a CRM lead is created. It rejects contact fields and never sends outreach. Source URLs are stored as agent-supplied references; the OS does not independently fetch or verify them in this tool.
 
 ## API
 
@@ -43,7 +44,7 @@ Example request body:
 ## Explicit limitations
 
 - No arbitrary shell, SQL, filesystem, browser, URL-fetch, MCP or provider tool execution is exposed.
-- No Revenue/Delivery business tools are registered yet.
+- Only the limited public research-draft tool is registered for Revenue. No other Revenue/Delivery business tools are enabled yet.
 - No external provider adapters or side-effecting tools are enabled.
 - Tools marked as requiring approval are rejected until a transactionally consumed approval adapter exists.
 - Per-tool budget reservation, concurrency quotas, execution leases, asynchronous external invocation, cancellation/reconciliation and provider webhook handling remain follow-on work.
@@ -52,3 +53,6 @@ Example request body:
 ## Adding a business tool safely
 
 Every future tool must have a typed input and output schema, a stable version, explicit data-class eligibility, risk classification, approval requirement, bounded payload/time/cost, a least-privilege adapter, DPG on both sides, scoped idempotency, durable result/error state, audit events and tests for cross-workspace access and denial paths. Side-effecting provider calls must be executed asynchronously through OS-owned execution/outbox records, never inside the request transaction.
+
+
+See [REVENUE_AGENT_RESEARCH.md](REVENUE_AGENT_RESEARCH.md) for the draft, review and CRM promotion workflow.

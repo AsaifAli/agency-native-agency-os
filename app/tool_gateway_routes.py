@@ -113,7 +113,7 @@ def invoke_machine_tool(
         }
 
     try:
-        raw_result = execute_tool(db, spec, validated_input)
+        raw_result = execute_tool(db, spec, validated_input, identity=identity, idempotency_key=idempotency_key)
         validated_result = validate_tool_output(spec, raw_result)
         safe_result, output_report = protect_untrusted_payload(validated_result)
     except DataProtectionBlocked as exc:
@@ -150,6 +150,7 @@ def invoke_machine_tool(
             "data_class": session.data_class,
             "input_redaction_counts": input_report.redaction_counts,
             "output_redaction_counts": output_report.redaction_counts,
+            "result_resource_id": safe_result.get("draft_id"),
         },
     )
     db.commit()

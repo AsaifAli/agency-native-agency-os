@@ -1,8 +1,9 @@
 # Agency OS Production Readiness Checklist
 
 **Last reviewed:** 2026-11-25  
-**Tracking branch:** `main`  
+**Tracking branch:** `feature/revenue-research-tool`  
 **Latest merged milestone:** [PR #35](https://github.com/AsaifAli/agency-native-agency-os/pull/35)  
+**Current integration PR:** [#36](https://github.com/AsaifAli/agency-native-agency-os/pull/36)  
 **Status:** Active development candidate — not a certification or release approval.
 
 ## Progress snapshot
@@ -270,3 +271,22 @@ A feature is **production-ready** only when implementation, authorization, tenan
 - [ ] Only `system.health.read` is executable in the Tool Registry. Revenue/Delivery business tools, approvals, budgets, sandboxed provider adapters and async external side effects remain unimplemented.
 - [ ] Session retention/deletion, artifact cleanup, backup/restore and operational recovery remain outstanding.
 - [ ] No production deployment or external provider configuration was performed by these merges.
+
+
+## Revenue agent research capture — 2026-11-25 (PR #36 candidate)
+
+- [x] Added a public-data-only `revenue.lead.research.capture` tool with typed schema, source references, fit/confidence scores, buying signals and risks.
+- [x] Rejects arbitrary extra/contact fields, duplicate source references, non-HTTPS URLs, embedded credentials, local/private hosts, private/reserved IPs and invalid ports. The tool stores supplied source references; it does not fetch or verify them.
+- [x] Applies DPG to the decoded input before validation and persistence; PII patterns are redacted and secret-like values are blocked.
+- [x] Persists `LeadResearchDraft` records with workspace and machine-identity composite scope, idempotency key and pending-review status. Agent capture does not create CRM contacts or leads.
+- [x] Added Founder Authority-only list, approve/reject and explicit promote routes. Rejected drafts cannot be promoted; only approved drafts can be promoted; repeat promotion returns the existing lead.
+- [x] Promotion creates the CRM `Lead` and `LeadResearchRecord` in one transaction, attributes the CRM write to the approving founder and audits the transition.
+- [x] Added migration `p6d8e2a4f913` with scoped foreign keys, idempotency uniqueness and score/status checks.
+- [x] Added tests for research capture, source validation, DPG redaction, contact-field rejection, founder-only review, reject gate and idempotent promotion.
+- [x] Independent focused validation in the isolated candidate: **196 tests passed** across 15 modules (machine/revenue research 25, worker runner 7, worker service 55, API 5, workforce 20, approvals 5, action policy 11, execution 12, outreach 3, operations 28, outbox 7, Revenue/Delivery 6, telephony 5, website intake 4, evaluation 1).
+- [x] Python compile check passed; Alembic reports one head `p6d8e2a4f913`; SQLite upgrade/downgrade/re-upgrade rehearsal through all three new migrations passed.
+- [ ] PostgreSQL 16 verification and full backend suite on exact PR #36 head remain pending. A previous full-suite attempt in the isolated candidate timed out around 56%; no full-suite pass is claimed.
+- [ ] Founder UI for reviewing/promoting drafts, actual public-source discovery connectors, cross-source company deduplication and additional Revenue/Delivery tools remain outstanding.
+- [ ] Commercial/client data grants, outbound communication, pricing, contracts, payments and other side-effecting tools remain blocked pending client policy, approvals, budgets, consent/suppression and asynchronous recovery controls.
+
+**Revenue capability boundary:** this is the first operational agent write tool, but it captures public research as a review draft. It does not itself browse the web, verify source truth, add contacts, send outreach or autonomously promote CRM records.
