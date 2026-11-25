@@ -88,3 +88,47 @@ def test_workspace_routes_reference_the_workspace_identifier():
         if "workspace_id" not in names:
             missing.append(f"{','.join(sorted(route.methods or []))} {route.path}")
     assert not missing, "Workspace routes that do not use their workspace identifier: " + ", ".join(sorted(missing))
+
+
+def test_workspace_scoped_routes_use_the_centralized_grant_guard():
+    import ast
+    import inspect
+
+    guard_calls = {
+        "workspace_in_org",
+        "_workspace",
+        "_scope",
+        "_write",
+        "require_workspace_access",
+        "require_workspace_access_from_context",
+    }
+    grant_admin_routes = {"create_workspace_grant", "revoke_workspace_grant"}
+    missing = []
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        source = inspect.getsource(route.endpoint)
+        tree = ast.parse(source)
+        names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+        args = {
+            arg.arg
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            for arg in node.args.args
+        }
+        if "workspace_id" not in names and "workspace_id" not in args:
+            continue
+        calls = {
+            node.func.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        }
+        if route.endpoint.__name__ in grant_admin_routes:
+            assert "require_founder_authority" in calls
+            continue
+        if not calls.intersection(guard_calls):
+            missing.append(f"{','.join(sorted(route.methods or []))} {route.path}")
+    assert not missing, (
+        "Workspace-scoped routes missing the centralized grant guard: "
+        + ", ".join(sorted(missing))
+    )
