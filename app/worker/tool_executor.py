@@ -6,9 +6,11 @@ import re
 from datetime import datetime, timezone
 from typing import Callable
 
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.audit import record_event
+from app.integrations.runtime import RuntimeToolRejected
 from app.machine_identity import MachinePrincipal, create_agent_session
 from app.models import Execution, ExecutionAttempt, ExecutionAttemptStatus, ExecutionStatus
 from app.security_models import AgentSession, MachineIdentity
@@ -16,7 +18,7 @@ from app.tool_gateway import invoke_registered_tool
 from app.tool_registry import get_tool_by_provider_name
 
 
-class ToolExecutionRejected(Exception):
+class ToolExecutionRejected(RuntimeToolRejected):
     """A custom tool call was rejected by OS identity or policy controls."""
 
 
@@ -88,19 +90,20 @@ def build_machine_tool_executor(
             ):
                 raise ToolExecutionRejected("EXECUTION_ATTEMPT_NOT_ACTIVE")
 
-            session = None
+            # Read the session's identity reference without locking, then lock identity
+            # before session. This matches revoke/authz lock order and avoids deadlocks.
+            session_identity_id = None
             if execution.machine_session_id:
-                session = (
-                    db.query(AgentSession)
+                session_identity_id = (
+                    db.query(AgentSession.machine_identity_id)
                     .filter_by(
                         id=execution.machine_session_id,
                         org_id=request.org_id,
                         workspace_id=request.workspace_id,
                     )
-                    .with_for_update()
-                    .first()
+                    .scalar()
                 )
-                if session is None:
+                if session_identity_id is None:
                     raise ToolExecutionRejected("EXECUTION_MACHINE_SESSION_INVALID")
 
             identity_query = db.query(MachineIdentity).filter_by(
@@ -110,8 +113,8 @@ def build_machine_tool_executor(
                 subject_id=request.agent_id,
                 revoked_at=None,
             )
-            if session is not None:
-                identity_query = identity_query.filter(MachineIdentity.id == session.machine_identity_id)
+            if session_identity_id is not None:
+                identity_query = identity_query.filter(MachineIdentity.id == session_identity_id)
             else:
                 identity_query = identity_query.order_by(
                     MachineIdentity.created_at.desc(), MachineIdentity.id.desc()
@@ -119,6 +122,22 @@ def build_machine_tool_executor(
             identity = identity_query.with_for_update().first()
             if identity is None or _as_utc(identity.expires_at) <= now:
                 raise ToolExecutionRejected("MACHINE_IDENTITY_NOT_ACTIVE")
+
+            session = None
+            if execution.machine_session_id:
+                session = (
+                    db.query(AgentSession)
+                    .filter_by(
+                        id=execution.machine_session_id,
+                        org_id=request.org_id,
+                        workspace_id=request.workspace_id,
+                        machine_identity_id=identity.id,
+                    )
+                    .with_for_update()
+                    .first()
+                )
+                if session is None:
+                    raise ToolExecutionRejected("EXECUTION_MACHINE_SESSION_INVALID")
 
             principal = MachinePrincipal(identity=identity)
             if session is not None:
@@ -171,14 +190,17 @@ def build_machine_tool_executor(
 
             # invoke_registered_tool owns the commit. Session binding, tool result,
             # invocation record and success audit therefore commit atomically.
-            result = invoke_registered_tool(
-                db,
-                principal,
-                session_id=session.id,
-                tool_key=spec.key,
-                payload=payload,
-                idempotency_key=idempotency_key,
-            )
+            try:
+                result = invoke_registered_tool(
+                    db,
+                    principal,
+                    session_id=session.id,
+                    tool_key=spec.key,
+                    payload=payload,
+                    idempotency_key=idempotency_key,
+                )
+            except HTTPException as exc:
+                raise ToolExecutionRejected("OS_TOOL_CALL_REJECTED") from exc
             return result["result"]
 
     return execute
