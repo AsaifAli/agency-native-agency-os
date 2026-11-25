@@ -179,13 +179,16 @@ def build_machine_tool_executor(
                     session = None
 
             if session is None:
-                session = create_agent_session(
-                    db,
-                    principal,
-                    purpose=f"Agent execution: {request.task_title or request.task_id}"[:240],
-                    data_class=request.data_class.value,
-                    ttl_seconds=ttl_seconds,
-                )
+                try:
+                    session = create_agent_session(
+                        db,
+                        principal,
+                        purpose=f"Agent execution: {request.task_title or request.task_id}"[:240],
+                        data_class=request.data_class.value,
+                        ttl_seconds=ttl_seconds,
+                    )
+                except HTTPException as exc:
+                    raise ToolExecutionRejected("MACHINE_SESSION_CREATION_DENIED") from exc
                 execution.machine_session_id = session.id
 
             # invoke_registered_tool owns the commit. Session binding, tool result,
