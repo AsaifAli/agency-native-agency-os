@@ -61,8 +61,8 @@ Percentages are weighted engineering estimates, not automated metrics. A partial
 - [x] Clients, contacts, contact activities, leads and opportunities.
 - [x] Suppression stage and reason.
 - [x] Service catalogue and proposal/contract approval foundations.
-- [x] One-time and retainer terms in proposals/contracts (PR #28, unmerged).
-- [x] Source-backed lead research records and founder-reviewed outreach drafts (PR #28, unmerged).
+- [x] One-time and retainer terms in proposals/contracts (merged via PR #29).
+- [x] Source-backed lead research records and founder-reviewed outreach drafts (merged via PR #29).
 - [ ] Prospect discovery and enrichment adapters with source provenance, confidence and deduplication.
 - [ ] Human-reviewed company/contact merge with audit and relationship preservation.
 - [ ] Approved sender identities, consent/provenance registry, channel-specific permissions and suppression list.
@@ -73,10 +73,10 @@ Percentages are weighted engineering estimates, not automated metrics. A partial
 - [ ] Discovery briefs, objection tracking, forecast and proposal revision/version history.
 
 ### 4. One-time and retainer delivery
-- [x] Contract snapshots distinguish fixed-scope one-time work from recurring retainer terms (PR #28, unmerged).
-- [x] Founder-governed retainer service periods, included hours, rollover calculation and usage snapshots (PR #28, unmerged).
-- [x] Idempotent recurring invoice draft generation linked uniquely to a closed retainer period; founder approval is still required before issue (PR #28, unmerged).
-- [x] Billable time entry requires an open period for active retainer projects; closed-period backdating is blocked at the API layer (PR #28, unmerged).
+- [x] Contract snapshots distinguish fixed-scope one-time work from recurring retainer terms (merged via PR #29).
+- [x] Founder-governed retainer service periods, included hours, rollover calculation and usage snapshots (merged via PR #29).
+- [x] Idempotent recurring invoice draft generation linked uniquely to a closed retainer period; founder approval is still required before issue (merged via PR #29).
+- [x] Billable time entry requires an open period for active retainer projects; closed-period backdating is blocked at the API layer (merged via PR #29).
 - [ ] Add concurrency and PostgreSQL locking tests for period close versus time entry creation.
 - [ ] Add adjustment/correction workflow for erroneous time entries without mutating closed snapshots.
 - [ ] Add founder approval for overage billability, rate and scope before any additional charge.
@@ -134,15 +134,12 @@ Percentages are weighted engineering estimates, not automated metrics. A partial
 - [ ] Use one deliberate CI validation cycle when the branch is ready; do not merge if required jobs fail.
 - [ ] If Actions quota is exhausted, use an approved local or alternate CI environment and preserve the exact logs/artifacts as evidence.
 
-## Historical PR #28 release gate (superseded by merged PR #29)
-- [ ] Confirm migration graph has one head and PostgreSQL upgrade succeeds from main.
-- [ ] Run backend tests, including new research/outreach and retainer period tests.
-- [ ] Run frontend TypeScript check and production build.
-- [ ] Test retainer period closeout under PostgreSQL transaction locking.
-- [ ] Test organization/workspace isolation for every new endpoint.
-- [ ] Confirm no send/dispatch, payment, renewal or external call side effect exists.
-- [ ] Obtain successful required CI checks and code review.
-- [ ] Merge only after all gates pass.
+## Historical PR #28 / integration PR #29 — merged
+- [x] Confirmed PR #28 was closed unmerged and its overlapping Revenue/Delivery work was reconciled through PR #29.
+- [x] Confirmed PR #29 merged to main with the unified Alembic merge revision l2e8a0b6d549.
+- [x] Confirmed the merged scope includes consent-governed outbound email preparation, source-backed research drafts, proposal catalogue snapshots, one-time/retainer terms, governed retainer periods and idempotent recurring invoice drafts.
+- [x] Preserved the safety boundary: outbound email dispatch, contract signing, invoice sending, payment collection and automatic renewal remain disabled.
+- [ ] Remaining PostgreSQL 16 tenant isolation/locking and external-provider dispatch gates are tracked in the active sections above; PR #29's validation is historical local evidence, not a fresh run against the exact remote commit.
 
 ## Definition of production-grade
 A feature is **production-ready** only when implementation, authorization, tenant isolation, persistence, audit, failure recovery, tests, observability, retention and operational documentation are all evidenced. A schema, UI, action taxonomy or mocked adapter alone is a foundation, not a complete capability.
@@ -463,3 +460,12 @@ Additional review controls: identity/session locks follow revocation lock order;
 - [ ] Complete remaining route authorization, SSRF egress, log redaction, secret-history and backup/restore gates.
 
 **Evidence boundary:** GitHub source review and PR metadata were available. The cloud development workspace could not establish TLS to GitHub, so no source code was modified and no tests were rerun during this continuation. Existing test counts above are historical branch evidence, not fresh verification.
+
+
+## Repository history reconciliation — 2026-11-25
+
+- [x] Verified PR #28 is closed without merge; do not treat it as the integration commit.
+- [x] Verified PR #29 is merged and reconciles the Revenue/Delivery work previously split across PRs #25, #26 and #28.
+- [x] Compared the four proposal/research/retainer migration blobs on PR #28's branch with main; all four are byte-identical on main.
+- [x] Compared the Retainer Operations and Research/Outreach UI paths; the Retainer page is identical and the Outreach page has since evolved on main.
+- [x] Corrected this checklist's historical references to identify PR #29 as the merged integration and PR #45 as the merged Claude custom-tool milestone.
