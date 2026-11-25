@@ -305,12 +305,12 @@ A feature is **production-ready** only when implementation, authorization, tenan
 
 ## Current continuation checkpoint — 2026-11-25
 
-### Founder research review UI — PR #37
+### Founder research review UI — PR #39 (rebased successor to PR #37)
 - [x] PR #37 adds the Founder Console `/research-drafts` page, workspace/status filters, evidence/source display, approve/reject notes and explicit CRM promotion.
 - [x] The UI keeps approval and CRM promotion as separate founder actions; it does not create contacts or send outreach.
 - [ ] Frontend dependency installation, TypeScript check and production build remain unverified.
-- [ ] Latest PR #37 Actions run (run `45630633706`) did not execute job steps; both jobs are marked failed and the account billing/spending-limit block must be resolved before CI can provide evidence.
-- [ ] Do not merge PR #37 until frontend validation is completed in an available local/alternate runner or CI is restored. The branch is reported mergeable, but mergeability is not test evidence.
+- [ ] Prior PR #37 Actions run (run `45630633706`) did not execute job steps; both jobs are marked failed and the account billing/spending-limit block must be resolved before CI can provide evidence.
+- [ ] Do not merge PR #39 until frontend validation is completed in an available local/alternate runner or CI is restored. PR #37 was closed as superseded; PR #39 is the active rebased candidate. Mergeability is not test evidence.
 
 ### Claude Managed Agents OS tool bridge — design
 - [x] Audited the current Tool Registry, REST gateway, machine identity/session model and Managed Agents adapter.
@@ -324,3 +324,13 @@ A feature is **production-ready** only when implementation, authorization, tenan
 - [ ] First pilot is limited to `system.health.read` and public-only `revenue.lead.research.capture`; no CRM promotion, contacts, outbound dispatch, payments or production actions.
 
 **Current verified boundary:** The main branch has a REST Tool Gateway, not an MCP server. The Managed Agents adapter intentionally rejects provider MCP/tools. This continuation adds the design only; no provider tools have been enabled and no runtime code or production configuration has changed.
+
+
+## Founder research review UI — 2026-11-25 (PR #39)
+
+- [x] Added `/research-drafts` to the Founder Console and sidebar navigation in PR #39.
+- [x] Added workspace/status filtering, evidence and source-reference display, fit/confidence scores, review notes, approve/reject actions and explicit CRM promotion for approved drafts.
+- [x] UI explains that source URLs are agent-supplied and unverified, and that no contact or outreach action occurs.
+- [x] TSX syntax parsing passed for the new page and updated sidebar.
+- [ ] Full Next.js lint, typecheck and production build remain unverified. The isolated environment has no frontend dependencies; `npm install` timed out, so no build success is claimed.
+- [ ] Merge PR #39 only after a full frontend dependency install, lint, TypeScript check and Next build pass.
