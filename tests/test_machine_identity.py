@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.auth import Principal, get_principal
 from app.db import Base, get_db
-from app.machine_identity import authenticate_machine_token, authorize_tool_session, create_agent_session
+from app.machine_identity import authenticate_machine_token, authorize_tool_session, create_agent_session, expire_due_agent_sessions
 from app.models import FounderAuthority, Membership, Organization, Role, User, Workspace
 from app.security_models import AgentSession, MachineIdentity, ToolInvocation
 from app.security_routes import router
@@ -388,3 +388,27 @@ def test_tool_gateway_rejects_schema_extra_fields(security_client):
         json={"session_id": session_id, "input": {"arbitrary": "not allowed"}},
     )
     assert invalid.status_code == 422
+
+
+def test_worker_session_expiry_sweep_marks_and_audits_due_sessions(security_client):
+    from app.models import AuditEvent
+    issued = _create_identity(security_client)
+    db = security_client.factory()
+    try:
+        principal = authenticate_machine_token("Bearer " + issued["token"], db)
+        session = create_agent_session(
+            db, principal, purpose="Expire this session", data_class="public", ttl_seconds=600
+        )
+        db.commit()
+        session.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.commit()
+        assert expire_due_agent_sessions(db, limit=10) == 1
+        db.commit()
+        db.refresh(session)
+        assert session.status == "expired"
+        event = db.query(AuditEvent).filter_by(
+            event_type="agent_session.expired", resource_id=session.id
+        ).one()
+        assert event.payload["reason_code"] == "SESSION_TTL_EXPIRED"
+    finally:
+        db.close()
