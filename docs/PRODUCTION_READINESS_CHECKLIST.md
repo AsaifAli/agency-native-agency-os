@@ -400,3 +400,15 @@ Additional review controls: identity/session locks follow revocation lock order;
 - [x] Documented Claude as the workforce interaction/runtime layer and Agency OS as the authority for identity, grants, business records, budgets, approvals and audit.
 - [x] Documented MCP as a thin Claude-side protocol adapter when required; it must call the OS Tool Gateway and cannot become a second authorization or execution system.
 - [ ] Reconcile the external SkillTree/brain report once its Google Doc content is supplied in an inspectable file. The supplied Google Docs URL could not be opened through an available Drive connector in this environment.
+
+
+## 2026-11-25 — 20-point pre-deploy security audit
+
+- [x] Audited all 20 controls against the reconciled branch; detailed findings, file/line evidence, severities and required patches are in `docs/PRE_DEPLOY_SECURITY_AUDIT_20_POINT.md`.
+- [x] Updated Next.js and matching ESLint config to 15.5.29; pinned PostCSS 8.5.33 and Sharp 0.35.5; committed npm lockfile; `npm audit` reports zero vulnerabilities.
+- [x] Moved pytest out of runtime requirements into `requirements-dev.txt` and upgraded to pytest 9.0.3; `pip-audit` reports no known vulnerabilities in runtime or development requirements.
+- [x] Explicitly disabled production browser source maps in `frontend/next.config.ts`.
+- [ ] Production authentication/session lifecycle, MFA, localStorage removal, PostgreSQL RLS, general rate limiting, safe production defaults, route-wide authorization matrix, full SSRF egress controls and centralized log scrubbing remain release blockers.
+- [ ] Complete PostgreSQL 16 test suite, ESLint flat config and full frontend production build; perform independent security review and secret-history scan.
+
+**Security release decision: NO-GO.** Dependency vulnerabilities found by this audit were patched, but the critical identity, RLS and verification gaps remain. See `docs/PRE_DEPLOY_SECURITY_AUDIT_20_POINT.md` for all 20 controls and evidence boundaries.
