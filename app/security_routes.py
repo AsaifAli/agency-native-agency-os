@@ -78,9 +78,7 @@ def create_machine_identity(
     principal: Principal = Depends(get_principal),
 ):
     require_founder_authority(db, org_id, principal.user.id)
-    workspace = db.query(Workspace).filter_by(id=body.workspace_id, org_id=org_id).first()
-    if workspace is None:
-        raise HTTPException(404, "Workspace not found")
+    require_workspace_access_from_context(org_id, body.workspace_id, db)
     if body.subject_type == "agent":
         subject = db.query(Agent).filter_by(id=body.subject_id, org_id=org_id, workspace_id=body.workspace_id).first()
         if subject is None:
