@@ -26,6 +26,14 @@ class MachineIdentityCreate(BaseModel):
     allowed_data_classes: list[str] = Field(default_factory=lambda: ["synthetic"], min_length=1, max_length=5)
     ttl_days: int = Field(default=30, ge=1, le=90)
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value):
+        value = value.strip()
+        if len(value) < 2:
+            raise ValueError("Machine identity name must contain at least two non-space characters")
+        return value
+
     @field_validator("subject_type")
     @classmethod
     def validate_subject_type(cls, value):
