@@ -166,3 +166,15 @@ Merged work includes PR #17 (contact timeline), PR #19 (leads/opportunities), PR
 - A cross-tenant contact/client mismatch caused preflight to abort while Alembic remained on the parent revision. All 16 deliberate cross-scope insert attempts were rejected by the migrated SQLite schema.
 - PostgreSQL 16 verification and full backend-suite execution on the exact remote PR head remain pending. The current local evidence does not replace those checks.
 - PR #33 was merged to main as `09d23d90b258c55331367f94096bc6906cdce249`. The migration must not be applied to populated production data until PostgreSQL 16 verification passes; no deployment or production-readiness claim is made.
+
+
+## Latest authoritative development update — 2026-11-25
+
+- PR #33 is merged to main as `09d23d90b258c55331367f94096bc6906cdce249`; any earlier notes in this document describing PR #33 as open or pending are superseded.
+- PR #34 candidate `feature/machine-identity-session-gateway` adds founder-governed machine identity issuance/revocation, one-time high-entropy credentials with digest-only persistence, workspace-bound sessions, expiry limits and a fail-closed tool/session authorization primitive.
+- Credentials are scoped to one organization/workspace and explicit subject. Agent identities require the referenced agent to be enabled in the same workspace. Only synthetic/public data grants are enabled in this increment.
+- Revocation and session creation/tool authorization serialize on the identity row; revocation cancels active sessions in the same transaction.
+- The new authorization primitive is not a tool execution gateway. No tool adapters, provider-side MCP tools, external dispatch or autonomous side effects are enabled by this increment.
+- Independent candidate validation: 10 machine-identity tests, 5 API tests, 20 workforce tests, 5 approval tests, 11 action-policy tests, 12 execution-service tests and 3 outreach API tests passed in separate pytest invocations (66 total). SQLite migration rehearsal from parent revision `m3f9c2a7e514` upgraded, downgraded and re-upgraded to `n4a7c2e91b60`. The candidate was syntax-compiled. These results are from an isolated reconciled candidate, not the exact remote PR head.
+- PostgreSQL 16 verification, full exact-head backend suite, actual Tool Registry/invocation execution, scheduled session cleanup, and production secret-manager setup remain incomplete.
+- Do not issue production credentials, enable tool grants, or claim production readiness until the gateway, isolation, PostgreSQL and operational lifecycle gates are verified.
