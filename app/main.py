@@ -41,6 +41,7 @@ from app.models import (
     ExecutionAttempt,
     ExecutionStatus,
     Membership,
+    WorkspaceGrant,
 )
 from app.schemas import (
     WorkspaceCreate,
@@ -355,7 +356,14 @@ def list_workspaces(
 
     return (
         db.query(Workspace)
-        .filter_by(org_id=org_id)
+        .join(WorkspaceGrant, WorkspaceGrant.workspace_id == Workspace.id)
+        .filter(
+            Workspace.org_id == org_id,
+            WorkspaceGrant.org_id == org_id,
+            WorkspaceGrant.user_id == p.user.id,
+            WorkspaceGrant.revoked_at.is_(None),
+        )
+        .order_by(Workspace.created_at.asc(), Workspace.id.asc())
         .all()
     )
 
@@ -377,10 +385,22 @@ def create_workspace(
     workspace = Workspace(
         org_id=org_id,
         name=body.name,
+        created_by=p.user.id,
     )
 
     db.add(workspace)
     db.flush()
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(
+            text("SELECT agency_os_private.grant_workspace_access(:org_id, :workspace_id, :user_id, :actor_id)"),
+            {"org_id": org_id, "workspace_id": workspace.id,
+             "user_id": p.user.id, "actor_id": p.user.id},
+        )
+    else:
+        db.add(WorkspaceGrant(
+            org_id=org_id, workspace_id=workspace.id, user_id=p.user.id,
+            granted_by=p.user.id,
+        ))
 
     record_event(
         db,
