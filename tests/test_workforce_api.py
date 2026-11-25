@@ -10,6 +10,7 @@ from app.db import Base, get_db
 from app.models import Membership, Organization, Role, User, Workspace, FounderAuthority
 from app.workforce_routes import router
 from app.workforce_service import initialize_workforce
+import app.domain_models  # noqa: F401 — register Revenue/Delivery tables before metadata.create_all
 import app.workforce_models  # noqa: F401
 import app.operations_models  # noqa: F401
 import app.telephony.models  # noqa: F401
