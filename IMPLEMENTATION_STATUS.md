@@ -257,3 +257,17 @@ Merged work includes PR #17 (contact timeline), PR #19 (leads/opportunities), PR
 - [ ] Founder UI for draft review/promotion and actual public-source research connectors remain outstanding. The tool stores source references supplied by an agent and does not independently verify them.
 - [ ] Further Revenue/Delivery tools, client-data eligibility, approval/budget integration, external adapters, retention/deletion and recovery remain outstanding.
 - [ ] No production deployment or external outreach was performed.
+
+
+## 2026-11-25 — Managed Agents OS custom-tool execution (branch work)
+
+**Status: implemented on `feature/managed-agent-os-tool-execution`; not yet merged or production-verified.**
+
+- Extracted the machine-tool invocation path into a shared OS service used by both the authenticated HTTP gateway and the worker callback.
+- Connected Claude Managed Agents custom-tool events to that service. The worker handles custom-tool events while the provider session is running and returns bounded `user.custom_tool_result` events.
+- Revalidates provider Agent configuration on every new or resumed attempt. Only exact custom-tool names, descriptions and JSON schemas from the OS Tool Registry are allowed. Built-in tools, MCP servers, skills and provider multiagent features remain disabled.
+- Each tool call checks the live OS execution, worker attempt/lease, agent machine identity, workspace, session, data class and exact tool grant. The shared gateway applies DPG, schema validation, idempotency, persistence and audit.
+- Provider event IDs are namespaced by OS execution ID. Tool sessions are bound to executions with a scoped composite foreign key. Custom tool calls are bounded to 10 per poll, 50 per execution and 16 KB per returned result.
+- Current registry scope remains intentionally small: read-only health and public lead-research draft capture. Research creates a pending founder-review draft only; it does not promote CRM records or send outreach.
+
+**Independent validation evidence (isolated candidate, not exact remote branch):** 45 tests across machine identity and Managed Agents runtime modules passed; 6 selected worker processor tests passed; `python -m compileall -q app tests` passed. A combined run of the full worker-service module timed out after 71%, so no full-suite pass is claimed. Ruff is unavailable in the isolated environment. PostgreSQL 16 migration verification, exact-branch test execution and live provider E2E remain pending.
