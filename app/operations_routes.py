@@ -1835,7 +1835,7 @@ def outbox_health(
     db: Session = Depends(get_db),
     p: Principal = Depends(get_principal),
 ):
-    """Founder-only, organization-scoped outbox operational summary."""
+    """Founder-only, workspace-scoped outbox operational summary."""
     require_founder_authority(db, org_id, p.user.id)
     _workspace(db, org_id, workspace_id)
 
@@ -1863,6 +1863,7 @@ def outbox_health(
         db.query(func.count(OutboxEvent.id))
         .filter(
             OutboxEvent.org_id == org_id,
+            OutboxEvent.workspace_id == workspace_id,
             OutboxEvent.status == "pending",
             OutboxEvent.attempts > 0,
         )
