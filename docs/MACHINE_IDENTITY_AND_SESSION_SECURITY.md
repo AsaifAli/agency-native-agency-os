@@ -29,3 +29,31 @@ This increment establishes scoped machine credentials and durable execution sess
 - Do not issue production machine credentials until PostgreSQL migration verification, secret-manager configuration, token rotation procedures, retention/deletion and artifact cleanup policies, recovery tests and end-to-end authorization tests are complete.
 - No agent tool grants are enabled by default. The current scope strings are authorization vocabulary for a future gateway.
 - This work does not assert compliance or production readiness.
+
+
+## Execution-bound tool sessions — PR #38 candidate
+
+- Each Managed Agents execution lazily creates or reuses one scoped `AgentSession` on its first custom-tool event.
+- `Execution.machine_session_id` persists the session association with composite org/workspace/session foreign-key enforcement and uniqueness so sessions are not shared between executions.
+- Session creation audit is emitted by the shared `create_agent_session` service, including worker-created sessions; HTTP and worker paths cannot bypass the lifecycle audit.
+- Provider event IDs are hashed into stable invocation idempotency keys. A worker restart after OS commit but before provider result delivery replays the existing invocation.
+- Session cleanup must detach or expire execution references before any future physical session deletion because the execution/session FK is restrictive.
+
+
+## Managed Agents custom tool bridge — 2026-11-25 (PR #38 candidate)
+
+- [x] Extracted a shared in-process `invoke_registered_tool` service used by HTTP and provider custom-tool callbacks.
+- [x] Added exact provider-safe custom tool names and JSON schemas generated from the OS Tool Registry.
+- [x] Managed Agents validates provider Agent tools against the OS registry on create and resume; unknown tools, schema drift, built-in toolsets, MCP servers, skills and multiagent features are rejected.
+- [x] Handles `agent.custom_tool_use` events while sessions are running/idle and sends `user.custom_tool_result` events only after the OS service completes.
+- [x] Waits for the provider session to resume after custom-tool results; built-in permission-gated actions are not auto-confirmed.
+- [x] Worker lazily creates/reuses an agent machine session, persists it on `Execution.machine_session_id`, and calls the OS gateway with exact agent/org/workspace scope.
+- [x] Provider event IDs map to deterministic idempotency keys; tool results are committed before being returned to the provider.
+- [x] Centralized session creation audit covers worker and HTTP creation paths; tool denials persist safe reason-code audit events after rollback.
+- [x] DPG now preserves only explicitly trusted OS-generated identifier fields in tool output; arbitrary/untrusted payload strings remain PII-scanned.
+- [x] Migration `q7f2b9d4c631` adds the composite scoped execution-to-session link and one-session-per-execution uniqueness.
+- [x] Independent isolated-candidate validation: **236 focused tests passed** across 16 modules, Python compile check passed, and SQLite migration upgrade/downgrade/re-upgrade through `q7f2b9d4c631` passed.
+- [ ] PostgreSQL 16 verification and full backend suite on exact PR #38 head remain pending. A previous full-suite attempt in the isolated candidate timed out; no full-suite pass is claimed.
+- [ ] Provider Agent external configuration, machine identity issuance for each agent, real API credential setup and synthetic live end-to-end test remain external/release steps.
+- [ ] Built-in web search/fetch, MCP, skills, multiagent, budgets and tools with approvals remain disabled. The research capture tool stores supplied references; it does not independently browse or verify them.
+- [ ] Session retention/deletion and physical cleanup remain outstanding; the new restrictive FK requires safe detachment/reconciliation before deletion.
