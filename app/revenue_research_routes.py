@@ -145,6 +145,7 @@ def promote_lead_research_draft(
         created_by=principal.user.id,
     )
     db.add(research)
+    db.flush()
     draft.status = "promoted"
     draft.promoted_lead_id = lead.id
     record_event(
