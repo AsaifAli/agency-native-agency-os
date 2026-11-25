@@ -61,7 +61,8 @@ class SessionBearerAuthMiddleware:
         headers = Headers(scope=scope)
         host = (headers.get("host") or "").lower()
         host_allowed = host in self.allowed_hosts or any(
-            pattern.endswith(":*") and host.startswith(pattern[:-1])
+            pattern.endswith(":*")
+            and (host == pattern[:-2] or host.startswith(pattern[:-1]))
             for pattern in self.allowed_hosts
         )
         origin = headers.get("origin")
