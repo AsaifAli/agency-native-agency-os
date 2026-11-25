@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db import get_db
 from app.models import User, Membership, FounderAuthority, Role
+from app.browser_sessions import authenticate_browser_session
 
 @dataclass
 class Principal:
@@ -37,13 +38,31 @@ def get_principal(
     session_cookie: str | None = Cookie(default=None, alias=settings.oidc_session_cookie_name),
     db: Session = Depends(get_db),
 ) -> Principal:
-    token = authorization.removeprefix("Bearer ").strip() if authorization and authorization.startswith("Bearer ") else session_cookie
-    if not token:
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.removeprefix("Bearer ").strip()
+        if settings.dev_auth_enabled and settings.app_env != "production" and token.startswith("dev:"):
+            email = _decode_token(token)
+            user = db.query(User).filter(User.email == email, User.active.is_(True)).first()
+        else:
+            browser_session = authenticate_browser_session(db, token)
+            user = db.query(User).filter(
+                User.id == browser_session.user_id,
+                User.active.is_(True),
+            ).first()
+            if user is not None and user.email.lower() != _decode_token(token):
+                user = None
+    elif session_cookie:
+        browser_session = authenticate_browser_session(db, session_cookie)
+        user = db.query(User).filter(
+            User.id == browser_session.user_id,
+            User.active.is_(True),
+        ).first()
+        if user is not None and user.email.lower() != _decode_token(session_cookie):
+            user = None
+    else:
         raise HTTPException(401, "Authenticated session required")
-    email = _decode_token(token)
-    user = db.query(User).filter(User.email == email, User.active.is_(True)).first()
     if not user:
-        raise HTTPException(401, "Unknown or inactive user")
+        raise HTTPException(401, "Unknown, inactive, or revoked user session")
     return Principal(user=user)
 
 def require_membership(org_id: str, principal: Principal, db: Session) -> Role:

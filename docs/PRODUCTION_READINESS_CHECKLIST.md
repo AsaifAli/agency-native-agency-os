@@ -3,7 +3,7 @@
 **Last reviewed:** 2026-11-25
 **Tracking branch:** `main` (PR #45 merged); `security/predeploy-20-point-audit` (PR #47 open draft)
 **Latest merged milestone:** [PR #45](https://github.com/AsaifAli/agency-native-agency-os/pull/45)
-**Status:** PR #45 is merged. PR #47 remains an open draft; its security hardening and OIDC implementation are not production-approved. PostgreSQL 16 RLS, server-side session revocation, live identity/MFA verification and other release gates remain. Not a certification or release approval.
+**Status:** PR #45 is merged. PR #47 remains an open draft. The persistent browser-session revocation implementation is now present in this candidate worktree but is not yet published or merged. PostgreSQL 16 RLS, live identity/MFA verification and other release gates remain. Not a certification or release approval.
 
 ## Progress snapshot
 
@@ -440,7 +440,7 @@ Additional review controls: identity/session locks follow revocation lock order;
 - [x] OIDC identity and CSRF unit tests pass; full backend suite 320 passed, 4 PostgreSQL-only skipped.
 - [ ] Provision Authentik provider/client and configure secrets/callback in deployment. No live OIDC flow has been run.
 - [ ] Enforce/verify `acr`/`amr` MFA assurance for founder/admin; configure phishing-resistant MFA in Authentik.
-- [ ] Add server-side session/token revocation ledger and verify actual Safari same-site cookie behavior.
+- [x] Add a persistent browser-session/token revocation ledger in the follow-up candidate below; production browser/Safari same-site verification remains pending.
 - [ ] PostgreSQL 16 RLS/non-owner runtime role and integration tests remain a critical release blocker.
 
 **Release decision remains NO-GO** pending live Authentik/MFA assurance and PostgreSQL RLS verification.
@@ -453,7 +453,7 @@ Additional review controls: identity/session locks follow revocation lock order;
 - [x] Rechecked PR #47 metadata and exact changed-file set; PR #47 remains open and draft. No merge or Actions run was triggered.
 - [x] Re-reviewed OIDC session, CSRF, rate-limit and migration source. The current browser session is a stateless short-lived JWT; logout clears cookies but does not revoke a copied token before expiry.
 - [x] Added a PR review comment documenting the required persisted session/JTI revocation and rotation lifecycle, PostgreSQL 16 RLS/runtime-role requirements, Claude parent/child execution controls and live Authentik assurance verification.
-- [ ] Implement and test the server-side session ledger before production; verify logout revokes server-side and replay fails immediately.
+- [x] Implement and test the server-side session ledger in the follow-up candidate below; logout revokes server-side and replay fails immediately in isolated API tests.
 - [ ] Implement and verify PostgreSQL 16 RLS with a non-owner/non-BYPASSRLS application role, transaction-local tenant context and pooled-connection isolation tests.
 - [ ] Implement durable Claude child-execution correlation, per-child budgets and exact grants, cancellation and provider-event reconciliation before enabling multiagent or side-effecting workflows.
 - [ ] Complete live Authentik OIDC/JWKS/ACR and browser cookie verification.
@@ -469,3 +469,18 @@ Additional review controls: identity/session locks follow revocation lock order;
 - [x] Compared the four proposal/research/retainer migration blobs on PR #28's branch with main; all four are byte-identical on main.
 - [x] Compared the Retainer Operations and Research/Outreach UI paths; the Retainer page is identical and the Outreach page has since evolved on main.
 - [x] Corrected this checklist's historical references to identify PR #29 as the merged integration and PR #45 as the merged Claude custom-tool milestone.
+
+
+## 2026-11-25 — Persistent browser-session revocation candidate
+
+- [x] Added `browser_sessions` with a unique SHA-256 digest of JWT `jti`, user binding, expiry, revocation timestamp and indexed lookup/expiry fields; the raw token and raw `jti` are not persisted.
+- [x] OIDC callback creates the browser session record and creation audit events before returning the HttpOnly cookie.
+- [x] Cookie and signed bearer presentations of browser JWTs now require a live persistent session record, active user and matching subject; dev-only `dev:` bearer tokens retain their existing non-production path.
+- [x] Logout revokes only the current session, records per-organization audit events in the same database transaction and remains idempotent; copied cookie and bearer-token replay are rejected.
+- [x] TDD regression suite: **9 focused browser-session tests passed**, including API logout/replay, inactive user, persistent expiry, digest-only storage and repeated revocation.
+- [x] Full backend suite on this worktree: **329 passed, 4 PostgreSQL-only skipped**.
+- [x] New Alembic revision `s9b5d7f1a204` is the single migration head; isolated upgrade from `r8a2c4e6f901` to the new revision passed on SQLite and verified table columns/indexes.
+- [ ] Full historical SQLite migration rehearsal still stops at pre-existing revision `eb75d47bfc63` (unsupported SQLite ALTER constraint operation); this does not verify the new migration on PostgreSQL. Run PostgreSQL 16 populated-schema upgrade/downgrade before merge.
+- [ ] Session rotation, scheduled retention/deletion, artifact cleanup, Safari same-site cookie verification, Authentik live MFA/ACR verification and PostgreSQL 16 RLS remain outstanding.
+
+**Evidence boundary:** source was cloned from public branch `security/predeploy-20-point-audit` at `730b10fb00206afbd02f6f49e17ad3ba8e431a95`. Tests ran in Upstash Box `certain-whale-42014` on Python 3.13.18. No GitHub Actions workflow was triggered. Changes are local to the Box worktree until published; no PR update or merge has occurred yet.

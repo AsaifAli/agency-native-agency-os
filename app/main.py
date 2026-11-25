@@ -57,6 +57,10 @@ from app.schemas import (
     ExecutionOut,
 )
 from app.audit import record_event
+from app.browser_sessions import (
+    issue_browser_session, authenticate_browser_session, revoke_browser_session,
+)
+from app.security_models import BrowserSession  # noqa: F401 — register browser session metadata
 from app.policy import assert_managed_agents_eligible
 from app.action_policy import MANDATORY_APPROVAL_ACTIONS
 from app.evaluation_service import (
@@ -139,7 +143,15 @@ async def authentik_callback(request: Request, db: Session = Depends(get_db)):
     db.refresh(user)
 
     csrf_token = secrets.token_urlsafe(32)
-    session_token = issue_access_token(user.email, settings.oidc_session_ttl_seconds)
+    session_token = issue_browser_session(db, user, ttl_seconds=settings.oidc_session_ttl_seconds)
+    browser_session = authenticate_browser_session(db, session_token)
+    for membership in memberships:
+        record_event(
+            db, membership.org_id, user.id, "auth.browser_session_created",
+            "browser_session", browser_session.id,
+            payload={"method": "oidc", "provider": "authentik"},
+        )
+    db.commit()
     redirect = RedirectResponse(settings.oidc_frontend_url.rstrip("/") + "/", status_code=303)
     secure = settings.app_env.lower() == "production"
     cookie_samesite = "none" if secure else "lax"
@@ -173,7 +185,23 @@ def get_csrf_token(request: Request, response: Response):
 
 
 @app.post("/v1/auth/logout")
-def authentik_logout(response: Response):
+def authentik_logout(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    token = request.cookies.get(settings.oidc_session_cookie_name)
+    if token:
+        session = revoke_browser_session(db, token)
+        if session is not None:
+            memberships = db.query(Membership).filter_by(user_id=session.user_id).all()
+            for membership in memberships:
+                record_event(
+                    db, membership.org_id, session.user_id, "auth.browser_session_revoked",
+                    "browser_session", session.id,
+                    payload={"reason_code": "USER_LOGOUT"},
+                )
+            db.commit()
     response.delete_cookie(settings.oidc_session_cookie_name, path="/")
     response.delete_cookie(settings.oidc_csrf_cookie_name, path="/")
     return {"status": "signed_out"}
