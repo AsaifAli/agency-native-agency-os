@@ -874,3 +874,25 @@ def test_provider_event_idempotency_is_scoped_to_os_execution(security_client):
         ).count() == 2
     finally:
         db.close()
+
+
+def test_execution_machine_session_mapping_uses_composite_workspace_scope():
+    from app.models import Execution
+
+    foreign_key = next(
+        constraint for constraint in Execution.__table__.constraints
+        if constraint.name == "fk_execution_machine_session_scope"
+    )
+    unique_key = next(
+        constraint for constraint in Execution.__table__.constraints
+        if constraint.name == "uq_execution_machine_session_scope"
+    )
+    assert [column.name for column in foreign_key.columns] == [
+        "org_id", "workspace_id", "machine_session_id",
+    ]
+    assert [element.column.name for element in foreign_key.elements] == [
+        "org_id", "workspace_id", "id",
+    ]
+    assert [column.name for column in unique_key.columns] == [
+        "org_id", "workspace_id", "machine_session_id",
+    ]
