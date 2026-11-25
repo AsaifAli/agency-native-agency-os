@@ -116,7 +116,7 @@ class WorkspaceGrant(Base):
             "uq_workspace_grants_active", "org_id", "workspace_id", "user_id",
             unique=True,
             postgresql_where=text("revoked_at IS NULL"),
-            sqlite_where=__import__("sqlalchemy").text("revoked_at IS NULL"),
+            sqlite_where=text("revoked_at IS NULL"),
         ),
         Index("ix_workspace_grants_user_active", "user_id", "revoked_at"),
     )
