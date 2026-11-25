@@ -27,6 +27,7 @@ def _workspace(db: Session, org_id: str, workspace_id: str) -> None:
 
 
 def _scoped_parent(db: Session, model, *, object_id: str, org_id: str, workspace_id: str, label: str):
+    _workspace(db, org_id, workspace_id)
     item = db.query(model).filter_by(
         id=object_id, org_id=org_id, workspace_id=workspace_id
     ).first()
@@ -398,6 +399,7 @@ def review_outreach_draft(
     if item is None:
         raise HTTPException(404, "Outreach draft not found")
     require_founder_authority(db, org_id, p.user.id)
+    _workspace(db, org_id, item.workspace_id)
     if item.status != "draft":
         raise HTTPException(409, "Only an unreviewed draft can be reviewed")
     item.status = "approved_draft" if body.decision == "approve_draft" else "rejected"
