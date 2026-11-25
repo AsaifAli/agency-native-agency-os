@@ -870,3 +870,8 @@ app.include_router(outreach_router)
 # Founder-governed machine identities and bounded agent sessions.
 from app.security_routes import router as machine_security_router
 app.include_router(machine_security_router)
+
+
+# Machine-to-OS tool gateway; only code-registered adapters can execute.
+from app.tool_gateway_routes import router as machine_tool_gateway_router
+app.include_router(machine_tool_gateway_router)
