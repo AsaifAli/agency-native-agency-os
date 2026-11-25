@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-from functools import partial
 
 import anyio
 from fastapi import HTTPException
