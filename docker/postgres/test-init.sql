@@ -9,11 +9,9 @@ GRANT USAGE, CREATE ON SCHEMA public TO agency_os_migrator;
 CREATE ROLE agency_os_app LOGIN PASSWORD 'local-only-test-app-password'
   NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
 
--- The production migration grants to this role. It remains a separate
--- non-superuser credential; BYPASSRLS is retained here only to mirror the
--- current worker implementation while integration tests are being exercised.
+-- Worker test role mirrors production: non-superuser and NOBYPASSRLS.
 CREATE ROLE agency_os_worker LOGIN PASSWORD 'local-only-test-worker-password'
-  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT BYPASSRLS;
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
 
 -- Dedicated NOBYPASSRLS login used by tenant-isolation integration tests.
 CREATE ROLE agency_os_test_app LOGIN PASSWORD 'local-only-test-app-password'
