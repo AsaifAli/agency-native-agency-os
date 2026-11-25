@@ -1831,17 +1831,19 @@ def agent_performance(
 @router.get("/outbox-health")
 def outbox_health(
     org_id: str,
+    workspace_id: str = Query(min_length=1),
     db: Session = Depends(get_db),
     p: Principal = Depends(get_principal),
 ):
     """Founder-only, organization-scoped outbox operational summary."""
     require_founder_authority(db, org_id, p.user.id)
+    _workspace(db, org_id, workspace_id)
 
     now = datetime.now(timezone.utc)
 
     status_rows = (
         db.query(OutboxEvent.status, func.count(OutboxEvent.id))
-        .filter(OutboxEvent.org_id == org_id)
+        .filter(OutboxEvent.org_id == org_id, OutboxEvent.workspace_id == workspace_id)
         .group_by(OutboxEvent.status)
         .all()
     )
@@ -1851,6 +1853,7 @@ def outbox_health(
         db.query(func.min(OutboxEvent.created_at))
         .filter(
             OutboxEvent.org_id == org_id,
+            OutboxEvent.workspace_id == workspace_id,
             OutboxEvent.status == "pending",
         )
         .scalar()
@@ -1870,6 +1873,7 @@ def outbox_health(
         db.query(func.count(OutboxEvent.id))
         .filter(
             OutboxEvent.org_id == org_id,
+            OutboxEvent.workspace_id == workspace_id,
             OutboxEvent.status == "processing",
             OutboxEvent.lease_expires_at.is_not(None),
             OutboxEvent.lease_expires_at <= now,
@@ -1888,6 +1892,7 @@ def outbox_health(
 
     return {
         "organization_id": org_id,
+        "workspace_id": workspace_id,
         "observed_at": now.isoformat(),
         "pending_count": counts.get("pending", 0),
         "oldest_pending_age_seconds": oldest_age,
