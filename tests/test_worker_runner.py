@@ -54,10 +54,6 @@ def test_run_maintenance_commits_separate_transactions(monkeypatch):
     recover = Mock(return_value=3)
     queue = Mock(return_value=4)
 
-    monkeypatch.setattr(runner, "list_worker_scopes", Mock(return_value=[("org-1", "workspace-1")]))
-    monkeypatch.setattr(runner, "scoped_worker_session_factory", lambda org_id, workspace_id, factory: factory)
-    monkeypatch.setattr(runner, "list_worker_scopes", Mock(return_value=[("org-1", "workspace-1")]))
-    monkeypatch.setattr(runner, "scoped_worker_session_factory", lambda org_id, workspace_id, factory: factory)
     monkeypatch.setattr(runner, "promote_due_retries", promote)
     monkeypatch.setattr(
         runner,
@@ -94,6 +90,8 @@ def test_run_worker_runs_startup_maintenance_and_waits_when_idle(
     recover = Mock(return_value=0)
     queue = Mock(return_value=0)
 
+    monkeypatch.setattr(runner, "list_worker_scopes", Mock(return_value=[("org-1", "workspace-1")]))
+    monkeypatch.setattr(runner, "scoped_worker_session_factory", lambda org_id, workspace_id, factory: factory)
     monkeypatch.setattr(runner, "promote_due_retries", promote)
     monkeypatch.setattr(
         runner,
