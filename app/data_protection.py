@@ -1,17 +1,22 @@
 """Deterministic data-protection boundary for agent execution payloads.
 
-This gateway is intentionally conservative and is not a compliance certification.
-It blocks unsupported data classes and credential-like material, and redacts
-high-confidence personal identifiers before a provider runtime receives input.
+This is a conservative first boundary, not a complete classifier or compliance
+certification. Every provider-facing structured payload must pass this gateway.
 """
 from __future__ import annotations
 
+import json
+import math
 import re
 from dataclasses import dataclass, replace
 from typing import Any
 
 from app.integrations.runtime import ExecutionRequest, ExecutionResult
 from app.models import DataClass
+
+MAX_METADATA_BYTES = 32_768
+MAX_METADATA_DEPTH = 6
+MAX_CONTAINER_ITEMS = 100
 
 
 class DataProtectionBlocked(Exception):
@@ -39,7 +44,7 @@ _SECRET_PATTERNS = (
     re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
     re.compile(
         r"\b(?:api[_ -]?key|access[_ -]?token|client[_ -]?secret|password)\s*[:=]\s*"
-        r"[\"']?[^\s\"',;]{8,}",
+        r"[\\"']?[^\s\\"',;]{8,}",
         re.IGNORECASE,
     ),
 )
@@ -83,8 +88,6 @@ def sanitize_text(value: str) -> tuple[str, dict[str, int]]:
     redact(_EMAIL, "EMAIL")
     redact(_PAN, "GOVERNMENT_ID")
 
-    # Detect valid payment-card numbers before the broader 12-digit
-    # government-ID pattern, otherwise a card prefix can be misclassified.
     def redact_card(match: re.Match[str]) -> str:
         raw = match.group(0)
         if _luhn_valid(raw):
@@ -107,6 +110,51 @@ def sanitize_text(value: str) -> tuple[str, dict[str, int]]:
     return text, counts
 
 
+def _bounded_json_size(value: Any) -> int:
+    try:
+        return len(json.dumps(
+            value, ensure_ascii=False, separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8"))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise DataProtectionBlocked("UNSUPPORTED_METADATA") from exc
+
+
+def _sanitize_value(value: Any, counts: dict[str, int], depth: int = 0) -> Any:
+    if depth > MAX_METADATA_DEPTH:
+        raise DataProtectionBlocked("METADATA_TOO_DEEP")
+    if isinstance(value, str):
+        cleaned, found = sanitize_text(value)
+        for key, count in found.items():
+            counts[key] = counts.get(key, 0) + count
+        return cleaned
+    if isinstance(value, list):
+        if len(value) > MAX_CONTAINER_ITEMS:
+            raise DataProtectionBlocked("METADATA_TOO_LARGE")
+        return [_sanitize_value(item, counts, depth + 1) for item in value]
+    if isinstance(value, dict):
+        if len(value) > MAX_CONTAINER_ITEMS:
+            raise DataProtectionBlocked("METADATA_TOO_LARGE")
+        cleaned: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise DataProtectionBlocked("INVALID_METADATA_KEY")
+            safe_key, found = sanitize_text(key)
+            for label, count in found.items():
+                counts[label] = counts.get(label, 0) + count
+            if safe_key in cleaned:
+                raise DataProtectionBlocked("DUPLICATE_SANITIZED_METADATA_KEY")
+            cleaned[safe_key] = _sanitize_value(item, counts, depth + 1)
+        return cleaned
+    if value is None or isinstance(value, bool) or isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise DataProtectionBlocked("NON_FINITE_NUMBER")
+        return value
+    raise DataProtectionBlocked("UNSUPPORTED_METADATA")
+
+
 def protect_execution_result(
     result: ExecutionResult,
 ) -> tuple[ExecutionResult, DataProtectionReport]:
@@ -115,30 +163,6 @@ def protect_execution_result(
         raise DataProtectionBlocked("INVALID_RUNTIME_RESULT")
     cleaned, counts = sanitize_text(result.detail)
     return replace(result, detail=cleaned), DataProtectionReport(redaction_counts=counts)
-
-
-def _sanitize_value(value: Any, counts: dict[str, int], depth: int = 0) -> Any:
-    if depth > 6:
-        raise DataProtectionBlocked("METADATA_TOO_DEEP")
-    if isinstance(value, str):
-        cleaned, found = sanitize_text(value)
-        for key, count in found.items():
-            counts[key] = counts.get(key, 0) + count
-        return cleaned
-    if isinstance(value, list):
-        if len(value) > 100:
-            raise DataProtectionBlocked("METADATA_TOO_LARGE")
-        return [_sanitize_value(item, counts, depth + 1) for item in value]
-    if isinstance(value, dict):
-        if len(value) > 100:
-            raise DataProtectionBlocked("METADATA_TOO_LARGE")
-        return {
-            str(key): _sanitize_value(item, counts, depth + 1)
-            for key, item in value.items()
-        }
-    if value is None or isinstance(value, (bool, int, float)):
-        return value
-    raise DataProtectionBlocked("UNSUPPORTED_METADATA")
 
 
 def protect_execution_request(
@@ -150,6 +174,10 @@ def protect_execution_request(
     if request.data_class == DataClass.commercial and not request.client_authorized:
         raise DataProtectionBlocked("CLIENT_AUTHORIZATION_REQUIRED")
 
+    metadata = request.request_metadata or {}
+    if _bounded_json_size(metadata) > MAX_METADATA_BYTES:
+        raise DataProtectionBlocked("METADATA_TOO_LARGE")
+
     counts: dict[str, int] = {}
     values = {
         "agent_name": request.agent_name,
@@ -158,11 +186,14 @@ def protect_execution_request(
         "task_title": request.task_title,
         "task_description": request.task_description,
     }
-    cleaned = {}
-    for key, value in values.items():
-        cleaned[key] = _sanitize_value(value or "", counts)
+    cleaned = {
+        key: _sanitize_value(value or "", counts)
+        for key, value in values.items()
+    }
+    safe_metadata = _sanitize_value(metadata, counts)
+    if _bounded_json_size(safe_metadata) > MAX_METADATA_BYTES:
+        raise DataProtectionBlocked("METADATA_TOO_LARGE")
 
-    metadata = _sanitize_value(request.request_metadata or {}, counts)
     protected = replace(
         request,
         agent_name=cleaned["agent_name"],
@@ -170,6 +201,6 @@ def protect_execution_request(
         agent_instructions=cleaned["agent_instructions"],
         task_title=cleaned["task_title"],
         task_description=cleaned["task_description"],
-        request_metadata=metadata,
+        request_metadata=safe_metadata,
     )
     return protected, DataProtectionReport(redaction_counts=dict(counts))
