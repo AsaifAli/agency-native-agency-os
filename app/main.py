@@ -929,12 +929,14 @@ def decide_approval(
     org_id: str,
     approval_id: str,
     body: ApprovalDecision,
+    workspace_id: str,
     db: Session = Depends(get_db),
     p: Principal = Depends(get_principal),
 ):
     # Membership proves organization access; founder authority is a separate grant.
     require_membership(org_id, p, db)
     require_founder_authority(db, org_id, p.user.id)
+    workspace_in_org(db, org_id, workspace_id)
 
     if body.decision == ApprovalStatus.pending:
         raise HTTPException(
@@ -947,6 +949,7 @@ def decide_approval(
         .filter_by(
             id=approval_id,
             org_id=org_id,
+            workspace_id=workspace_id,
         )
         .with_for_update()
         .first()
@@ -954,7 +957,6 @@ def decide_approval(
 
     if not approval:
         raise HTTPException(404, "Approval not found")
-    workspace_in_org(db, org_id, approval.workspace_id)
 
     if approval.status != ApprovalStatus.pending:
         raise HTTPException(409, "Approval already decided")
