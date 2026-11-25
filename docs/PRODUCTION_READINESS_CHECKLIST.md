@@ -339,4 +339,7 @@ A feature is **production-ready** only when implementation, authorization, tenan
 - [ ] Run synthetic end-to-end tests against the live Managed Agents provider; verify execution, tool authorization, persistence, replay, denial audit and recovery.
 - [ ] Complete provider session ambiguous-create reconciliation and production recovery before unattended rollout.
 
-**Evidence boundary:** 45 machine identity/Managed Agents tests and 6 selected worker processor tests passed in an isolated candidate copy; compileall passed. These are not exact-branch or PostgreSQL 16 results. Full suite and live provider compatibility are not verified.
+**Evidence boundary:** 47 machine identity/Managed Agents tests and 6 selected worker processor tests passed in an isolated candidate copy; compileall passed. These are not exact-branch or PostgreSQL 16 results. Full suite and live provider compatibility are not verified.
+
+
+Additional review controls: identity/session locks follow revocation lock order; policy denials are generic to the model while unexpected gateway/database failures enter worker retry; internal-ID PII exemptions are limited to explicit draft/lead/research-record fields. The current tools do not yet perform autonomous web search, web fetch or prospect discovery; supplied research references remain unverified.
