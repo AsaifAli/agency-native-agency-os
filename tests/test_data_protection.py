@@ -112,3 +112,50 @@ def test_protect_execution_result_blocks_secret_output():
     with pytest.raises(DataProtectionBlocked) as error:
         protect_execution_result(result)
     assert error.value.code == "SECRET_DETECTED"
+
+
+def test_protect_execution_request_sanitizes_sensitive_metadata_keys():
+    request = _request(request_metadata={"owner@example.com": "public"})
+    protected, report = protect_execution_request(request)
+    assert "owner@example.com" not in protected.request_metadata
+    assert "[REDACTED_EMAIL]" in protected.request_metadata
+    assert report.redaction_counts["EMAIL"] == 1
+
+
+@pytest.mark.parametrize("metadata", [
+    {1: "non-string key"},
+    {"nested": {"bad": float("nan")}},
+    {"nested": {"bad": float("inf")}},
+    {"x": "a" * 40_000},
+])
+def test_protect_execution_request_rejects_unsafe_or_oversized_metadata(metadata):
+    with pytest.raises(DataProtectionBlocked):
+        protect_execution_request(_request(request_metadata=metadata))
+
+
+def test_protect_execution_request_rejects_key_collisions_after_redaction():
+    metadata = {
+        "founder@example.com": "first",
+        "[REDACTED_EMAIL]": "second",
+    }
+    with pytest.raises(DataProtectionBlocked) as error:
+        protect_execution_request(_request(request_metadata=metadata))
+    assert error.value.code == "DUPLICATE_SANITIZED_METADATA_KEY"
+
+
+def test_protect_execution_result_redacts_and_blocks_provider_output():
+    result = ExecutionResult(
+        provider="test", external_run_id="run-3", status="succeeded",
+        detail="Send to ops@example.com",
+    )
+    protected, report = protect_execution_result(result)
+    assert "ops@example.com" not in protected.detail
+    assert report.redaction_counts == {"EMAIL": 1}
+
+    secret_result = ExecutionResult(
+        provider="test", external_run_id="run-4", status="succeeded",
+        detail="token=sk-ant-api-1234567890abcdefghijkl",
+    )
+    with pytest.raises(DataProtectionBlocked) as error:
+        protect_execution_result(secret_result)
+    assert error.value.code == "SECRET_DETECTED"
