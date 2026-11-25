@@ -19,7 +19,7 @@ The current main branch contains:
 - Only two registered tools: `system.health.read` and `revenue.lead.research.capture`.
 - A Claude Managed Agents adapter that deliberately rejects provider-side tools, MCP servers, skills and multiagent configuration.
 
-The existing REST gateway is not yet an MCP server. The Claude adapter does not yet pass per-session vault credentials. This design closes those two gaps without relaxing the current boundary.
+The existing REST gateway is not yet an MCP server, and the Claude adapter still rejects provider tools. The first custom-tool implementation does not require a public MCP endpoint or per-session vault credential. Those remain deferred unless the MCP connector is later adopted.
 
 ## 3. Trust boundaries
 
