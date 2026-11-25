@@ -216,3 +216,45 @@ def test_revoked_machine_credential_cannot_authenticate(security_client):
             authenticate_machine_token("Bearer " + issued["token"], db)
     finally:
         db.close()
+
+
+def test_session_purpose_is_redacted_and_audited_without_raw_pii(security_client):
+    from app.models import AuditEvent
+    issued = _create_identity(security_client)
+    response = security_client.post(
+        "/v1/machine/sessions",
+        headers={"Authorization": "Bearer " + issued["token"]},
+        json={
+            "purpose": "Research for owner@example.test",
+            "data_class": "public",
+            "ttl_seconds": 300,
+        },
+    )
+    assert response.status_code == 201, response.text
+    assert "owner@example.test" not in response.json()["purpose"]
+    assert "[REDACTED_EMAIL]" in response.json()["purpose"]
+    db = security_client.factory()
+    try:
+        event = db.query(AuditEvent).filter_by(
+            event_type="agent_session.created",
+            resource_id=response.json()["id"],
+        ).one()
+        assert event.payload["purpose_redaction_counts"] == {"EMAIL": 1}
+        assert "owner@example.test" not in str(event.payload)
+    finally:
+        db.close()
+
+
+def test_session_purpose_with_secret_is_blocked(security_client):
+    issued = _create_identity(security_client)
+    response = security_client.post(
+        "/v1/machine/sessions",
+        headers={"Authorization": "Bearer " + issued["token"]},
+        json={
+            "purpose": "Use token sk-ant-api-1234567890abcdefghijkl",
+            "data_class": "public",
+            "ttl_seconds": 300,
+        },
+    )
+    assert response.status_code == 422
+    assert "blocked by data-protection" in response.json()["detail"]
