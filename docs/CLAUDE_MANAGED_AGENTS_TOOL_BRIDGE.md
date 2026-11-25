@@ -1,10 +1,10 @@
 # Claude Managed Agents — OS Tool Bridge Design
 
-**Status:** Design decision only. No provider-side tools, MCP connection, session credential, or autonomous side effect is enabled by this document.
+**Status:** Design decision only. No provider-side tools, MCP connection, session credential, or autonomous side effect is enabled. The first integration candidate is Managed Agents custom tools handled by the OS worker; the MCP connector path is deferred pending a specific need for provider-initiated HTTP connectivity.
 
 ## 1. Objective
 
-Connect Claude Managed Agents to the Agency OS through an OS-owned Model Context Protocol (MCP) endpoint. Claude may reason and request tools; the OS remains the sole authority for identity, workspace scope, data eligibility, tool grants, approvals, budgets, persistence and audit.
+Connect Claude Managed Agents to the Agency OS through application-executed custom tools. Claude may request a registered tool; the OS worker validates and executes it using OS-owned identity, workspace scope, data eligibility, workforce capability grants, approvals, budgets, persistence and audit. An MCP connector remains a future alternative if direct provider-to-OS connectivity becomes necessary.
 
 This is an internal operating capability, not a public SaaS integration.
 
@@ -24,15 +24,15 @@ The existing REST gateway is not yet an MCP server. The Claude adapter does not 
 ## 3. Trust boundaries
 
 1. **Claude is an untrusted execution runtime.** Prompt instructions are not authorization.
-2. **The OS MCP endpoint is a narrow adapter.** It exposes only tools registered and enabled by OS policy; it never exposes SQL, ORM models, arbitrary HTTP, shell, filesystem, or provider credentials.
+2. **The OS worker custom-tool handler is a narrow adapter.** It exposes only tools registered and enabled by OS policy; it never exposes SQL, ORM models, arbitrary HTTP, shell, filesystem, or provider credentials.
 3. **Every tool call is re-authorized.** Check active machine identity, exact session, workspace, data class, tool scope, tool version, action policy, budget and approval state on every invocation.
-4. **The provider receives a session-bound bearer token, not the machine identity's reusable credential.** Persist only a digest in the OS. Deliver the raw token to the provider vault over TLS and never put it in prompts, logs, source control or tool results.
+4. **The custom-tool path sends no OS bearer credential to the provider.** The worker handles tool events and authorizes each call against the persisted OS execution, machine identity, session and capability grants. If a future MCP connector is selected, it must use a session-bound token—not the machine identity's reusable credential—and persist only its digest.
 5. **Provider-side tools remain off by default.** Do not enable Bash, arbitrary file operations, general web search/fetch, provider skills or multiagent delegation as a side effect of enabling MCP.
 6. **All business state remains OS-owned.** The provider's session history is not the system of record for tasks, CRM, approvals, costs or audit.
 
 ## 4. Proposed components and contracts
 
-### 4.1 Session-scoped MCP credential
+### 4.1 Optional future MCP connector credential (deferred)
 
 Add an OS-owned credential record linked by composite foreign key to one `AgentSession` and its `MachineIdentity` scope. Store:
 
@@ -44,7 +44,7 @@ Issue a high-entropy, single-session token only after the OS session is persiste
 
 The MCP request's bearer token determines the machine identity and exact session. The model must not supply or override the session ID as a tool argument.
 
-### 4.2 MCP transport
+### 4.2 Managed Agents custom-tool callback (preferred first path)
 
 Expose a dedicated HTTPS Streamable HTTP MCP endpoint (for example, `/mcp/agency-os`) on the OS API service. Use a maintained MCP SDK and pin a compatible version. Keep transport stateless unless the SDK requires protocol state; business/session state remains in PostgreSQL.
 
@@ -54,7 +54,7 @@ The endpoint must enforce request size, timeouts, concurrency limits, JSON/schem
 
 ### 4.3 Tool exposure
 
-The MCP `tools/list` result is the intersection of:
+The custom tool definitions configured on the provider Agent are a static, versioned allowlist. Runtime authorization is the intersection of:
 
 - Code-registered tools.
 - The machine identity's explicit `tools:invoke` and `tool:<key>` scopes.
@@ -62,7 +62,7 @@ The MCP `tools/list` result is the intersection of:
 - The agent's OS capability grants and runtime policy.
 - The current tool version and enabled state.
 
-The MCP server returns only safe names, descriptions and JSON input schemas. Every `tools/call` repeats the authorization and DPG checks. A hidden tool is also rejected if called directly.
+The provider receives only safe names, descriptions and JSON input schemas. Every `agent.custom_tool_use` event repeats authorization and DPG checks in the worker. A tool omitted from the runtime allowlist is rejected even if the provider emits it.
 
 Initial rollout must expose only:
 - `system.health.read` for a read-only smoke test.
@@ -78,7 +78,7 @@ For the initial draft-capture tool, define a deterministic idempotency strategy 
 
 Keep external provider/network calls outside database transactions. The tool bridge itself must not perform external side effects.
 
-### 4.5 Claude Managed Agents configuration
+### 4.5 Claude Managed Agents configuration (custom tools)
 
 Anthropic's current Managed Agents MCP contract separates reusable agent configuration from per-session authentication:
 
@@ -132,11 +132,11 @@ Use bounded retries with backoff for transient failures only. Authentication, po
 ### Unit and contract tests
 - Session token is high entropy, digest-only, constant-time verified, session-bound, expiring and revocable.
 - Wrong identity, workspace, session, data class, scope, tool version or disabled tool is rejected.
-- MCP tool list is filtered and direct invocation of hidden tools is denied.
+- Provider custom tool definitions match the versioned OS registry exactly; unknown and hidden tool calls are denied.
 - DPG blocks secrets and redacts PII before schema validation/persistence.
 - Invalid schemas, oversized inputs/outputs and malicious/untrusted tool results fail closed.
 - Idempotent replay, same-key/different-payload conflict and concurrent duplicate calls.
-- MCP errors never reveal tokens, provider secrets, SQL or internal exception strings.
+- Custom-tool callback errors never reveal provider secrets, SQL or internal exception strings.
 
 ### Integration and recovery tests
 - Managed Agent session receives only the correct vault credential for its OS session.
@@ -149,7 +149,7 @@ Use bounded retries with backoff for transient failures only. Authentication, po
 - PostgreSQL 16 migration/locking tests, not SQLite-only evidence.
 
 ### Release gate
-Do not enable the MCP endpoint for Managed Agents until the above tests pass, the provider Agent definition is reviewed/version-pinned, the public HTTPS endpoint and network policy are configured, secret handling and cleanup are demonstrated, and a founder-approved synthetic pilot is completed. Keep the current no-provider-tools behavior until then.
+Do not enable custom tools for Managed Agents until the above tests pass, the provider Agent definition is reviewed/version-pinned, capability checks are enforced by backend code, retry/replay behavior is proven, and a founder-approved synthetic pilot is completed. Keep the current no-provider-tools behavior until then.
 
 ## 8. Implementation sequence
 
@@ -166,9 +166,24 @@ Do not enable the MCP endpoint for Managed Agents until the above tests pass, th
 
 ## 9. References
 
-- [Claude Managed Agents MCP connector](https://platform.claude.com/docs/en/managed-agents/mcp-connector)
+- [Claude Managed Agents tools and custom-tool event flow](https://platform.claude.com/docs/en/managed-agents/tools)\n- [Claude Managed Agents MCP connector](https://platform.claude.com/docs/en/managed-agents/mcp-connector)
 - [Claude Managed Agents vaults](https://platform.claude.com/docs/en/managed-agents/vaults)
 - [Create a vault credential API](https://platform.claude.com/docs/en/api/http/beta/vaults/credentials/create)
 - [Claude Managed Agents overview and data handling](https://platform.claude.com/docs/en/managed-agents/overview)
 
 **Important:** Managed Agents is beta and is not eligible for Zero Data Retention or HIPAA BAA under the current documentation. Do not claim compliance or use ineligible data classes.
+
+
+## Architecture decision review — 2026-11-25
+
+**Decision candidate: use Managed Agents custom tools through the OS worker for the first integration; defer a provider-facing MCP endpoint.**
+
+Anthropic documents custom tools as application-executed calls: the agent emits `agent.custom_tool_use`, the session pauses, the application executes the tool and posts `user.custom_tool_result`. This matches the Agency OS worker model and avoids exposing a public MCP endpoint or issuing a provider-held OS session bearer credential for the first pilot.
+
+The unmerged `feature/managed-agent-os-tool-execution` branch is a useful implementation reference, not merge-ready code. Source review found that it has execution-bound callbacks, machine-session persistence, event idempotency and focused tests, but it still needs:
+- Explicit linkage from each tool call to an enabled WorkforceCapability for the exact Agent/member/workspace; machine identity scopes alone are not a substitute for the workforce grant.
+- Retry recovery that can replay a committed invocation result if the provider event is re-delivered after the original OS session expired or was renewed.
+- Integration against current main without reverting the current DPG, REST Tool Gateway, worker lifecycle, authorization and checklist work.
+- Fresh focused tests, PostgreSQL 16 migration/locking verification and a synthetic end-to-end run.
+
+This is an architecture review only. No custom tools have been enabled and no code from the feature branch has been merged. MCP remains a valid future option when direct provider-to-OS connectivity is genuinely needed; if adopted, the session-bound token and vault requirements above remain mandatory.
