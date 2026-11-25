@@ -1093,6 +1093,109 @@ def test_processor_rejects_unsupported_runtime(worker_context):
     assert attempt.status == ExecutionAttemptStatus.failed
 
 
+def test_processor_blocks_secret_input_and_persists_only_reason_code(worker_context, monkeypatch):
+    ctx = worker_context
+    task = ctx["db"].get(Task, ctx["task_id"])
+    task.description = "Use this credential sk-ant-api-1234567890abcdefghijkl"
+    execution = create_worker_execution(ctx)
+    ctx["db"].commit()
+
+    monkeypatch.setattr(
+        "app.worker.processor.get_runtime",
+        lambda _: pytest.fail("provider must not be called for blocked input"),
+    )
+    session_factory = sessionmaker(
+        bind=ctx["db"].get_bind(), autoflush=False, autocommit=False,
+    )
+    processed_id = process_one_execution(
+        worker_id="dpg-input-block", session_factory=session_factory,
+    )
+    assert processed_id == execution.id
+
+    ctx["db"].expire_all()
+    saved = ctx["db"].get(Execution, execution.id)
+    assert saved.status == ExecutionStatus.failed
+    assert saved.error_code == "DATA_PROTECTION_BLOCKED"
+    event = ctx["db"].query(AuditEvent).filter_by(
+        org_id=ctx["org_id"],
+        event_type="execution.data_protection_blocked",
+        resource_type="execution",
+        resource_id=execution.id,
+    ).one()
+    assert event.payload == {"reason_code": "SECRET_DETECTED"}
+    assert "sk-ant" not in str(event.payload)
+
+
+def test_processor_redacts_provider_output_and_audits_counts(worker_context, monkeypatch):
+    ctx = worker_context
+    execution = create_worker_execution(ctx)
+    ctx["db"].commit()
+
+    class PersonalDataRuntime:
+        def start(self, request):
+            return ExecutionResult(
+                provider="mock", external_run_id="provider-run-456",
+                status="succeeded", detail="Contact billing@example.com",
+            )
+
+    monkeypatch.setattr(
+        "app.worker.processor.get_runtime",
+        lambda _: PersonalDataRuntime(),
+    )
+    session_factory = sessionmaker(
+        bind=ctx["db"].get_bind(), autoflush=False, autocommit=False,
+    )
+    process_one_execution(worker_id="dpg-output-redact", session_factory=session_factory)
+
+    ctx["db"].expire_all()
+    saved = ctx["db"].get(Execution, execution.id)
+    assert saved.status == ExecutionStatus.succeeded
+    assert "billing@example.com" not in saved.result["detail"]
+    assert "[REDACTED_EMAIL]" in saved.result["detail"]
+    event = ctx["db"].query(AuditEvent).filter_by(
+        org_id=ctx["org_id"],
+        event_type="execution.output_redacted",
+        resource_type="execution",
+        resource_id=execution.id,
+    ).one()
+    assert event.payload["redaction_counts"] == {"EMAIL": 1}
+
+
+def test_processor_blocks_provider_secret_output_before_result_persistence(worker_context, monkeypatch):
+    ctx = worker_context
+    execution = create_worker_execution(ctx)
+    ctx["db"].commit()
+
+    class SecretOutputRuntime:
+        def start(self, request):
+            return ExecutionResult(
+                provider="mock", external_run_id="provider-run-789",
+                status="succeeded", detail="token=sk-ant-api-1234567890abcdefghijkl",
+            )
+
+    monkeypatch.setattr(
+        "app.worker.processor.get_runtime",
+        lambda _: SecretOutputRuntime(),
+    )
+    session_factory = sessionmaker(
+        bind=ctx["db"].get_bind(), autoflush=False, autocommit=False,
+    )
+    process_one_execution(worker_id="dpg-output-block", session_factory=session_factory)
+
+    ctx["db"].expire_all()
+    saved = ctx["db"].get(Execution, execution.id)
+    assert saved.status == ExecutionStatus.failed
+    assert saved.error_code == "DATA_PROTECTION_BLOCKED"
+    assert saved.result is None
+    event = ctx["db"].query(AuditEvent).filter_by(
+        org_id=ctx["org_id"],
+        event_type="execution.output_protection_blocked",
+        resource_type="execution",
+        resource_id=execution.id,
+    ).one()
+    assert event.payload == {"reason_code": "SECRET_DETECTED"}
+
+
 def test_processor_sanitizes_runtime_failure(worker_context, monkeypatch):
     ctx = worker_context
     execution, session_factory = mock_worker_context(ctx)

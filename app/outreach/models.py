@@ -1,7 +1,7 @@
 """Governed outbound communications metadata; no provider credentials or send execution."""
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db import Base
 
@@ -18,6 +18,11 @@ class OutboundSender(Base):
     __tablename__ = "outbound_senders"
     __table_args__ = (
         UniqueConstraint("org_id", "workspace_id", "email_address", name="uq_outbound_sender_email"),
+        UniqueConstraint("org_id", "workspace_id", "id", name="uq_outbound_senders_scope_id"),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id"], ["workspaces.org_id", "workspaces.id"],
+            ondelete="CASCADE", name="fk_outbound_senders_workspace_scope",
+        ),
         Index("ix_outbound_senders_scope_status", "org_id", "workspace_id", "status"),
         CheckConstraint("status IN ('draft','active','paused')", name="ck_outbound_sender_status"),
         CheckConstraint("max_per_hour >= 1 AND max_per_hour <= 100 AND max_per_day >= 1 AND max_per_day <= 1000", name="ck_outbound_sender_rate_limits"),
@@ -42,6 +47,16 @@ class CommunicationConsent(Base):
     """Append-only channel-specific consent or reviewed legal-basis evidence."""
     __tablename__ = "communication_consents"
     __table_args__ = (
+        UniqueConstraint("org_id", "workspace_id", "id", name="uq_communication_consents_scope_id"),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id"], ["workspaces.org_id", "workspaces.id"],
+            ondelete="CASCADE", name="fk_communication_consents_workspace_scope",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "contact_id"],
+            ["contacts.org_id", "contacts.workspace_id", "contacts.id"],
+            ondelete="CASCADE", name="fk_communication_consents_contact_scope",
+        ),
         Index("ix_communication_consents_latest", "org_id", "workspace_id", "contact_id", "channel", "recorded_at"),
         CheckConstraint("channel IN ('email','phone','sms')", name="ck_communication_consent_channel"),
         CheckConstraint("status IN ('unknown','granted','legitimate_interest_reviewed','withdrawn')", name="ck_communication_consent_status"),
@@ -68,6 +83,15 @@ class CommunicationBlock(Base):
     __tablename__ = "communication_blocks"
     __table_args__ = (
         UniqueConstraint("org_id", "workspace_id", "contact_id", "channel", name="uq_communication_block_contact_channel"),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id"], ["workspaces.org_id", "workspaces.id"],
+            ondelete="CASCADE", name="fk_communication_blocks_workspace_scope",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "contact_id"],
+            ["contacts.org_id", "contacts.workspace_id", "contacts.id"],
+            ondelete="CASCADE", name="fk_communication_blocks_contact_scope",
+        ),
         Index("ix_communication_blocks_scope_status", "org_id", "workspace_id", "status"),
         CheckConstraint("channel IN ('email','phone','sms')", name="ck_communication_block_channel"),
         CheckConstraint("status IN ('active','released')", name="ck_communication_block_status"),
@@ -93,6 +117,36 @@ class CommunicationBlock(Base):
 class OutboundMessage(Base):
     __tablename__ = "outbound_messages"
     __table_args__ = (
+        UniqueConstraint("org_id", "workspace_id", "id", name="uq_outbound_messages_scope_id"),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id"], ["workspaces.org_id", "workspaces.id"],
+            ondelete="CASCADE", name="fk_outbound_messages_workspace_scope",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "sender_id"],
+            ["outbound_senders.org_id", "outbound_senders.workspace_id", "outbound_senders.id"],
+            ondelete="RESTRICT", name="fk_outbound_messages_sender_scope",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "contact_id"],
+            ["contacts.org_id", "contacts.workspace_id", "contacts.id"],
+            ondelete="RESTRICT", name="fk_outbound_messages_contact_scope",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "lead_id"],
+            ["leads.org_id", "leads.workspace_id", "leads.id"],
+            ondelete="RESTRICT", name="fk_outbound_messages_lead_scope",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "consent_id"],
+            ["communication_consents.org_id", "communication_consents.workspace_id", "communication_consents.id"],
+            ondelete="RESTRICT", name="fk_outbound_messages_consent_scope",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "approval_id"],
+            ["approvals.org_id", "approvals.workspace_id", "approvals.id"],
+            ondelete="RESTRICT", name="fk_outbound_messages_approval_scope",
+        ),
         Index("ix_outbound_messages_scope_status", "org_id", "workspace_id", "status"),
         Index("ix_outbound_messages_sender_queued", "org_id", "workspace_id", "sender_id", "queued_at"),
         Index("ix_outbound_messages_contact", "org_id", "workspace_id", "contact_id", "created_at"),
@@ -128,6 +182,15 @@ class OutboundMessage(Base):
 class OutboundMessageEvent(Base):
     __tablename__ = "outbound_message_events"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id"], ["workspaces.org_id", "workspaces.id"],
+            ondelete="CASCADE", name="fk_outbound_message_events_workspace_scope",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "message_id"],
+            ["outbound_messages.org_id", "outbound_messages.workspace_id", "outbound_messages.id"],
+            ondelete="CASCADE", name="fk_outbound_message_events_message_scope",
+        ),
         UniqueConstraint("org_id", "workspace_id", "external_event_id", name="uq_outbound_external_event"),
         Index("ix_outbound_message_events_scope", "org_id", "workspace_id", "message_id", "occurred_at"),
         CheckConstraint("event_type IN ('reply','opt_out','bounce','delivered','failed')", name="ck_outbound_event_type"),
