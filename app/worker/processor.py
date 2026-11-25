@@ -2,7 +2,7 @@ import json
 import threading
 
 from app.audit import record_event
-from app.data_protection import DataProtectionBlocked, protect_execution_request
+from app.data_protection import DataProtectionBlocked, protect_execution_request, protect_execution_result
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -144,6 +144,34 @@ def _serialize_result(result: ExecutionResult) -> dict:
         raise ValueError("Runtime result exceeds the permitted size")
     return payload
 
+def _record_data_protection_failure(
+    session_factory: SessionFactory, *, execution_id: str, attempt_id: str,
+    worker_id: str, org_id: str, workspace_id: str, reason_code: str,
+    event_type: str,
+) -> None:
+    """Persist the policy block and failed attempt atomically; never send raw data."""
+    try:
+        with session_factory() as db:
+            record_event(
+                db, org_id, None, event_type, "execution", execution_id,
+                workspace_id, {"reason_code": reason_code},
+            )
+            fail_execution(
+                db, execution_id=execution_id, attempt_id=attempt_id,
+                worker_id=worker_id, error_code="DATA_PROTECTION_BLOCKED",
+                error_message="Execution blocked by data-protection policy.",
+                retryable=False,
+            )
+            db.commit()
+    except Exception:
+        _record_failure(
+            session_factory, execution_id=execution_id, attempt_id=attempt_id,
+            worker_id=worker_id, error_code="DATA_PROTECTION_AUDIT_FAILED",
+            error_message="Data-protection audit could not be persisted; provider execution was blocked.",
+            retryable=True,
+        )
+
+
 def process_one_execution(
     *, worker_id: str, lease_seconds: int = 60,
     heartbeat_interval_seconds: float | None = None,
@@ -207,28 +235,12 @@ def process_one_execution(
     try:
         request, protection_report = protect_execution_request(request)
     except DataProtectionBlocked as exc:
-        try:
-            with session_factory() as protection_db:
-                record_event(
-                    protection_db, execution.org_id, None,
-                    "execution.data_protection_blocked", "execution", execution_id,
-                    execution.workspace_id,
-                    {"reason_code": exc.code, "data_class": execution.data_class.value},
-                )
-                fail_execution(
-                    protection_db, execution_id=execution_id, attempt_id=attempt_id,
-                    worker_id=worker_id, error_code="DATA_PROTECTION_BLOCKED",
-                    error_message="Execution blocked by data-protection policy.",
-                    retryable=False,
-                )
-                protection_db.commit()
-        except Exception:
-            _record_failure(
-                session_factory, execution_id=execution_id, attempt_id=attempt_id,
-                worker_id=worker_id, error_code="DATA_PROTECTION_AUDIT_FAILED",
-                error_message="Data-protection audit could not be persisted; provider execution was blocked.",
-                retryable=True,
-            )
+        _record_data_protection_failure(
+            session_factory, execution_id=execution_id, attempt_id=attempt_id,
+            worker_id=worker_id, org_id=execution.org_id,
+            workspace_id=execution.workspace_id, reason_code=exc.code,
+            event_type="execution.data_protection_blocked",
+        )
         return execution_id
 
     if protection_report.total_redactions:
@@ -261,10 +273,39 @@ def process_one_execution(
     heartbeat.start()
     runtime_error: tuple[str, str, bool] | None = None
     serialized_result: dict | None = None
+    data_protection_block_code: str | None = None
     try:
         runtime = get_runtime(runtime_name)
         runtime_result = runtime.start(request)
-        serialized_result = _serialize_result(runtime_result)
+        runtime_result, output_protection = protect_execution_result(runtime_result)
+        if output_protection.total_redactions:
+            try:
+                with session_factory() as audit_db:
+                    record_event(
+                        audit_db, execution.org_id, None,
+                        "execution.output_redacted", "execution", execution_id,
+                        execution.workspace_id,
+                        {
+                            "redaction_counts": output_protection.redaction_counts,
+                            "data_class": execution.data_class.value,
+                        },
+                    )
+                    audit_db.commit()
+            except Exception:
+                runtime_error = (
+                    "DATA_PROTECTION_AUDIT_FAILED",
+                    "Data-protection audit could not be persisted; provider output was discarded.",
+                    False,
+                )
+        if runtime_error is None:
+            serialized_result = _serialize_result(runtime_result)
+    except DataProtectionBlocked as exc:
+        data_protection_block_code = exc.code
+        runtime_error = (
+            "DATA_PROTECTION_BLOCKED",
+            "Runtime output blocked by data-protection policy.",
+            False,
+        )
     except RuntimeNotConfiguredError:
         runtime_error = (
             "RUNTIME_NOT_CONFIGURED", "The requested runtime is unavailable.", False,
@@ -291,6 +332,16 @@ def process_one_execution(
         )
     finally:
         heartbeat.stop()
+
+    if data_protection_block_code is not None:
+        _record_data_protection_failure(
+            session_factory, execution_id=execution_id, attempt_id=attempt_id,
+            worker_id=worker_id, org_id=execution.org_id,
+            workspace_id=execution.workspace_id,
+            reason_code=data_protection_block_code,
+            event_type="execution.output_protection_blocked",
+        )
+        return execution_id
 
     heartbeat.assert_healthy()
     if runtime_error is not None:

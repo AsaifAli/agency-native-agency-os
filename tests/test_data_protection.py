@@ -87,3 +87,28 @@ def test_protect_execution_request_allows_authorized_commercial_after_redaction(
     ))
     assert "billing@example.com" not in protected.task_description
     assert report.redaction_counts == {"EMAIL": 1}
+
+from app.data_protection import protect_execution_result
+from app.integrations.runtime import ExecutionResult
+
+
+def test_protect_execution_result_redacts_personal_data_before_persistence():
+    result = ExecutionResult(
+        provider="test", external_run_id="run-1", status="succeeded",
+        detail="Contact billing@example.com or call +91 98765 43210.",
+    )
+    protected, report = protect_execution_result(result)
+    assert "billing@example.com" not in protected.detail
+    assert "98765 43210" not in protected.detail
+    assert report.redaction_counts == {"EMAIL": 1, "PHONE": 1}
+    assert result.detail == "Contact billing@example.com or call +91 98765 43210."
+
+
+def test_protect_execution_result_blocks_secret_output():
+    result = ExecutionResult(
+        provider="test", external_run_id="run-2", status="succeeded",
+        detail="Credential: sk-ant-api-1234567890abcdefghijkl",
+    )
+    with pytest.raises(DataProtectionBlocked) as error:
+        protect_execution_result(result)
+    assert error.value.code == "SECRET_DETECTED"

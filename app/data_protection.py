@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass, replace
 from typing import Any
 
-from app.integrations.runtime import ExecutionRequest
+from app.integrations.runtime import ExecutionRequest, ExecutionResult
 from app.models import DataClass
 
 
@@ -105,6 +105,16 @@ def sanitize_text(value: str) -> tuple[str, dict[str, int]]:
 
     text = _PHONE.sub(redact_phone, text)
     return text, counts
+
+
+def protect_execution_result(
+    result: ExecutionResult,
+) -> tuple[ExecutionResult, DataProtectionReport]:
+    """Sanitize provider output before it can be persisted as an execution result."""
+    if not isinstance(result, ExecutionResult) or not isinstance(result.detail, str):
+        raise DataProtectionBlocked("INVALID_RUNTIME_RESULT")
+    cleaned, counts = sanitize_text(result.detail)
+    return replace(result, detail=cleaned), DataProtectionReport(redaction_counts=counts)
 
 
 def _sanitize_value(value: Any, counts: dict[str, int], depth: int = 0) -> Any:
