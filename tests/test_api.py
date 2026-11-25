@@ -265,3 +265,21 @@ def test_new_workspace_is_granted_to_creator_but_not_future_org_members():
         headers=viewer_headers,
     )
     assert denied.status_code == 404
+
+
+def test_organization_owner_without_founder_authority_cannot_change_workspace_grants():
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer dev:owner@test.local"}
+    org_id = _org_id()
+    denied_grant = client.post(
+        f"/v1/orgs/{org_id}/workspaces/ws-test/grants",
+        params={"user_id": "someone-else"},
+        headers=headers,
+    )
+    assert denied_grant.status_code == 403
+
+    denied_revoke = client.delete(
+        f"/v1/orgs/{org_id}/workspaces/ws-test/grants/someone-else",
+        headers=headers,
+    )
+    assert denied_revoke.status_code == 403
