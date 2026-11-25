@@ -209,6 +209,7 @@ class OutreachDraft(Base):
     reviewed_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     review_note: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
+    promoted_lead_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_by: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 
@@ -301,9 +302,15 @@ class LeadResearchDraft(Base):
             ondelete="RESTRICT",
             name="fk_lead_research_drafts_machine_identity_scope",
         ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "promoted_lead_id"],
+            ["leads.org_id", "leads.workspace_id", "leads.id"],
+            ondelete="RESTRICT",
+            name="fk_lead_research_drafts_promoted_lead_scope",
+        ),
         CheckConstraint("fit_score BETWEEN 0 AND 100", name="ck_lead_research_draft_fit_score"),
         CheckConstraint("confidence_score BETWEEN 0 AND 100", name="ck_lead_research_draft_confidence_score"),
-        CheckConstraint("status IN ('pending_review','approved','rejected')", name="ck_lead_research_draft_status"),
+        CheckConstraint("status IN ('pending_review','approved','rejected','promoted')", name="ck_lead_research_draft_status"),
         Index("ix_lead_research_drafts_scope_status_created", "org_id", "workspace_id", "status", "created_at"),
     )
 
