@@ -56,7 +56,6 @@ services:
       - "-c"
       - "GRANT USAGE ON SCHEMA agency_os_private TO agency_os_test_app"
       - "-c"
-      - "-c"
       - "GRANT EXECUTE ON FUNCTION agency_os_private.user_has_org_access(text, text) TO agency_os_test_app"
       - "-c"
       - "GRANT EXECUTE ON FUNCTION agency_os_private.user_has_workspace_access(text, text, text) TO agency_os_test_app"
