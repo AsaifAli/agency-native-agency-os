@@ -95,3 +95,17 @@ def test_workspace_authorization_migration_uses_exact_grants_and_audited_functio
     assert "workspace_id IS NOT NULL" in source
     assert "agency_os_migrator" in source
     assert "REVOKE ALL ON FUNCTION" in source
+
+
+def test_workspace_authorization_migration_covers_every_workspace_owned_table():
+    path = PATH.with_name("v2c4e6a8b0d2_human_workspace_authorization.py")
+    spec = importlib.util.spec_from_file_location("workspace_rls_migration", path)
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    expected = {
+        table.name
+        for table in Base.metadata.sorted_tables
+        if {"org_id", "workspace_id"} <= {column.name for column in table.columns}
+        and table.name != "workspace_grants"
+    }
+    assert set(migration.WORKSPACE_TABLES) == expected
