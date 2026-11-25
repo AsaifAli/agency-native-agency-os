@@ -4,7 +4,7 @@
 
 Migration `t0a1b2c3d4e5` enables and FORCEs RLS for organization-scoped model tables, `organizations` and `browser_sessions`. Follow-up migration `u1b2c3d4e5f6` adds RLS to `execution_attempts`, scopes org-level outbox events and adds two private SECURITY DEFINER worker operations. The worker role is changed to non-superuser `NOBYPASSRLS`; it enumerates org/workspace identifiers through a narrowly granted function, then runs normal queue, execution, session and outbox queries with a transaction-local exact workspace context. Browser-session retention runs through a bounded, audited SECURITY DEFINER function. Direct worker privileges on users, browser sessions, memberships, founder authorities and machine identities are revoked. API and worker startup verify their PostgreSQL role attributes.
 
-**Not live-verified yet:** this Upstash development environment has no PostgreSQL server or Docker daemon. The migration can be rendered to PostgreSQL SQL and has static model-coverage tests, but it has not been applied to a live PostgreSQL 16 instance here. The live isolation suite is included and remains skipped until a disposable PostgreSQL test database is supplied.
+**Validation status:** the earlier PR #47 candidate was exercised by the user against an isolated PostgreSQL 16 test database and its five live tests passed. The follow-up migration `u1b2c3d4e5f6` and worker-role tests in PR #48 have not yet been run against that database. The assistant-side development environment has no Docker daemon or live PostgreSQL service.
 
 Human organization membership currently grants access to all workspaces in that organization. There is no per-user workspace membership/assignment model yet; human workspace restrictions still rely on route-level `org_id`/`workspace_id` checks. Machine identities are database-enforced to their exact workspace.
 
@@ -47,7 +47,7 @@ Do not reset/delete the volume. Back up first.
 - Machine authentication first binds only the supplied identity ID for one-row lookup; after digest verification it binds the machine organization and exact workspace.
 - Signed website intake binds only its configured org/workspace after signature and idempotency checks.
 - SQLAlchemy reapplies context after each new transaction. `set_config(..., true)` resets at commit/rollback so pooled connections do not retain a previous request's tenant identity.
-- A restricted `SECURITY DEFINER` membership predicate is owned by `agency_os_migrator`; execute is revoked from PUBLIC and granted only to the API and worker roles.
+- A restricted `SECURITY DEFINER` membership predicate is owned by `agency_os_migrator`; execute is revoked from PUBLIC and granted to API and worker roles. For `session_user = 'agency_os_worker'`, it always returns false so the worker cannot use it as a membership oracle.
 - Worker scope enumeration returns only org/workspace identifiers. All worker data queries use a workspace-scoped session factory. Execution attempts inherit their parent execution's RLS scope.
 - Browser-session retention is a bounded, audited SECURITY DEFINER operation; the worker has no direct browser-session table privileges.
 
