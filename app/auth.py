@@ -5,7 +5,7 @@ from fastapi import Cookie, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 from app.config import settings
 from app.db import get_db, set_rls_context
-from app.models import User, Membership, FounderAuthority, Role
+from app.models import User, Membership, FounderAuthority, Role, Workspace, WorkspaceGrant
 from app.browser_sessions import authenticate_browser_session
 from app.jwt_keys import decode_jwt, encode_jwt
 
@@ -88,6 +88,56 @@ def require_membership(org_id: str, principal: Principal, db: Session) -> Role:
         # Avoid disclosing whether an organization exists to non-members.
         raise HTTPException(404, "Organization not found")
     return membership.role
+
+def require_workspace_access(
+    org_id: str, workspace_id: str, principal: Principal, db: Session
+) -> Workspace:
+    """Require active organization membership and an active exact-workspace grant.
+
+    Return a uniform 404 for missing membership, workspace, or grant so callers
+    cannot use this boundary to enumerate another organization's workspaces.
+    Organization roles remain a separate permission check.
+    """
+    if not principal.user.active:
+        raise HTTPException(404, "Workspace not found")
+    membership = db.query(Membership.id).filter_by(
+        org_id=org_id, user_id=principal.user.id
+    ).first()
+    if membership is None:
+        raise HTTPException(404, "Workspace not found")
+    workspace = (
+        db.query(Workspace)
+        .join(
+            WorkspaceGrant,
+            (WorkspaceGrant.org_id == Workspace.org_id)
+            & (WorkspaceGrant.workspace_id == Workspace.id),
+        )
+        .filter(
+            Workspace.org_id == org_id,
+            Workspace.id == workspace_id,
+            WorkspaceGrant.user_id == principal.user.id,
+            WorkspaceGrant.revoked_at.is_(None),
+        )
+        .first()
+    )
+    if workspace is None:
+        raise HTTPException(404, "Workspace not found")
+    return workspace
+
+
+def require_workspace_access_from_context(
+    org_id: str, workspace_id: str, db: Session
+) -> Workspace:
+    """Route-helper variant using the identity established by get_principal()."""
+    context = db.info.get("agency_os_rls_context") or {}
+    user_id = context.get("user_id")
+    if not user_id:
+        raise HTTPException(401, "Authenticated session required")
+    user = db.query(User).filter_by(id=user_id, active=True).first()
+    if user is None:
+        raise HTTPException(401, "Authenticated session required")
+    return require_workspace_access(org_id, workspace_id, Principal(user), db)
+
 
 def require_role(role: Role, allowed: set[Role]):
     if role not in allowed:
