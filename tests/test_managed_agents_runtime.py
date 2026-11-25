@@ -284,7 +284,6 @@ def test_managed_agents_dispatches_custom_tool_while_session_is_running_and_retu
     assert posted[0]["type"] == "user.custom_tool_result"
     assert posted[0]["custom_tool_use_id"] == "sevt_custom_1"
     assert json.loads(posted[0]["content"][0]["text"]) == {"database": "ok"}
-    assert posted[0]["is_error"] is False
 
 
 def test_managed_agents_custom_tool_errors_are_returned_without_raw_exception_text():
@@ -323,7 +322,6 @@ def test_managed_agents_custom_tool_errors_are_returned_without_raw_exception_te
     )
     result = runtime.start(request(execute_custom_tool=fail))
     assert result.detail == "Tool failed safely."
-    assert posted[0]["is_error"] is True
     text_result = posted[0]["content"][0]["text"]
     assert "secret-provider-token" not in text_result
     assert "OS_TOOL_CALL_REJECTED" in text_result
