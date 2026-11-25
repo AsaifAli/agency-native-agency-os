@@ -23,7 +23,7 @@ def upgrade() -> None:
         sa.Column("subject_type", sa.String(16), nullable=False),
         sa.Column("subject_id", sa.String(36), nullable=False),
         sa.Column("token_hash", sa.String(64), nullable=False),
-        sa.Column("token_prefix", sa.String(24), nullable=False),
+        sa.Column("token_prefix", sa.String(48), nullable=False),
         sa.Column("scopes", sa.JSON(), nullable=False),
         sa.Column("allowed_data_classes", sa.JSON(), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
@@ -50,11 +50,7 @@ def upgrade() -> None:
         sa.Column("last_seen_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("ended_at", sa.DateTime(timezone=True), nullable=True),
-        sa.ForeignKeyConstraint(
-            ["org_id", "workspace_id", "machine_identity_id"],
-            ["machine_identities.org_id", "machine_identities.workspace_id", "machine_identities.id"],
-            ondelete="CASCADE", name="fk_agent_session_identity_scope",
-        ),
+        sa.ForeignKeyConstraint(["org_id", "workspace_id", "machine_identity_id"], ["machine_identities.org_id", "machine_identities.workspace_id", "machine_identities.id"], ondelete="CASCADE", name="fk_agent_session_identity_scope"),
         sa.CheckConstraint("status IN ('active','cancelled','expired','closed')", name="ck_agent_session_status"),
         sa.CheckConstraint("data_class IN ('synthetic','public','commercial','confidential','regulated')", name="ck_agent_session_data_class"),
     )
