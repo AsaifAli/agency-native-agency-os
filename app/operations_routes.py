@@ -762,12 +762,15 @@ def record_invoice_issued(
 @router.post("/invoices/{invoice_id}/reject", response_model=InvoiceOut)
 def reject_invoice(
     org_id: str, invoice_id: str, body: ContractReject,
+    workspace_id: str = Query(min_length=1),
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
-    item = db.query(InvoiceRecord).filter_by(id=invoice_id, org_id=org_id).with_for_update().first()
+    _workspace(db, org_id, workspace_id)
+    item = db.query(InvoiceRecord).filter_by(
+        id=invoice_id, org_id=org_id, workspace_id=workspace_id
+    ).with_for_update().first()
     if item is None:
         raise HTTPException(404, "Invoice not found")
-    _workspace(db, org_id, item.workspace_id)
     require_founder_authority(db, org_id, p.user.id)
     if item.status != "pending_approval" or item.approval_id != body.approval_id:
         raise HTTPException(409, "Invoice is not awaiting this approval")
@@ -1035,12 +1038,15 @@ def submit_onboarding_for_activation(
 @router.post("/onboardings/{onboarding_id}/reject-activation", response_model=OnboardingOut)
 def reject_onboarding_activation(
     org_id: str, onboarding_id: str, body: ContractReject,
+    workspace_id: str = Query(min_length=1),
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
-    item = db.query(ClientOnboarding).filter_by(id=onboarding_id, org_id=org_id).with_for_update().first()
+    _workspace(db, org_id, workspace_id)
+    item = db.query(ClientOnboarding).filter_by(
+        id=onboarding_id, org_id=org_id, workspace_id=workspace_id
+    ).with_for_update().first()
     if item is None:
         raise HTTPException(404, "Onboarding not found")
-    _workspace(db, org_id, item.workspace_id)
     require_founder_authority(db, org_id, p.user.id)
     if item.status != "pending_approval" or item.approval_id != body.approval_id:
         raise HTTPException(409, "Onboarding is not awaiting this approval")
@@ -1255,12 +1261,15 @@ def submit_contract_for_approval(
 @router.post("/contracts/{contract_id}/record-execution", response_model=ContractOut)
 def record_contract_execution(
     org_id: str, contract_id: str, body: ContractExecutionEvidence,
+    workspace_id: str = Query(min_length=1),
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
-    item = db.query(ContractRecord).filter_by(id=contract_id, org_id=org_id).with_for_update().first()
+    _workspace(db, org_id, workspace_id)
+    item = db.query(ContractRecord).filter_by(
+        id=contract_id, org_id=org_id, workspace_id=workspace_id
+    ).with_for_update().first()
     if item is None:
         raise HTTPException(404, "Contract not found")
-    _workspace(db, org_id, item.workspace_id)
     require_founder_authority(db, org_id, p.user.id)
     if item.status != "pending_approval" or item.approval_id != body.approval_id:
         raise HTTPException(409, "Contract is not awaiting this approval")
@@ -1290,12 +1299,15 @@ def record_contract_execution(
 @router.post("/contracts/{contract_id}/reject", response_model=ContractOut)
 def reject_contract(
     org_id: str, contract_id: str, body: ContractReject,
+    workspace_id: str = Query(min_length=1),
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
-    item = db.query(ContractRecord).filter_by(id=contract_id, org_id=org_id).with_for_update().first()
+    _workspace(db, org_id, workspace_id)
+    item = db.query(ContractRecord).filter_by(
+        id=contract_id, org_id=org_id, workspace_id=workspace_id
+    ).with_for_update().first()
     if item is None:
         raise HTTPException(404, "Contract not found")
-    _workspace(db, org_id, item.workspace_id)
     require_founder_authority(db, org_id, p.user.id)
     if item.status != "pending_approval" or item.approval_id != body.approval_id:
         raise HTTPException(409, "Contract is not awaiting this approval")
@@ -1471,12 +1483,15 @@ def approve_proposal(
 @router.post("/proposals/{proposal_id}/reject", response_model=ProposalOut)
 def reject_proposal(
     org_id: str, proposal_id: str, body: ProposalDecision,
+    workspace_id: str = Query(min_length=1),
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
-    item = db.query(Proposal).filter_by(id=proposal_id, org_id=org_id).with_for_update().first()
+    _workspace(db, org_id, workspace_id)
+    item = db.query(Proposal).filter_by(
+        id=proposal_id, org_id=org_id, workspace_id=workspace_id
+    ).with_for_update().first()
     if item is None:
         raise HTTPException(404, "Proposal not found")
-    _workspace(db, org_id, item.workspace_id)
     require_founder_authority(db, org_id, p.user.id)
     if item.status != "pending_approval" or item.approval_id != body.approval_id:
         raise HTTPException(409, "Proposal is not awaiting this approval")
