@@ -9,6 +9,7 @@ RUN pip install --no-cache-dir -r requirements-dev.txt
 COPY alembic.ini .
 COPY migrations ./migrations
 COPY app ./app
+COPY docker ./docker
 COPY tests ./tests
 COPY pytest.ini .
 
