@@ -145,3 +145,74 @@ def test_machine_session_route_requires_machine_credential(security_client):
         json={"purpose": "Synthetic test", "data_class": "synthetic", "ttl_seconds": 300},
     )
     assert response.status_code == 201, response.text
+
+
+def test_nonfounder_cannot_issue_machine_identity(security_client):
+    from app.models import Membership, Role, User
+    from app.auth import get_principal, Principal
+    operator = User(email="security-operator@example.test")
+    db = security_client.factory()
+    try:
+        db.add(operator)
+        db.flush()
+        db.add(Membership(org_id=security_client.org_id, user_id=operator.id, role=Role.operator))
+        db.commit()
+    finally:
+        db.close()
+    security_client.app.dependency_overrides[get_principal] = lambda: Principal(user=operator)
+    response = security_client.post(
+        f"/v1/orgs/{security_client.org_id}/machine-identities",
+        json={
+            "workspace_id": security_client.workspace_id,
+            "name": "Unauthorized Worker",
+            "subject_type": "worker",
+            "subject_id": "worker-unauthorized",
+            "scopes": ["sessions:create"],
+            "allowed_data_classes": ["synthetic"],
+        },
+    )
+    assert response.status_code == 403
+
+
+def test_machine_identity_rejects_commercial_data_until_client_policy_exists(security_client):
+    response = security_client.post(
+        f"/v1/orgs/{security_client.org_id}/machine-identities",
+        json={
+            "workspace_id": security_client.workspace_id,
+            "name": "Commercial Worker",
+            "subject_type": "worker",
+            "subject_id": "commercial-worker",
+            "scopes": ["sessions:create"],
+            "allowed_data_classes": ["commercial"],
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_machine_session_cannot_outlive_its_identity(security_client):
+    issued = _create_identity(security_client)
+    db = security_client.factory()
+    try:
+        principal = authenticate_machine_token("Bearer " + issued["token"], db)
+        principal.identity.expires_at = datetime.now(timezone.utc) + timedelta(seconds=180)
+        db.flush()
+        session = create_agent_session(
+            db, principal, purpose="Bounded session", data_class="public", ttl_seconds=3600
+        )
+        assert session.expires_at <= principal.identity.expires_at
+    finally:
+        db.close()
+
+
+def test_revoked_machine_credential_cannot_authenticate(security_client):
+    issued = _create_identity(security_client)
+    revoked = security_client.post(
+        f"/v1/orgs/{security_client.org_id}/machine-identities/{issued['id']}/revoke"
+    )
+    assert revoked.status_code == 200
+    db = security_client.factory()
+    try:
+        with pytest.raises(Exception):
+            authenticate_machine_token("Bearer " + issued["token"], db)
+    finally:
+        db.close()
