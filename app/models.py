@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 from sqlalchemy import (
     String, DateTime, Boolean, ForeignKey, ForeignKeyConstraint, Text, Enum, JSON,
-    UniqueConstraint, Index, CheckConstraint, func, true,
+    UniqueConstraint, Index, CheckConstraint, func, true, text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db import Base
@@ -115,7 +115,7 @@ class WorkspaceGrant(Base):
         Index(
             "uq_workspace_grants_active", "org_id", "workspace_id", "user_id",
             unique=True,
-            postgresql_where=__import__("sqlalchemy").text("revoked_at IS NULL"),
+            postgresql_where=text("revoked_at IS NULL"),
             sqlite_where=__import__("sqlalchemy").text("revoked_at IS NULL"),
         ),
         Index("ix_workspace_grants_user_active", "user_id", "revoked_at"),
