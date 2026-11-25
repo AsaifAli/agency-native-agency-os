@@ -13,6 +13,9 @@ branch_labels = None
 depends_on = None
 
 
+ORG_LEVEL_NULLABLE_WORKSPACE_TABLES = ("audit_events", "outbox_events")
+
+
 WORKSPACE_TABLES = (
     "agent_sessions", "agents", "approvals", "audit_events", "call_sessions",
     "call_transcripts", "client_onboardings", "clients",
@@ -351,42 +354,51 @@ def upgrade() -> None:
             if table == "machine_identities" else ""
         )
         op.execute(f'DROP POLICY IF EXISTS tenant_isolation ON public."{table}"')
+        if table in ORG_LEVEL_NULLABLE_WORKSPACE_TABLES:
+            human_predicate = """
+                (
+                    (workspace_id IS NULL AND agency_os_private.user_has_org_access(
+                        org_id, nullif(current_setting('agency_os.user_id', true), '')
+                    ))
+                    OR
+                    (workspace_id IS NOT NULL AND agency_os_private.user_has_workspace_access(
+                        org_id, workspace_id,
+                        nullif(current_setting('agency_os.user_id', true), '')
+                    ))
+                )
+            """
+            machine_predicate = """
+                (
+                    org_id = nullif(current_setting('agency_os.machine_org_id', true), '')
+                    AND (
+                        workspace_id IS NULL
+                        OR workspace_id = nullif(current_setting('agency_os.machine_workspace_id', true), '')
+                    )
+                )
+            """ if table == "outbox_events" else """
+                (
+                    org_id = nullif(current_setting('agency_os.machine_org_id', true), '')
+                    AND workspace_id = nullif(current_setting('agency_os.machine_workspace_id', true), '')
+                )
+            """
+        else:
+            human_predicate = """
+                agency_os_private.user_has_workspace_access(
+                    org_id, workspace_id,
+                    nullif(current_setting('agency_os.user_id', true), '')
+                )
+            """
+            machine_predicate = """
+                (
+                    org_id = nullif(current_setting('agency_os.machine_org_id', true), '')
+                    AND workspace_id = nullif(current_setting('agency_os.machine_workspace_id', true), '')
+                )
+            """
+        policy = f"({human_predicate}) OR ({machine_predicate}){identity_lookup}"
         op.execute(f'''
             CREATE POLICY tenant_isolation ON public."{table}"
-            USING (
-                (
-                    (workspace_id IS NULL AND agency_os_private.user_has_org_access(
-                        org_id, nullif(current_setting('agency_os.user_id', true), '')
-                    ))
-                    OR
-                    (workspace_id IS NOT NULL AND agency_os_private.user_has_workspace_access(
-                        org_id, workspace_id,
-                        nullif(current_setting('agency_os.user_id', true), '')
-                    ))
-                )
-                OR (
-                    org_id = nullif(current_setting('agency_os.machine_org_id', true), '')
-                    AND workspace_id = nullif(current_setting('agency_os.machine_workspace_id', true), '')
-                )
-                {identity_lookup}
-            )
-            WITH CHECK (
-                (
-                    (workspace_id IS NULL AND agency_os_private.user_has_org_access(
-                        org_id, nullif(current_setting('agency_os.user_id', true), '')
-                    ))
-                    OR
-                    (workspace_id IS NOT NULL AND agency_os_private.user_has_workspace_access(
-                        org_id, workspace_id,
-                        nullif(current_setting('agency_os.user_id', true), '')
-                    ))
-                )
-                OR (
-                    org_id = nullif(current_setting('agency_os.machine_org_id', true), '')
-                    AND workspace_id = nullif(current_setting('agency_os.machine_workspace_id', true), '')
-                )
-                {identity_lookup}
-            )
+            USING ({policy})
+            WITH CHECK ({policy})
         ''')
 
     # Attempts inherit exact workspace authorization from their parent.
