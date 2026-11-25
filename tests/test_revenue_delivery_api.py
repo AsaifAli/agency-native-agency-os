@@ -169,8 +169,8 @@ def test_agent_research_and_outreach_drafts_are_source_backed_and_never_send(cli
         f"/v1/orgs/{org}/outreach-drafts?workspace_id={client.other_ws_id}",
         headers=auth(),
     )
-    assert other_workspace_drafts.status_code == 200
-    assert other_workspace_drafts.json() == []
+    # A workspace from another organization is not visible through this org route.
+    assert other_workspace_drafts.status_code == 404
     future_research = client.post(f"/v1/orgs/{org}/lead-research", headers=auth(), json={
         "workspace_id": ws, "lead_id": lead_id,
         "summary": "Future-dated research evidence must be rejected by the API.",
