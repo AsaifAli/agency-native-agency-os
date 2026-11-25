@@ -249,3 +249,20 @@ def test_protect_untrusted_payload_rejects_oversized_or_non_json_values():
 
     with pytest.raises(DataProtectionBlocked):
         protect_untrusted_payload({"unsupported": object()})
+
+
+def test_internal_scope_ids_are_not_misclassified_as_phone_numbers():
+    protected, _ = protect_execution_request(
+        _request(workspace_id="worker-ws-1234567890")
+    )
+    assert protected.workspace_id == "worker-ws-1234567890"
+
+
+def test_provider_run_identifier_that_looks_like_phone_is_blocked():
+    result = ExecutionResult(
+        provider="test", external_run_id="9876543210",
+        status="succeeded", detail="safe",
+    )
+    with pytest.raises(DataProtectionBlocked) as error:
+        protect_execution_result(result)
+    assert error.value.code == "SENSITIVE_RUNTIME_IDENTIFIER"
