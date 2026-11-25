@@ -1,9 +1,10 @@
-"""Conservative Claude Managed Agents adapter with durable session recovery.
+"""Claude Managed Agents adapter with durable sessions and OS-owned custom tools.
 
-The first integration slice refuses provider-side tools, MCP servers, skills,
-and multiagent workflows until the Agency OS MCP gateway and authorization
-enforcement are implemented. A provider session is complete only when every
-workflow run has ended and the primary turn reaches end_turn.
+Only exact custom tools from the Agency OS registry are permitted. Built-in
+provider tools, MCP servers, skills and provider multiagent features remain
+disabled until their actions can be reconciled into OS-owned policy and audit.
+A provider session completes only after all workflow runs end and the primary
+turn reaches end_turn.
 """
 from __future__ import annotations
 
