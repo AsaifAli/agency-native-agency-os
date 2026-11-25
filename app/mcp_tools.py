@@ -25,6 +25,7 @@ def list_session_tools(
     for spec in list_tools():
         if (
             spec.key not in enabled
+            or spec.risk_level != "read_only"
             or spec.requires_approval
             or "tools:invoke" not in identity.scopes
             or f"tool:{spec.key}" not in identity.scopes
@@ -51,6 +52,12 @@ def call_session_tool(
     max_calls_per_session: int = 50,
 ) -> dict:
     principal, session = load_active_session_context(db, context)
+    # The initial MCP bridge is read-only. Write tools remain unavailable until
+    # an OS-owned approval adapter can consume founder approval atomically.
+    read_only_keys = {
+        spec.key for spec in list_tools()
+        if spec.risk_level == "read_only" and not spec.requires_approval
+    }
     request_identity = f"{session.id}:{request_id}:{tool_name}"
     idempotency_key = "mcp_" + hashlib.sha256(request_identity.encode("utf-8")).hexdigest()
     return invoke_registered_tool(
@@ -61,5 +68,5 @@ def call_session_tool(
         payload=arguments,
         idempotency_key=idempotency_key,
         max_calls_per_session=max_calls_per_session,
-        allowed_tool_keys=set(enabled_tool_keys),
+        allowed_tool_keys=set(enabled_tool_keys).intersection(read_only_keys),
     )
