@@ -169,6 +169,25 @@ def _validate_runtime_identifier(value: str | None) -> str | None:
     return value
 
 
+def protect_untrusted_payload(
+    payload: Any,
+) -> tuple[Any, DataProtectionReport]:
+    """Sanitize a bounded JSON-compatible tool, connector, or extracted-text payload.
+
+    Binary file handling and caller authorization remain the responsibility of
+    the upload/connector boundary; this function protects the decoded payload.
+    """
+    if not isinstance(payload, (dict, list)):
+        raise DataProtectionBlocked("INVALID_UNTRUSTED_PAYLOAD")
+    if _bounded_json_size(payload) > MAX_EXECUTION_REQUEST_BYTES:
+        raise DataProtectionBlocked("UNTRUSTED_PAYLOAD_TOO_LARGE")
+    counts: dict[str, int] = {}
+    protected = _sanitize_value(payload, counts)
+    if _bounded_json_size(protected) > MAX_EXECUTION_REQUEST_BYTES:
+        raise DataProtectionBlocked("UNTRUSTED_PAYLOAD_TOO_LARGE")
+    return protected, DataProtectionReport(redaction_counts=dict(counts))
+
+
 def protect_execution_result(
     result: ExecutionResult,
 ) -> tuple[ExecutionResult, DataProtectionReport]:
