@@ -101,6 +101,8 @@ def test_managed_agents_resumes_persisted_session_without_creating_another():
 
     def handler(req):
         calls.append((req.method, req.url.path))
+        if req.method == "GET" and req.url.path == "/v1/agents/agent_test":
+            return httpx.Response(200, json={"id": "agent_test", "archived_at": None, "tools": [], "mcp_servers": [], "skills": [], "multiagent": None})
         if req.method == "GET" and req.url.path == "/v1/sessions/sesn_existing":
             return httpx.Response(200, json={"id": "sesn_existing", "status": "idle"})
         if req.method == "GET" and req.url.path == "/v1/sessions/sesn_existing/events":
