@@ -266,3 +266,27 @@ def test_provider_run_identifier_that_looks_like_phone_is_blocked():
     with pytest.raises(DataProtectionBlocked) as error:
         protect_execution_result(result)
     assert error.value.code == "SENSITIVE_RUNTIME_IDENTIFIER"
+
+
+def test_tool_result_internal_resource_ids_are_exempt_only_for_explicit_keys():
+    protected, _ = protect_untrusted_payload(
+        {"draft_id": "draft-1234567890", "notes": "Contact owner@example.test"},
+        trusted_internal_id_keys={"draft_id"},
+    )
+    assert protected["draft_id"] == "draft-1234567890"
+    assert protected["notes"] == "Contact [REDACTED_EMAIL]"
+    with pytest.raises(DataProtectionBlocked) as error:
+        protect_untrusted_payload(
+            {"draft_id": "not a safe id: owner@example.test"},
+            trusted_internal_id_keys={"draft_id"},
+        )
+    assert error.value.code == "INVALID_RUNTIME_IDENTIFIER"
+
+
+def test_tool_result_cannot_exempt_arbitrary_fields_from_pii_redaction():
+    with pytest.raises(DataProtectionBlocked) as error:
+        protect_untrusted_payload(
+            {"notes": "owner@example.test"},
+            trusted_internal_id_keys={"notes"},
+        )
+    assert error.value.code == "INVALID_TRUSTED_IDENTIFIER_POLICY"

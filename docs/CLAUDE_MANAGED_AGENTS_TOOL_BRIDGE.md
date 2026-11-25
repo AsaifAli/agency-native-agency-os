@@ -174,3 +174,8 @@ The unmerged `feature/managed-agent-os-tool-execution` branch is a useful implem
 - Fresh focused tests, PostgreSQL 16 migration/locking verification and a synthetic end-to-end run.
 
 This is an architecture review only. No custom tools have been enabled and no code from the feature branch has been merged. MCP remains a valid future option when direct provider-to-OS connectivity is genuinely needed; if adopted, the session-bound token and vault requirements above remain mandatory.
+
+
+## Claude-side MCP boundary
+
+MCP is implemented, if required by the selected Claude experience, as a thin Claude integration adapter. It is not a standalone core OS service or an alternative tool authorization plane. The adapter forwards tool calls to the authenticated OS Tool Gateway; the OS rechecks the workforce member, exact enabled tool/action/data-class/scope grant, machine identity/session, workspace, data-protection policy, budget and approvals. The adapter owns only protocol translation and connection lifecycle. The OS remains authoritative for executions, results, business records, idempotency and audit. Native Managed Agents custom-tool event callbacks remain a distinct transport and do not imply that an MCP server must be exposed.

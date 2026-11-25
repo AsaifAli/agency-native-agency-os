@@ -257,3 +257,27 @@ Merged work includes PR #17 (contact timeline), PR #19 (leads/opportunities), PR
 - [ ] Founder UI for draft review/promotion and actual public-source research connectors remain outstanding. The tool stores source references supplied by an agent and does not independently verify them.
 - [ ] Further Revenue/Delivery tools, client-data eligibility, approval/budget integration, external adapters, retention/deletion and recovery remain outstanding.
 - [ ] No production deployment or external outreach was performed.
+
+
+## 2026-11-25 — Managed Agents OS custom-tool execution (branch work)
+
+**Status: implemented on `feature/managed-agent-os-tool-execution`; not yet merged or production-verified.**
+
+- Extracted the machine-tool invocation path into a shared OS service used by both the authenticated HTTP gateway and the worker callback.
+- Connected Claude Managed Agents custom-tool events to that service. The worker handles custom-tool events while the provider session is running and returns bounded `user.custom_tool_result` events.
+- Revalidates provider Agent configuration on every new or resumed attempt. Only exact custom-tool names, descriptions and JSON schemas from the OS Tool Registry are allowed. Built-in tools, MCP servers, skills and provider multiagent features remain disabled.
+- Each tool call checks the live OS execution, worker attempt/lease, agent machine identity, workspace, session, data class and exact tool grant. The shared gateway applies DPG, schema validation, idempotency, persistence and audit.
+- Provider event IDs are namespaced by OS execution ID. Tool sessions are bound to executions with a scoped composite foreign key. Custom tool calls are bounded to 10 per poll, 50 per execution and 16 KB per returned result.
+- Current registry scope remains intentionally small: read-only health and public lead-research draft capture. Research creates a pending founder-review draft only; it does not promote CRM records or send outreach.
+
+**Independent validation evidence (isolated candidate, not exact remote branch):** 47 tests across machine identity and Managed Agents runtime modules passed; 6 selected worker processor tests passed; `python -m compileall -q app tests` passed. A combined run of the full worker-service module timed out after 71%, so no full-suite pass is claimed. Ruff is unavailable in the isolated environment. PostgreSQL 16 migration verification, exact-branch test execution and live provider E2E remain pending.
+
+
+Additional hardening during review: identity/session row locks follow the same order as revocation (identity before session); provider policy denials are returned as generic tool errors while unexpected gateway/database failures propagate to the worker retry path. Trusted output identifier exemptions are limited to explicit draft/lead/research-record ID fields. The current registry does not provide web search/fetch or autonomous prospect discovery; research capture stores agent-supplied references that are not independently verified.
+
+
+## 2026-11-25 — Managed Agents tool execution reconciliation
+
+The PR #45 implementation has been reconciled with current `main` on `fix/pr45-reconciled`. The shared Tool Gateway now enforces an active WorkforceMember and exact enabled WorkforceCapability grant for agent identities (tool key, required action, data class and minimum scope) in addition to machine identity/session checks. Worker callbacks use execution-scoped idempotency context so a provider event replay after OS session renewal returns the persisted result only after the renewed session is reauthorized. DPG permits internal IDs only for a fixed allowlist of resource-ID fields and validates their format. The LeadResearchDraft ORM now includes the migration-backed `promoted_lead_id` column.
+
+Validation: 285 backend tests passed, 4 PostgreSQL-only tests skipped; compileall passed; Alembic has one head (`q7f2b9d4c631`). PostgreSQL 16 migration/concurrency tests and live Claude provider validation remain pending. Frontend build compiled and passed TypeScript validation but page generation failed with environment `EAGAIN`; ESLint is blocked by missing ESLint v9 flat configuration. No provider tools have been enabled for production.

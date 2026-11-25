@@ -20,6 +20,7 @@ class ExecutionRequest:
     task_description: str = ""
     external_run_id: str | None = None
     persist_external_run_id: Callable[[str], None] | None = None
+    execute_custom_tool: Callable[[str, dict, str], dict] | None = None
     request_metadata: dict = field(default_factory=dict)
 
 
@@ -45,6 +46,10 @@ class RuntimeTransientError(RuntimeExecutionError):
 
 class RuntimeManualReviewRequired(RuntimeExecutionError):
     """The provider paused for a tool approval or other human decision."""
+
+
+class RuntimeToolRejected(Exception):
+    """An OS policy or authorization gate explicitly rejected a tool call."""
 
 
 class AgentRuntime(ABC):

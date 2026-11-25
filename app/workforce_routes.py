@@ -136,7 +136,18 @@ def enable_capability(org_id: str, member_id: str, capability_id: str,
     ):
         raise HTTPException(403, "Capability contains an unknown or approval-required action")
     if capability.tool_allowlist:
-        raise HTTPException(409, "Tool grants cannot be enabled before the Agency OS MCP gateway exists")
+        from app.tool_registry import get_tool
+        for tool_key in capability.tool_allowlist:
+            spec = get_tool(tool_key)
+            if spec is None or spec.requires_approval:
+                raise HTTPException(403, "Capability contains an unknown or approval-gated tool")
+            if spec.required_action not in capability.allowed_actions:
+                raise HTTPException(403, "Capability action does not authorize every selected tool")
+            if not set(spec.allowed_data_classes).intersection(capability.allowed_data_classes):
+                raise HTTPException(403, "Capability data class does not authorize every selected tool")
+            scope_rank = {"self": 0, "team": 1, "workspace": 2}
+            if capability.scope not in scope_rank or scope_rank[capability.scope] < scope_rank[spec.minimum_scope]:
+                raise HTTPException(403, "Capability scope is narrower than the selected tool requires")
     if not capability.allowed_data_classes or set(capability.allowed_data_classes) - {"synthetic", "public"}:
         raise HTTPException(403, "Only synthetic and public data classes are currently eligible")
     agent = db.query(Agent).filter_by(
