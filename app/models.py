@@ -7,6 +7,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db import Base
+import app.security_models  # noqa: F401 — register machine-session FK targets for executions
 
 def uid(): return str(uuid.uuid4())
 def now(): return datetime.now(timezone.utc)
