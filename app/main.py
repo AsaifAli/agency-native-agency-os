@@ -1,4 +1,5 @@
 
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, Depends, HTTPException
@@ -65,11 +66,31 @@ from app.execution_service import (
 )
 
 
+_mcp_server_app = None
+_mcp_authenticated_app = None
+if settings.mcp_gateway_enabled:
+    from app.mcp_server import create_mcp_gateway
+
+    _mcp_server_app, _mcp_authenticated_app = create_mcp_gateway()
+
+
+@asynccontextmanager
+async def lifespan(_app):
+    if _mcp_server_app is not None:
+        async with _mcp_server_app.router.lifespan_context(_mcp_server_app):
+            yield
+    else:
+        yield
+
+
 app = FastAPI(
     title="Agency OS API",
     version="0.1.0",
     description="Founder-controlled Agency OS foundation",
+    lifespan=lifespan,
 )
+if _mcp_authenticated_app is not None:
+    app.mount("/mcp/agency-os", _mcp_authenticated_app)
 
 app.add_middleware(
     CORSMiddleware,
