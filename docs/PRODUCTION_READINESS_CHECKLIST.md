@@ -156,3 +156,20 @@ A feature is **production-ready** only when implementation, authorization, tenan
 - [ ] Implement OS Tool Gateway and machine identities before any skill can call tools.
 - [ ] Implement durable loop definitions, schedule/event triggers, budgets, recovery and independent evaluation before enabling loops.
 - [ ] Pilot one read-only public/synthetic loop under supervised manual operation before scheduling.
+
+
+## Consolidation sprint — 2026-11-25
+- [x] Merge governed agent operating-model reference integration (PR #31) into main: `f8fc318cfece0dafb64a846d93fe7d78e64c5593`. The four new skills remain disabled, tool-free and public/synthetic-only; loops remain design artifacts, not active automation.
+- [x] Harden PR #30 DPG metadata boundary: total serialized-size limit, string-only sanitized keys, redaction-key collision rejection, non-finite number rejection, and adversarial regression tests.
+- [ ] Execute the expanded DPG unit tests and full backend suite on an available runner.
+- [ ] Execute PR #30 tenant migration, preflight-abort fixture, cross-tenant insert tests, and upgrade/downgrade rehearsal on isolated PostgreSQL 16.
+- [ ] Review ORM/migration parity and all existing production data before any populated-database migration.
+- [ ] Complete tenant isolation audit beyond outreach tables (APIs, workers, files, sessions, caches and database row-level controls).
+- [ ] Implement machine identities, session lifecycle, and OS Tool Gateway before enabling agent tool grants.
+- [ ] Extend DPG to uploads, extracted documents, retrieval/RAG context, connector responses and tool inputs/outputs; add per-client policy/runtime eligibility.
+- [ ] Implement durable OS-owned operating-loop execution, scheduler/event triggers, idempotent recovery, independent checks and founder approval gates.
+- [ ] Complete signed provider webhooks, dispatch adapter, reply/opt-out/bounce reconciliation and end-to-end stop-condition tests before real outreach.
+- [ ] Complete delivery QA/handover, support/SLA/renewal, finance reconciliation, backup restore, SBOM, monitoring/alerts and independent security review.
+- [ ] Complete external configuration and synthetic end-to-end deployment verification for the website bridge and provider integrations.
+
+**Release boundary:** PR #30 remains open and unverified. GitHub Actions runner allocation is blocked by account billing; no Actions reruns were started. No claim of production readiness, live autonomous dispatch, or compliance is made.
