@@ -229,3 +229,185 @@ def test_managed_agents_waits_for_workflow_run_end_before_accepting_idle():
     result = runtime.start(request())
     assert result.detail == "Workflow report."
     assert len(event_calls) == 2
+
+
+
+def test_managed_agents_dispatches_registered_custom_tool_while_session_is_running():
+    from app.tool_registry import managed_agent_custom_tool_definitions
+
+    tool = next(item for item in managed_agent_custom_tool_definitions() if item["name"] == "os_system_health_read")
+    state = {"answered": False, "session_polls": 0}
+    posted = []
+    calls = []
+
+    def handler(req):
+        if req.method == "GET" and req.url.path == "/v1/agents/agent_test":
+            return httpx.Response(200, json={
+                "id": "agent_test", "archived_at": None, "tools": [tool],
+                "mcp_servers": [], "skills": [], "multiagent": None,
+            })
+        if req.method == "POST" and req.url.path == "/v1/sessions":
+            return httpx.Response(200, json={"id": "sesn_custom_tool"})
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_custom_tool":
+            state["session_polls"] += 1
+            status = "running" if state["session_polls"] == 1 else "idle"
+            return httpx.Response(200, json={"id": "sesn_custom_tool", "status": status})
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_custom_tool/events":
+            if not state["answered"]:
+                return httpx.Response(200, json={"data": [{
+                    "type": "agent.custom_tool_use",
+                    "id": "sevt_custom_1",
+                    "name": "os_system_health_read",
+                    "input": {},
+                }]})
+            return httpx.Response(200, json={"data": [
+                {
+                    "type": "agent.custom_tool_use", "id": "sevt_custom_1",
+                    "name": "os_system_health_read", "input": {},
+                },
+                {
+                    "type": "user.custom_tool_result", "custom_tool_use_id": "sevt_custom_1",
+                    "content": [{"type": "text", "text": "{\"database\":\"ok\"}"}],
+                    "is_error": False,
+                },
+                {"type": "agent.message", "content": [{"type": "text", "text": "Health check completed."}]},
+                {"type": "session.status_idle", "stop_reason": {"type": "end_turn"}},
+            ]})
+        if req.method == "POST" and req.url.path == "/v1/sessions/sesn_custom_tool/events":
+            posted.extend(json.loads(req.content)["events"])
+            state["answered"] = True
+            return httpx.Response(200, json={"data": []})
+        return httpx.Response(404)
+
+    def execute(name, payload, event_id):
+        calls.append((name, payload, event_id))
+        return {"database": "ok"}
+
+    runtime = ManagedAgentsRuntime(
+        config(),
+        client_factory=lambda: httpx.Client(
+            base_url="https://api.anthropic.com",
+            transport=httpx.MockTransport(handler),
+        ),
+        sleep=lambda _seconds: None,
+    )
+    result = runtime.start(request(execute_custom_tool=execute))
+    assert result.detail == "Health check completed."
+    assert calls == [("os_system_health_read", {}, "sevt_custom_1")]
+    assert posted[0]["type"] == "user.custom_tool_result"
+    assert posted[0]["custom_tool_use_id"] == "sevt_custom_1"
+    assert json.loads(posted[0]["content"][0]["text"]) == {"database": "ok"}
+
+
+def test_managed_agents_rejects_provider_custom_tool_schema_drift():
+    from app.tool_registry import managed_agent_custom_tool_definitions
+
+    tool = next(item for item in managed_agent_custom_tool_definitions() if item["name"] == "os_system_health_read")
+    tool = {**tool, "input_schema": {"type": "object", "properties": {"command": {"type": "string"}}}}
+    calls = []
+
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        if req.method == "GET" and req.url.path == "/v1/agents/agent_test":
+            return httpx.Response(200, json={
+                "id": "agent_test", "archived_at": None, "tools": [tool],
+                "mcp_servers": [], "skills": [], "multiagent": None,
+            })
+        return httpx.Response(200, json={"id": "unexpected"})
+
+    runtime = ManagedAgentsRuntime(
+        config(),
+        client_factory=lambda: httpx.Client(
+            base_url="https://api.anthropic.com",
+            transport=httpx.MockTransport(handler),
+        ),
+    )
+    with pytest.raises(RuntimeNotConfiguredError):
+        runtime.start(request(execute_custom_tool=lambda *_args: {}))
+    assert calls == [("GET", "/v1/agents/agent_test")]
+
+
+def test_managed_agents_revalidates_provider_tool_allowlist_when_resuming_session():
+    calls = []
+
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        if req.method == "GET" and req.url.path == "/v1/agents/agent_test":
+            return httpx.Response(200, json={
+                "id": "agent_test", "archived_at": None,
+                "tools": [{
+                    "type": "custom", "name": "unregistered_tool",
+                    "description": "untrusted", "input_schema": {"type": "object"},
+                }],
+                "mcp_servers": [], "skills": [], "multiagent": None,
+            })
+        return httpx.Response(200, json={"id": "sesn_existing", "status": "idle"})
+
+    runtime = ManagedAgentsRuntime(
+        config(),
+        client_factory=lambda: httpx.Client(
+            base_url="https://api.anthropic.com",
+            transport=httpx.MockTransport(handler),
+        ),
+    )
+    with pytest.raises(RuntimeNotConfiguredError):
+        runtime.start(request(external_run_id="sesn_existing", execute_custom_tool=lambda *_args: {}))
+    assert calls == [("GET", "/v1/agents/agent_test")]
+
+
+def test_managed_agents_does_not_wait_for_unknown_blocking_event_ids():
+    events = [{
+        "type": "session.status_idle",
+        "stop_reason": {"type": "requires_action", "event_ids": ["sevt_missing"]},
+    }]
+    assert ManagedAgentsRuntime._waiting_for_custom_tool_resume(
+        events, {"os_system_health_read": "system.health.read"}
+    ) is False
+
+
+def test_managed_agents_bounds_pending_custom_tool_calls_before_dispatch():
+    from app.tool_registry import managed_agent_custom_tool_definitions
+
+    tool = next(item for item in managed_agent_custom_tool_definitions() if item["name"] == "os_system_health_read")
+    events = [{
+        "type": "agent.custom_tool_use",
+        "id": f"sevt_many_{index}",
+        "name": tool["name"],
+        "input": {},
+    } for index in range(11)]
+    calls = []
+    runtime = ManagedAgentsRuntime(config())
+    with pytest.raises(RuntimeManualReviewRequired):
+        runtime._process_custom_tool_events(
+            None,
+            "sesn_many",
+            events,
+            request(execute_custom_tool=lambda *args: calls.append(args) or {"ok": True}),
+            {tool["name"]: "system.health.read"},
+            max_calls=10,
+        )
+    assert calls == []
+
+
+def test_managed_agents_requires_os_executor_when_custom_tools_are_enabled():
+    from app.tool_registry import managed_agent_custom_tool_definitions
+
+    tool = next(item for item in managed_agent_custom_tool_definitions() if item["name"] == "os_system_health_read")
+
+    def handler(req):
+        if req.method == "GET" and req.url.path == "/v1/agents/agent_test":
+            return httpx.Response(200, json={
+                "id": "agent_test", "archived_at": None, "tools": [tool],
+                "mcp_servers": [], "skills": [], "multiagent": None,
+            })
+        return httpx.Response(200, json={"id": "unexpected"})
+
+    runtime = ManagedAgentsRuntime(
+        config(),
+        client_factory=lambda: httpx.Client(
+            base_url="https://api.anthropic.com",
+            transport=httpx.MockTransport(handler),
+        ),
+    )
+    with pytest.raises(RuntimeNotConfiguredError):
+        runtime.start(request())
