@@ -13,6 +13,10 @@ from app.tool_gateway import invoke_registered_tool
 from app.tool_registry import get_tool_by_provider_name
 
 
+def _as_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
 class ToolExecutionRejected(Exception):
     """A custom tool call was rejected by OS identity or policy controls."""
 
@@ -55,7 +59,7 @@ def build_machine_tool_executor(
             if (
                 identity is None
                 or identity.revoked_at is not None
-                or identity.expires_at.replace(tzinfo=timezone.utc) <= now
+                or _as_utc(identity.expires_at) <= now
             ):
                 raise ToolExecutionRejected("MACHINE_IDENTITY_NOT_ACTIVE")
 
@@ -83,7 +87,7 @@ def build_machine_tool_executor(
                 if (
                     session is not None
                     and session.status == "active"
-                    and session.expires_at.replace(tzinfo=timezone.utc) > now
+                    and _as_utc(session.expires_at) > now
                     and session.data_class == request.data_class.value
                 ):
                     pass
