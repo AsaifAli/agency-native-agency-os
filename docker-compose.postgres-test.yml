@@ -37,14 +37,24 @@ services:
     image: postgres:16
     environment:
       PGPASSWORD: local-only-test-admin-password
-    entrypoint: ["/bin/sh", "-ec"]
-    command: >
-      psql -h postgres-test -U agency_os -d agency_os_worker_test
-      -v ON_ERROR_STOP=1
-      -c "GRANT CONNECT ON DATABASE agency_os_worker_test TO agency_os_test_app"
-      -c "GRANT USAGE ON SCHEMA public TO agency_os_test_app"
-      -c "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO agency_os_test_app"
-      -c "GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO agency_os_test_app"
+    entrypoint: ["psql"]
+    command:
+      - "-h"
+      - "postgres-test"
+      - "-U"
+      - "agency_os"
+      - "-d"
+      - "agency_os_worker_test"
+      - "-v"
+      - "ON_ERROR_STOP=1"
+      - "-c"
+      - "GRANT CONNECT ON DATABASE agency_os_worker_test TO agency_os_test_app"
+      - "-c"
+      - "GRANT USAGE ON SCHEMA public TO agency_os_test_app"
+      - "-c"
+      - "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO agency_os_test_app"
+      - "-c"
+      - "GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO agency_os_test_app"
     depends_on:
       migrate-test:
         condition: service_completed_successfully
