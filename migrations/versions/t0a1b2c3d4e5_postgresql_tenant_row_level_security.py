@@ -1,7 +1,8 @@
 """Enable PostgreSQL RLS for organization-scoped Agency OS records.
 
-API connects as non-owner NOBYPASSRLS; worker connects with a separate
-non-superuser BYPASSRLS role to claim jobs across tenants. Migrations run as
+API and worker connect as non-owner NOBYPASSRLS roles. The worker uses
+workspace-scoped transaction context and narrowly granted SECURITY DEFINER
+operations for the few cross-workspace maintenance tasks. Migrations run as
 agency_os_migrator, a non-superuser BYPASSRLS table owner.
 """
 from alembic import op
