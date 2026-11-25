@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 from app.db import get_db
+from app.data_protection import DataProtectionBlocked, sanitize_text
 from app.security_models import AgentSession, MachineIdentity
 
 TOKEN_PREFIX = "aos_mi_"
@@ -82,12 +83,18 @@ def create_agent_session(db: Session, principal: MachinePrincipal, *, purpose: s
         raise HTTPException(422, "Session TTL must be between 60 and 86400 seconds")
     if not purpose or len(purpose.strip()) > 240:
         raise HTTPException(422, "A session purpose of at most 240 characters is required")
+    try:
+        safe_purpose, _ = sanitize_text(purpose.strip())
+    except DataProtectionBlocked as exc:
+        raise HTTPException(422, "Session purpose blocked by data-protection policy") from exc
+    if not safe_purpose:
+        raise HTTPException(422, "Session purpose is empty after data protection")
     expires_at = min(now + timedelta(seconds=ttl_seconds), identity_expiry)
     if expires_at <= now:
         raise HTTPException(401, "Machine credential is expired")
     session = AgentSession(
         org_id=identity.org_id, workspace_id=identity.workspace_id,
-        machine_identity_id=identity.id, purpose=purpose.strip(),
+        machine_identity_id=identity.id, purpose=safe_purpose,
         data_class=data_class, status="active", created_at=now,
         last_seen_at=now, expires_at=expires_at,
     )
