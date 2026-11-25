@@ -386,16 +386,6 @@ def upgrade() -> None:
             machine_predicate = """
                 (
                     org_id = nullif(current_setting('agency_os.machine_org_id', true), '')
-                    AND (
-                        workspace_id = nullif(current_setting('agency_os.machine_workspace_id', true), '')
-                        OR (
-                            id = nullif(current_setting('agency_os.machine_identity_lookup_id', true), '')
-                        )
-                    )
-                )
-            """ if table == "machine_identities" else """
-                (
-                    org_id = nullif(current_setting('agency_os.machine_org_id', true), '')
                     AND workspace_id = nullif(current_setting('agency_os.machine_workspace_id', true), '')
                 )
             """
@@ -405,6 +395,19 @@ def upgrade() -> None:
             USING ({policy})
             WITH CHECK ({policy})
         ''')
+
+    # Machine authentication begins with only an opaque identity ID. Permit
+    # SELECT of that exact row before org/workspace context is known. This
+    # policy grants no INSERT/UPDATE/DELETE access; normal writes still require
+    # the exact machine workspace predicate in tenant_isolation.
+    op.execute("""
+        CREATE POLICY machine_identity_lookup
+        ON public.machine_identities
+        FOR SELECT
+        USING (
+            id = nullif(current_setting('agency_os.machine_identity_lookup_id', true), '')
+        )
+    """)
 
     # Attempts inherit exact workspace authorization from their parent.
     op.execute("DROP POLICY IF EXISTS execution_attempt_tenant_isolation ON public.execution_attempts")
@@ -453,6 +456,7 @@ def downgrade() -> None:
     op.execute("DROP POLICY IF EXISTS workspace_insert ON public.workspaces")
     op.execute("DROP POLICY IF EXISTS workspace_update ON public.workspaces")
     op.execute("DROP POLICY IF EXISTS workspace_delete ON public.workspaces")
+    op.execute("DROP POLICY IF EXISTS machine_identity_lookup ON public.machine_identities")
     op.execute("CREATE POLICY tenant_isolation ON public.workspaces USING (agency_os_private.user_has_org_access(org_id, nullif(current_setting('agency_os.user_id', true), '')) OR (org_id = nullif(current_setting('agency_os.machine_org_id', true), '') AND id = nullif(current_setting('agency_os.machine_workspace_id', true), '')) WITH CHECK (agency_os_private.user_has_org_access(org_id, nullif(current_setting('agency_os.user_id', true), '')) OR (org_id = nullif(current_setting('agency_os.machine_org_id', true), '') AND id = nullif(current_setting('agency_os.machine_workspace_id', true), '')))")
     for table in WORKSPACE_TABLES:
         identity_lookup = (
@@ -473,8 +477,9 @@ def downgrade() -> None:
                 )
                 OR (
                     org_id = nullif(current_setting('agency_os.machine_org_id', true), '')
-                    AND ({machine_workspace}{identity_lookup})
+                    AND ({machine_workspace})
                 )
+                {identity_lookup}
             )
             WITH CHECK (
                 agency_os_private.user_has_org_access(
@@ -482,8 +487,9 @@ def downgrade() -> None:
                 )
                 OR (
                     org_id = nullif(current_setting('agency_os.machine_org_id', true), '')
-                    AND ({machine_workspace}{identity_lookup})
+                    AND ({machine_workspace})
                 )
+                {identity_lookup}
             )
         ''')
 
