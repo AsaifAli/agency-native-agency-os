@@ -19,6 +19,12 @@ from app.tool_gateway_routes import router as tool_gateway_router
 def security_client():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    import app.models  # noqa: F401
+    import app.domain_models  # noqa: F401
+    import app.telephony.models  # noqa: F401
+    import app.operations_models  # noqa: F401
+    import app.outreach.models  # noqa: F401
+    import app.workforce_models  # noqa: F401
     import app.security_models  # noqa: F401
     Base.metadata.create_all(engine)
     db = factory()
