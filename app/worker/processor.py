@@ -230,6 +230,9 @@ def process_one_execution(
             request_metadata=execution.request_metadata or {},
         )
         runtime_name = execution.runtime
+        execution_org_id = execution.org_id
+        execution_workspace_id = execution.workspace_id
+        execution_data_class = execution.data_class
         db.commit()
 
     try:
@@ -237,8 +240,8 @@ def process_one_execution(
     except DataProtectionBlocked as exc:
         _record_data_protection_failure(
             session_factory, execution_id=execution_id, attempt_id=attempt_id,
-            worker_id=worker_id, org_id=execution.org_id,
-            workspace_id=execution.workspace_id, reason_code=exc.code,
+            worker_id=worker_id, org_id=execution_org_id,
+            workspace_id=execution_workspace_id, reason_code=exc.code,
             event_type="execution.data_protection_blocked",
         )
         return execution_id
@@ -247,12 +250,12 @@ def process_one_execution(
         try:
             with session_factory() as protection_db:
                 record_event(
-                    protection_db, execution.org_id, None,
+                    protection_db, execution_org_id, None,
                     "execution.data_redacted", "execution", execution_id,
-                    execution.workspace_id,
+                    execution_workspace_id,
                     {
                         "redaction_counts": protection_report.redaction_counts,
-                        "data_class": execution.data_class.value,
+                        "data_class": execution_data_class.value,
                     },
                 )
                 protection_db.commit()
@@ -282,12 +285,12 @@ def process_one_execution(
             try:
                 with session_factory() as audit_db:
                     record_event(
-                        audit_db, execution.org_id, None,
+                        audit_db, execution_org_id, None,
                         "execution.output_redacted", "execution", execution_id,
-                        execution.workspace_id,
+                        execution_workspace_id,
                         {
                             "redaction_counts": output_protection.redaction_counts,
-                            "data_class": execution.data_class.value,
+                            "data_class": execution_data_class.value,
                         },
                     )
                     audit_db.commit()
@@ -336,8 +339,8 @@ def process_one_execution(
     if data_protection_block_code is not None:
         _record_data_protection_failure(
             session_factory, execution_id=execution_id, attempt_id=attempt_id,
-            worker_id=worker_id, org_id=execution.org_id,
-            workspace_id=execution.workspace_id,
+            worker_id=worker_id, org_id=execution_org_id,
+            workspace_id=execution_workspace_id,
             reason_code=data_protection_block_code,
             event_type="execution.output_protection_blocked",
         )
