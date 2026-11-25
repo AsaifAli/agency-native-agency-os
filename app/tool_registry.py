@@ -85,6 +85,7 @@ class LeadResearchCaptureOutput(BaseModel):
 @dataclass(frozen=True)
 class ToolSpec:
     key: str
+    provider_name: str
     version: str
     description: str
     risk_level: str
@@ -97,6 +98,7 @@ class ToolSpec:
 TOOLS = {
     "system.health.read": ToolSpec(
         key="system.health.read",
+        provider_name="os_system_health_read",
         version="1.0.0",
         description="Read the Agency OS API database health without accessing client records.",
         risk_level="read_only",
@@ -107,6 +109,7 @@ TOOLS = {
     ),
     "revenue.lead.research.capture": ToolSpec(
         key="revenue.lead.research.capture",
+        provider_name="os_revenue_lead_research_capture",
         version="1.0.0",
         description="Save source-backed public company research as a founder-review draft; does not create a CRM lead or contact.",
         risk_level="write_draft",
@@ -124,6 +127,26 @@ def get_tool(tool_key: str) -> ToolSpec | None:
 
 def list_tools() -> list[ToolSpec]:
     return list(TOOLS.values())
+
+
+def get_tool_by_provider_name(provider_name: str) -> ToolSpec | None:
+    return next(
+        (spec for spec in TOOLS.values() if spec.provider_name == provider_name),
+        None,
+    )
+
+
+def managed_agent_custom_tool_definitions() -> list[dict]:
+    """Return only the code-owned custom tools permitted in Managed Agents."""
+    return [
+        {
+            "type": "custom",
+            "name": spec.provider_name,
+            "description": spec.description,
+            "input_schema": spec.input_model.model_json_schema(),
+        }
+        for spec in TOOLS.values()
+    ]
 
 
 def validate_tool_input(spec: ToolSpec, payload: dict) -> dict:
