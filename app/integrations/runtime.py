@@ -48,6 +48,10 @@ class RuntimeManualReviewRequired(RuntimeExecutionError):
     """The provider paused for a tool approval or other human decision."""
 
 
+class RuntimeToolRejected(Exception):
+    """An OS policy or authorization gate explicitly rejected a tool call."""
+
+
 class AgentRuntime(ABC):
     @abstractmethod
     def start(self, request: ExecutionRequest) -> ExecutionResult: ...
