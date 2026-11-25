@@ -1,0 +1,82 @@
+# Isolated, disposable PostgreSQL 16 integration-test stack.
+# Uses a dedicated project name and volume; does not touch docker-compose.yml
+# or the normal Agency OS database volume.
+services:
+  postgres-test:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: agency_os_worker_test
+      POSTGRES_USER: agency_os
+      POSTGRES_PASSWORD: local-only-test-admin-password
+    ports:
+      - "55432:5432"
+    volumes:
+      - agency_os_pg_test:/var/lib/postgresql/data
+      - ./docker/postgres/test-init.sql:/docker-entrypoint-initdb.d/01-test-role.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agency_os -d agency_os_worker_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  migrate-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres-test
+    environment:
+      DATABASE_URL: postgresql+psycopg://agency_os_migrator:local-only-test-migrator-password@postgres-test:5432/agency_os_worker_test
+      MIGRATION_DATABASE_URL: postgresql+psycopg://agency_os_migrator:local-only-test-migrator-password@postgres-test:5432/agency_os_worker_test
+      APP_ENV: test
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+    restart: "no"
+
+  grant-test-app:
+    image: postgres:16
+    environment:
+      PGPASSWORD: local-only-test-admin-password
+    entrypoint: ["psql"]
+    command:
+      - "-h"
+      - "postgres-test"
+      - "-U"
+      - "agency_os"
+      - "-d"
+      - "agency_os_worker_test"
+      - "-v"
+      - "ON_ERROR_STOP=1"
+      - "-c"
+      - "GRANT CONNECT ON DATABASE agency_os_worker_test TO agency_os_test_app"
+      - "-c"
+      - "GRANT USAGE ON SCHEMA public TO agency_os_test_app"
+      - "-c"
+      - "GRANT USAGE ON SCHEMA agency_os_private TO agency_os_test_app"
+      - "-c"
+      - "GRANT EXECUTE ON FUNCTION agency_os_private.user_has_org_access(text, text) TO agency_os_test_app"
+      - "-c"
+      - "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO agency_os_test_app"
+      - "-c"
+      - "GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO agency_os_test_app"
+    depends_on:
+      migrate-test:
+        condition: service_completed_successfully
+    restart: "no"
+
+  postgres-tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres-test
+    environment:
+      APP_ENV: test
+      AGENCY_OS_TEST_DATABASE_URL: postgresql+psycopg://agency_os:local-only-test-admin-password@postgres-test:5432/agency_os_worker_test
+      AGENCY_OS_TEST_RLS_ADMIN_DATABASE_URL: postgresql+psycopg://agency_os:local-only-test-admin-password@postgres-test:5432/agency_os_worker_test
+      AGENCY_OS_TEST_RLS_DATABASE_URL: postgresql+psycopg://agency_os_test_app:local-only-test-app-password@postgres-test:5432/agency_os_worker_test
+    depends_on:
+      grant-test-app:
+        condition: service_completed_successfully
+    restart: "no"
+
+volumes:
+  agency_os_pg_test:

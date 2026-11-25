@@ -5,8 +5,10 @@ import socket
 import threading
 import uuid
 
-from app.db import engine
+from app.db import verify_postgres_role, worker_engine
+from app.config import settings
 from app.worker.runner import run_worker
+from app.log_sanitization import configure_log_redaction
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +18,11 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    configure_log_redaction()
+    if settings.app_env.lower() == "production":
+        if settings.process_role != "worker":
+            raise RuntimeError("Worker process must use PROCESS_ROLE=worker in production")
+        verify_postgres_role(worker_engine, expected_bypassrls=True, require_rls=False)
 
     stop_event = threading.Event()
 
@@ -41,7 +48,7 @@ def main() -> None:
         raise
     finally:
         logger.info("Disposing worker database engine")
-        engine.dispose()
+        worker_engine.dispose()
 
 
 if __name__ == "__main__":

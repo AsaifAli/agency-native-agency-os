@@ -2,10 +2,11 @@
 import {useEffect,useState} from "react";
 import Page from "@/components/page";
 import {api,orgId} from "@/lib/api";
+type Workspace={id:string;name:string};
 type Approval={id:string;workspace_id:string;action_type:string;resource_id:string;status:string;requested_by:string;decision_note:string;created_at:string};
 export default function Approvals(){
- const [items,setItems]=useState<Approval[]>([]),[ws,setWs]=useState<any[]>([]),[workspace,setWorkspace]=useState(""),[action,setAction]=useState("production.release"),[resource,setResource]=useState("release-candidate"),[reason,setReason]=useState(""),[err,setErr]=useState(""),[ok,setOk]=useState("");
- async function load(){const w=await api<any[]>(`/v1/orgs/${orgId()}/workspaces`);setWs(w);if(w[0])setWorkspace(v=>v||w[0].id);setItems(await api<Approval[]>(`/v1/orgs/${orgId()}/approvals`))}
+ const [items,setItems]=useState<Approval[]>([]),[ws,setWs]=useState<Workspace[]>([]),[workspace,setWorkspace]=useState(""),[action,setAction]=useState("production.release"),[resource,setResource]=useState("release-candidate"),[reason,setReason]=useState(""),[err,setErr]=useState(""),[ok,setOk]=useState("");
+ async function load(){const w=await api<Workspace[]>(`/v1/orgs/${orgId()}/workspaces`);setWs(w);if(w[0])setWorkspace(v=>v||w[0].id);setItems(await api<Approval[]>(`/v1/orgs/${orgId()}/approvals`))}
  useEffect(()=>{if(orgId())load().catch(e=>setErr(e.message));else setErr("Set NEXT_PUBLIC_ORG_ID first.")},[]);
  async function request(){setErr("");setOk("");try{await api(`/v1/orgs/${orgId()}/approvals`,{method:"POST",body:JSON.stringify({workspace_id:workspace,action_type:action,resource_id:resource,idempotency_key:crypto.randomUUID(),request_payload:{reason}})});setOk("Approval request recorded.");await load()}catch(e){setErr((e as Error).message)}}
  async function decide(id:string,decision:"approved"|"rejected"){setErr("");setOk("");try{await api(`/v1/orgs/${orgId()}/approvals/${id}/decision`,{method:"POST",body:JSON.stringify({decision,note:"Reviewed in founder console"})});setOk(`Request ${decision}.`);await load()}catch(e){setErr((e as Error).message)}}

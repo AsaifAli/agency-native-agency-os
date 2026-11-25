@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from fastapi import Depends, Header, HTTPException
 from sqlalchemy.orm import Session
-from app.db import get_db
+from app.db import get_db, set_rls_context
 from app.audit import record_event
 from app.data_protection import DataProtectionBlocked, sanitize_text
 from app.security_models import AgentSession, MachineIdentity
@@ -45,6 +45,7 @@ def authenticate_machine_token(authorization: str | None, db: Session) -> Machin
     identity_id, secret = token[len(TOKEN_PREFIX):].split(".", 1)
     if not identity_id or len(identity_id) > 36 or not secret or len(secret) > 256:
         raise HTTPException(401, "Invalid machine credential")
+    set_rls_context(db, machine_identity_lookup_id=identity_id)
     identity = db.query(MachineIdentity).filter(MachineIdentity.id == identity_id).first()
     if identity is None or identity.revoked_at is not None:
         raise HTTPException(401, "Invalid or revoked machine credential")
@@ -53,6 +54,7 @@ def authenticate_machine_token(authorization: str | None, db: Session) -> Machin
     if not hmac.compare_digest(identity.token_hash, _token_digest(secret)):
         raise HTTPException(401, "Invalid machine credential")
     identity.last_used_at = _utcnow()
+    set_rls_context(db, machine_org_id=identity.org_id, machine_workspace_id=identity.workspace_id)
     return MachinePrincipal(identity=identity)
 
 def get_machine_principal(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> MachinePrincipal:

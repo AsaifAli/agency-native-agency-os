@@ -1,5 +1,7 @@
 # Agency OS implementation status — stabilization checkpoint
 
+> **Current candidate update — 2026-11-26 (security branch, not merged):** The PR #47 security candidate now adds persistent browser-session revocation/rotation/retention, JWT key-ID overlap, frontend refresh (including CSRF cookie renewal), PostgreSQL RLS SQL for 49 org-scoped model tables plus `organizations` and `browser_sessions` (51 policies), separate API/migrator/worker DB roles, route-auth inventory guards, centralized log redaction and production OIDC issuer URL validation. Verification in the Upstash development box: **364 backend tests passed, 5 PostgreSQL-only tests skipped; frontend lint completed with 7 existing hook-dependency warnings and no errors; Next.js production build passed; Python compilation, Compose YAML parsing, role-script syntax, Alembic head and isolated RLS SQL rendering passed.** No live PostgreSQL 16 instance or Docker daemon was available, so RLS has not been applied or integration-tested. Worker currently uses a separate non-superuser `BYPASSRLS` role for cross-tenant queue operations; this remains a privileged isolation gap. Human workspace-level grants are not implemented. PR #47 remains a draft and the branch is not production approved.
+
 ## Verified cleanup checkpoint
 - Branch: `feature/agency-os-native-runtime-cleanup`.
 - Commit: `80b989ae611b08d9a9c37925195517417ba79b05`.
@@ -58,8 +60,8 @@
 - The pre-created Managed Agent owns its tools/MCP/skills. The adapter now queries the provider Agent and rejects non-empty tools/MCP/skills or enabled multiagent configuration; actual account configuration and environment sandbox/egress still require live verification.
 - Claude Agent SDK adapter is not implemented.
 - Agency OS MCP server and narrowly scoped OS tools are not implemented; this is the prerequisite for enabling real agent capabilities and OS-mediated side effects.
-- Full OIDC/JWKS/MFA, secure frontend session lifecycle and scoped machine identities are not implemented.
-- Complete cross-workspace isolation across APIs/workers/files/sessions/caches and PostgreSQL RLS are not validated.
+- Authentik OIDC authorization-code + PKCE, pre-provisioned subject linking, HttpOnly session cookies, CSRF checks and persistent browser-session revocation/rotation/retention are implemented on the unmerged security branch. Live Authentik/JWKS/MFA assurance and PostgreSQL session behavior remain unverified.
+- PostgreSQL RLS candidate covers organization-scoped models and browser sessions, but has not been applied/tested on PostgreSQL 16. Worker `BYPASSRLS`, human org-wide workspace access, files/caches isolation and nested-object BOLA review remain open.
 - Complete Data Protection Gateway, PII redaction and retention/deletion lifecycle are not implemented.
 - Revenue operations remain partial: CRM clients/contacts/leads/opportunities, contact activity history, lead suppression, proposal drafts and founder pricing approval are implemented. Prospect research/enrichment, evidence/provenance capture at scale, deduplication/merge review, governed outreach drafting/dispatch, sender identity, reply/opt-out/bounce event handling, campaign operations and revenue attribution remain incomplete. No external message dispatch is enabled.
 - Proposal drafts and founder pricing approval, service catalogue, contract register, contract-backed onboarding, invoice approval/issue evidence and payment receipt reconciliation are implemented as internal records. Remaining gaps include proposal revision/versioning and client delivery, legal template review/e-signature provider, invoice document generation/sending, payment-provider reconciliation/webhooks, refunds/credit notes, tax/accounting integrations and statutory accounting. Existing records are not a full finance ledger or statutory accounting system.
@@ -281,3 +283,19 @@ Additional hardening during review: identity/session row locks follow the same o
 The PR #45 implementation has been reconciled with current `main` on `fix/pr45-reconciled`. The shared Tool Gateway now enforces an active WorkforceMember and exact enabled WorkforceCapability grant for agent identities (tool key, required action, data class and minimum scope) in addition to machine identity/session checks. Worker callbacks use execution-scoped idempotency context so a provider event replay after OS session renewal returns the persisted result only after the renewed session is reauthorized. DPG permits internal IDs only for a fixed allowlist of resource-ID fields and validates their format. The LeadResearchDraft ORM now includes the migration-backed `promoted_lead_id` column.
 
 Validation: 285 backend tests passed, 4 PostgreSQL-only tests skipped; compileall passed; Alembic has one head (`q7f2b9d4c631`). PostgreSQL 16 migration/concurrency tests and live Claude provider validation remain pending. Frontend build compiled and passed TypeScript validation but page generation failed with environment `EAGAIN`; ESLint is blocked by missing ESLint v9 flat configuration. No provider tools have been enabled for production.
+
+
+## 2026-11-25 — Pre-deploy security audit
+
+Completed a 20-control source/configuration audit. Findings and exact remediation requirements are in `docs/PRE_DEPLOY_SECURITY_AUDIT_20_POINT.md`. Remediated dependency findings: Next.js/eslint-config-next 15.5.29, PostCSS 8.5.33 and Sharp 0.35.5; npm audit reports zero vulnerabilities. Pytest 9.0.3 is now development-only in `requirements-dev.txt`; pip-audit reports no known vulnerabilities in either requirements set. Production browser source maps are explicitly disabled. Full backend suite: 285 passed, 4 PostgreSQL-only skipped. Production readiness remains NO-GO: production auth/session/MFA, removal of localStorage bearer storage, PostgreSQL RLS, general rate limiting, production fail-closed config, SSRF egress controls and further security verification are still outstanding.
+
+
+## 2026-11-25 — Security hardening continuation
+
+Added production fail-closed configuration checks, Redis-backed request throttling, removal of browser-persisted bearer tokens, required Compose DB password, ESLint 9 flat config, production source-map disablement and constrained successful Next.js build. Validation: backend 298 passed / 4 PostgreSQL-only skipped; npm audit 0 vulnerabilities; frontend lint 0 errors / 7 warnings; frontend build successful with 31 static pages. Security release remains NO-GO because production identity/session/MFA and PostgreSQL 16 RLS/runtime-role isolation are not implemented or verified. See `docs/PRE_DEPLOY_SECURITY_AUDIT_20_POINT.md`.
+
+
+## 2026-11-25 — Authentik OIDC integration
+
+Added Authentik OIDC relying-party integration (Authlib, OIDC discovery, authorization code + PKCE S256, state/nonce), strict pre-provisioned-user linking by verified issuer/subject/email, unique OIDC subject migration, AES-GCM encrypted OIDC transaction cookie, HttpOnly session cookie, double-submit CSRF + Origin checks, CSRF bootstrap/current-user/logout endpoints and frontend credentialed requests. Added `docs/AUTHENTIK_SETUP.md`. Validation: OIDC/CSRF focused tests 35 passed; full backend suite 320 passed / 4 PostgreSQL-only skipped; compileall passed; Alembic single head `r8a2c4e6f901`. Live Authentik configuration, Authentik MFA assurance policy (`acr`), browser topology and PostgreSQL RLS remain unverified. Production remains NO-GO.
+

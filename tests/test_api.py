@@ -207,3 +207,13 @@ def test_execution_history_rejects_invalid_status_and_limit():
         headers=headers,
     )
     assert invalid_limit.status_code == 422
+
+
+def test_development_token_endpoint_remains_usable_without_browser_session():
+    client = TestClient(app)
+    issued = client.post("/v1/auth/dev-token", params={"email": "owner@test.local"})
+    assert issued.status_code == 200
+    token = issued.json()["access_token"]
+    identity = client.get("/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert identity.status_code == 200
+    assert identity.json()["email"] == "owner@test.local"

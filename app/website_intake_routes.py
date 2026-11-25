@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.audit import record_event
 from app.config import settings
-from app.db import get_db
+from app.db import get_db, set_rls_context
 from app.domain_models import Contact, Lead
 from app.models import FounderAuthority, Workspace
 from app.telephony.models import OutboxEvent
@@ -87,6 +87,7 @@ async def receive_website_lead(request: Request, db: Session = Depends(get_db)):
     if not idempotency_key or not hmac.compare_digest(idempotency_key, payload.submission_id):
         raise HTTPException(400, "Idempotency key does not match submission")
 
+    set_rls_context(db, machine_org_id=org_id, machine_workspace_id=workspace_id)
     workspace = db.query(Workspace).filter_by(id=workspace_id, org_id=org_id).first()
     if workspace is None:
         raise HTTPException(503, "Configured website intake workspace is unavailable")

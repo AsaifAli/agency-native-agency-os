@@ -1,13 +1,20 @@
 
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+import secrets
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import text, or_
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.db import get_db
+from app.db import engine, get_db, set_rls_context, verify_postgres_role
+from app.rate_limit import RedisRateLimitMiddleware
+from app.csrf import CookieCSRFMiddleware
+from app.session import EncryptedSessionMiddleware
+from app.oidc_auth import configure_oidc, link_provisioned_user, oidc_client, verified_identity
 from app.config import settings
 from app.workforce_service import initialize_workforce
 from app.auth import (
@@ -32,6 +39,7 @@ from app.models import (
     Execution,
     ExecutionAttempt,
     ExecutionStatus,
+    Membership,
 )
 from app.schemas import (
     WorkspaceCreate,
@@ -50,6 +58,14 @@ from app.schemas import (
     ExecutionOut,
 )
 from app.audit import record_event
+from app.browser_sessions import (
+    issue_browser_session, authenticate_browser_session, revoke_browser_session,
+    rotate_browser_session,
+)
+from app.log_sanitization import configure_log_redaction
+
+configure_log_redaction()
+from app.security_models import BrowserSession  # noqa: F401 — register browser session metadata
 from app.policy import assert_managed_agents_eligible
 from app.action_policy import MANDATORY_APPROVAL_ACTIONS
 from app.evaluation_service import (
@@ -65,11 +81,32 @@ from app.execution_service import (
 )
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if settings.app_env.lower() == "production":
+        if settings.process_role != "api":
+            raise RuntimeError("API process must use PROCESS_ROLE=api in production")
+        verify_postgres_role(engine, expected_bypassrls=False, require_rls=True)
+    yield
+
+
 app = FastAPI(
-    title="Agency OS API",
-    version="0.1.0",
-    description="Founder-controlled Agency OS foundation",
+    title="Agency OS API", version="0.1.0",
+    description="Founder-controlled Agency OS foundation", lifespan=lifespan,
 )
+
+configure_oidc()
+
+app.add_middleware(
+    EncryptedSessionMiddleware,
+    secret_key=settings.oidc_state_secret or settings.jwt_secret,
+    session_cookie=settings.oidc_state_cookie_name,
+    max_age=600,
+    same_site="lax",
+    https_only=settings.app_env.lower() == "production",
+)
+app.add_middleware(CookieCSRFMiddleware)
+app.add_middleware(RedisRateLimitMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -80,9 +117,163 @@ app.add_middleware(
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
+    allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "X-CSRF-Token"],
 )
 
+
+
+@app.get("/v1/auth/login")
+async def authentik_login(request: Request):
+    client = oidc_client()
+    return await client.authorize_redirect(request, settings.oidc_redirect_uri)
+
+
+@app.get("/v1/auth/callback")
+async def authentik_callback(request: Request, db: Session = Depends(get_db)):
+    client = oidc_client()
+    try:
+        token = await client.authorize_access_token(request)
+        claims = token.get("userinfo")
+        if not claims or claims.get("iss") != settings.oidc_issuer:
+            raise HTTPException(401, "Identity issuer validation failed")
+        subject, email = verified_identity(dict(claims), settings.oidc_required_acr)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Do not expose token exchange, state, nonce or provider internals.
+        raise HTTPException(401, "Identity provider authentication failed") from exc
+
+    issuer = settings.oidc_issuer
+    user = link_provisioned_user(db, issuer, subject, email)
+    set_rls_context(db, user_id=user.id)
+
+    memberships = db.query(Membership).filter_by(user_id=user.id).all()
+    for membership in memberships:
+        record_event(
+            db, membership.org_id, user.id, "auth.oidc_login",
+            "user", user.id, payload={"provider": "authentik", "method": "oidc"},
+        )
+    db.commit()
+    db.refresh(user)
+
+    csrf_token = secrets.token_urlsafe(32)
+    session_token = issue_browser_session(db, user, ttl_seconds=settings.oidc_session_ttl_seconds)
+    browser_session = authenticate_browser_session(db, session_token)
+    for membership in memberships:
+        record_event(
+            db, membership.org_id, user.id, "auth.browser_session_created",
+            "browser_session", browser_session.id,
+            payload={"method": "oidc", "provider": "authentik"},
+        )
+    db.commit()
+    redirect = RedirectResponse(settings.oidc_frontend_url.rstrip("/") + "/", status_code=303)
+    secure = settings.app_env.lower() == "production"
+    cookie_samesite = "none" if secure else "lax"
+    redirect.set_cookie(
+        settings.oidc_session_cookie_name, session_token,
+        max_age=settings.oidc_session_ttl_seconds, httponly=True,
+        secure=secure, samesite=cookie_samesite, path="/",
+    )
+    redirect.set_cookie(
+        settings.oidc_csrf_cookie_name, csrf_token,
+        max_age=settings.oidc_session_ttl_seconds, httponly=False,
+        secure=secure, samesite=cookie_samesite, path="/",
+    )
+    request.session.clear()
+    return redirect
+
+
+@app.get("/v1/auth/csrf")
+def get_csrf_token(request: Request, response: Response):
+    token = request.cookies.get(settings.oidc_csrf_cookie_name)
+    if not token:
+        token = secrets.token_urlsafe(32)
+        secure = settings.app_env.lower() == "production"
+        response.set_cookie(
+            settings.oidc_csrf_cookie_name, token,
+            max_age=settings.oidc_session_ttl_seconds, httponly=False,
+            secure=secure, samesite="none" if secure else "lax", path="/",
+        )
+    response.headers["Cache-Control"] = "no-store"
+    return {"csrf_token": token}
+
+
+@app.post("/v1/auth/logout")
+def authentik_logout(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    token = request.cookies.get(settings.oidc_session_cookie_name)
+    if token:
+        session = revoke_browser_session(db, token)
+        if session is not None:
+            set_rls_context(db, user_id=session.user_id)
+            memberships = db.query(Membership).filter_by(user_id=session.user_id).all()
+            for membership in memberships:
+                record_event(
+                    db, membership.org_id, session.user_id, "auth.browser_session_revoked",
+                    "browser_session", session.id,
+                    payload={"reason_code": "USER_LOGOUT"},
+                )
+            db.commit()
+    response.delete_cookie(settings.oidc_session_cookie_name, path="/")
+    response.delete_cookie(settings.oidc_csrf_cookie_name, path="/")
+    return {"status": "signed_out"}
+
+
+@app.post("/v1/auth/refresh")
+def refresh_browser_session(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    token = request.cookies.get(settings.oidc_session_cookie_name)
+    if not token:
+        raise HTTPException(401, "Authenticated browser session required")
+
+    old_session, new_session, new_token = rotate_browser_session(
+        db, token, ttl_seconds=settings.oidc_session_ttl_seconds
+    )
+    set_rls_context(db, user_id=old_session.user_id)
+    memberships = db.query(Membership).filter_by(user_id=old_session.user_id).all()
+    for membership in memberships:
+        record_event(
+            db, membership.org_id, old_session.user_id, "auth.browser_session_rotated",
+            "browser_session", old_session.id,
+            payload={"replacement_session_id": new_session.id},
+        )
+    db.commit()
+
+    secure = settings.app_env.lower() == "production"
+    response.set_cookie(
+        settings.oidc_session_cookie_name, new_token,
+        max_age=settings.oidc_session_ttl_seconds, httponly=True,
+        secure=secure, samesite="none" if secure else "lax", path="/",
+    )
+    # The double-submit CSRF cookie shares the browser-session lifetime. Extend
+    # its expiry whenever the authenticated session rotates, without changing
+    # the token held in the browser's in-memory request helper.
+    csrf_token = request.cookies.get(settings.oidc_csrf_cookie_name)
+    if csrf_token:
+        response.set_cookie(
+            settings.oidc_csrf_cookie_name, csrf_token,
+            max_age=settings.oidc_session_ttl_seconds, httponly=False,
+            secure=secure, samesite="none" if secure else "lax", path="/",
+        )
+    response.headers["Cache-Control"] = "no-store"
+    return {"status": "refreshed"}
+
+
+@app.get("/v1/auth/me")
+def current_identity(p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+    memberships = db.query(Membership).filter_by(user_id=p.user.id).all()
+    return {
+        "user_id": p.user.id,
+        "email": p.user.email,
+        "display_name": p.user.display_name,
+        "memberships": [{"org_id": item.org_id, "role": item.role.value} for item in memberships],
+    }
 
 
 @app.post("/v1/auth/dev-token")

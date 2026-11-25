@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.db import SessionLocal
+from app.db import WorkerSessionLocal
 from app.integrations.runtime import (
     ExecutionRequest,
     ExecutionResult,
@@ -176,7 +176,7 @@ def _record_data_protection_failure(
 def process_one_execution(
     *, worker_id: str, lease_seconds: int = 60,
     heartbeat_interval_seconds: float | None = None,
-    session_factory: SessionFactory = SessionLocal,
+    session_factory: SessionFactory = WorkerSessionLocal,
 ) -> str | None:
     """Claim and process one execution; provider work runs outside DB transactions."""
     with session_factory() as db:

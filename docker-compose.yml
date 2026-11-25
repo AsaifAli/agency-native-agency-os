@@ -4,11 +4,15 @@ services:
     environment:
       POSTGRES_DB: agency_os
       POSTGRES_USER: agency_os
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-only-change-me}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env before starting Agency OS}
+      POSTGRES_MIGRATOR_PASSWORD: ${POSTGRES_MIGRATOR_PASSWORD:?Set POSTGRES_MIGRATOR_PASSWORD in .env before starting Agency OS}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?Set POSTGRES_APP_PASSWORD in .env before starting Agency OS}
+      POSTGRES_WORKER_PASSWORD: ${POSTGRES_WORKER_PASSWORD:?Set POSTGRES_WORKER_PASSWORD in .env before starting Agency OS}
     ports:
       - "5432:5432"
     volumes:
       - agency_os_pg:/var/lib/postgresql/data
+      - ./docker/postgres/01-roles.sh:/docker-entrypoint-initdb.d/01-roles.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U agency_os -d agency_os"]
       interval: 5s
@@ -22,9 +26,11 @@ services:
 
   migrate:
     build: .
-    env_file: .env
     environment:
-      DATABASE_URL: postgresql+psycopg://agency_os:${POSTGRES_PASSWORD:-local-only-change-me}@postgres:5432/agency_os
+      APP_ENV: production
+      PROCESS_ROLE: migration
+      DATABASE_URL: postgresql+psycopg://agency_os_migrator:${POSTGRES_MIGRATOR_PASSWORD:?Set POSTGRES_MIGRATOR_PASSWORD in .env before starting Agency OS}@postgres:5432/agency_os
+      MIGRATION_DATABASE_URL: postgresql+psycopg://agency_os_migrator:${POSTGRES_MIGRATOR_PASSWORD:?Set POSTGRES_MIGRATOR_PASSWORD in .env before starting Agency OS}@postgres:5432/agency_os
     command: ["alembic", "upgrade", "head"]
     restart: "no"
     depends_on:
@@ -33,9 +39,10 @@ services:
 
   api:
     build: .
-    env_file: .env
+    env_file: .env.runtime
     environment:
-      DATABASE_URL: postgresql+psycopg://agency_os:${POSTGRES_PASSWORD:-local-only-change-me}@postgres:5432/agency_os
+      PROCESS_ROLE: api
+      DATABASE_URL: postgresql+psycopg://agency_os_app:${POSTGRES_APP_PASSWORD:?Set POSTGRES_APP_PASSWORD in .env before starting Agency OS}@postgres:5432/agency_os
       REDIS_URL: redis://redis:6379/0
     ports:
       - "8000:8000"
@@ -57,9 +64,10 @@ services:
 
   worker:
     build: .
-    env_file: .env
+    env_file: .env.runtime
     environment:
-      DATABASE_URL: postgresql+psycopg://agency_os:${POSTGRES_PASSWORD:-local-only-change-me}@postgres:5432/agency_os
+      PROCESS_ROLE: worker
+      DATABASE_URL: postgresql+psycopg://agency_os_worker:${POSTGRES_WORKER_PASSWORD:?Set POSTGRES_WORKER_PASSWORD in .env before starting Agency OS}@postgres:5432/agency_os
     command: ["python", "-m", "app.worker.main"]
     init: true
     restart: unless-stopped

@@ -58,10 +58,13 @@ class Organization(Base):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (UniqueConstraint("oidc_issuer", "oidc_subject", name="uq_users_oidc_issuer_subject"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True, nullable=False)
     display_name: Mapped[str] = mapped_column(String(200), default="")
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    oidc_issuer: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    oidc_subject: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 class Membership(Base):
     __tablename__ = "memberships"

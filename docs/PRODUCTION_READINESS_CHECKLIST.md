@@ -1,9 +1,9 @@
 # Agency OS Production Readiness Checklist
 
-**Last reviewed:** 2026-11-25
-**Tracking branch:** `feature/managed-agent-os-tool-execution` (reconciled candidate)
-**Latest merged milestone:** [PR #44](https://github.com/AsaifAli/agency-native-agency-os/pull/44)
-**Status:** PR #45 reconciled with main and locally validated in the cloud workspace; push/merge and PostgreSQL/live-provider gates remain. Not a certification or release approval.
+**Last reviewed:** 2026-11-26
+**Tracking branch:** `main` (PR #45 merged); `security/predeploy-20-point-audit` (PR #47 open draft)
+**Latest merged milestone:** [PR #45](https://github.com/AsaifAli/agency-native-agency-os/pull/45)
+**Status:** PR #45 is merged. PR #47 remains an open draft. The security branch now includes persistent session revocation/rotation/retention, frontend refresh, JWT key overlap, PostgreSQL RLS candidate with separate API/worker/migrator roles, route authorization guards, log redaction and OIDC URL validation. These changes remain unmerged; RLS has not been applied or tested on live PostgreSQL 16. Not a certification or release approval.
 
 ## Progress snapshot
 
@@ -15,7 +15,7 @@
 | External configuration | **5%** | Only limited setup is evidenced; most providers remain unconfigured |
 | Release readiness | **Not ready** | Backend suite passes on reconciled branch; PostgreSQL 16 and live Claude provider validation remain unverified |
 
-Percentages are weighted engineering estimates, not automated metrics. A partially implemented feature does not count as complete. The production verification percentage is intentionally lower than implementation because code presence is not proof of safe operation.
+Percentages are weighted engineering estimates, not automated metrics. The values above are the last reconciled-mainline baseline and do not yet credit the unmerged PR #47 security candidate. A partially implemented feature does not count as complete. The production verification percentage is intentionally lower than implementation because code presence is not proof of safe operation. Candidate verification evidence is recorded separately below.
 
 ## Workstream scorecard
 
@@ -25,10 +25,10 @@ Percentages are weighted engineering estimates, not automated metrics. A partial
 | Founder authority, workforce and Claude runtime | 55% | 45% | Workforce hierarchy, 16 departments, positions, delegation, draft planning, Claude adapter, worker-mediated custom tools and exact workforce capability authorization. Remaining: PostgreSQL validation, budget reservation/usage ledger, provider live validation, session ambiguous-create reconciliation and Claude-side MCP adapter runtime validation if required. |
 | Revenue engine | 48% | 52% | CRM, contact timeline, leads/opportunities, service catalogue, proposal/contract approval, onboarding, invoices/receivables foundations, research records and reviewed outreach drafts. Remaining: prospect discovery/enrichment, dedupe/merge workflow, consent/provenance, approved dispatch, stop conditions, campaign tracking, sales forecasting and attribution. |
 | Delivery and client success | 55% | 45% | Projects, milestones, playbooks, onboarding, time/cost, scope changes, financial summaries and retainer usage-period ledger. Remaining: requirements traceability, acceptance evidence, independent QA/rework gates, release/handover, support, SLA measurement, client health and renewal/termination workflows. |
-| Security and governance | 60% | 40% | Founder-only approvals, workspace scoping, autonomy policy, machine identity/session grants, DPG redaction, exact workforce tool grants and denial audit. Remaining: PostgreSQL lock/isolation verification, secrets/egress controls, retention/deletion and independent security review. |
+| Security and governance | 60% | 40% | Merged baseline includes founder-only approvals, machine identity/session grants, DPG redaction and exact workforce tool grants. PR #47 candidate adds browser-session revocation/rotation/retention, JWT key overlap, 51 RLS policies, API/migrator/worker role split, route guards and log redaction; still unmerged and not live-verified. Remaining: worker BYPASSRLS removal, human workspace grants, PostgreSQL verification, secrets/egress controls and independent security review. |
 | Automation and execution reliability | 55% | 45% | Persisted executions/attempts, leases, heartbeat/recovery, retries, outbox and execution-scoped idempotent Claude tool callbacks. Remaining: integration-wide reconciliation, dead-letter operations, cancellation, worker load tests and operational alerts. |
 | Founder Console | 60% | 40% | Workforce, tasks, operations, approvals, CRM, proposals, contracts, onboarding, invoices, audit/monitoring, research/outreach and retainer page foundations. Remaining: integrated lifecycle views, tool/permission controls, finance and client-health views, accessible UX and end-to-end workflow polish. |
-| Verification and operations | 28% | 72% | Reconciled branch full backend suite: 285 passed, 4 PostgreSQL-only skipped; compileall passed. Remaining: PostgreSQL 16 migrations/concurrency, frontend lint/static generation, tenant isolation, security scans, SBOM, backup restore, alerting, RPO/RTO and runbooks. |
+| Verification and operations | 28% | 72% | PR #47 candidate: 364 backend tests passed, 5 PostgreSQL-only skipped; compileall, isolated PostgreSQL SQL rendering, Compose YAML and role-script syntax passed; frontend lint 0 errors/7 existing warnings and Next.js production build passed. Remaining: live PostgreSQL 16 migrations/concurrency, worker isolation, security scans/SBOM, backup restore, alerting, RPO/RTO and runbooks. |
 | External integrations and configuration | 5% | 95% | Website intake is designed to be disabled until configured. Remaining: Claude production account/runtime, approved research sources, email/LinkedIn providers, telephony, object storage, secrets, webhook endpoints, domain/DNS and external legal/provider review. |
 
 ## Detailed delivery checklist
@@ -61,8 +61,8 @@ Percentages are weighted engineering estimates, not automated metrics. A partial
 - [x] Clients, contacts, contact activities, leads and opportunities.
 - [x] Suppression stage and reason.
 - [x] Service catalogue and proposal/contract approval foundations.
-- [x] One-time and retainer terms in proposals/contracts (PR #28, unmerged).
-- [x] Source-backed lead research records and founder-reviewed outreach drafts (PR #28, unmerged).
+- [x] One-time and retainer terms in proposals/contracts (merged via PR #29).
+- [x] Source-backed lead research records and founder-reviewed outreach drafts (merged via PR #29).
 - [ ] Prospect discovery and enrichment adapters with source provenance, confidence and deduplication.
 - [ ] Human-reviewed company/contact merge with audit and relationship preservation.
 - [ ] Approved sender identities, consent/provenance registry, channel-specific permissions and suppression list.
@@ -73,10 +73,10 @@ Percentages are weighted engineering estimates, not automated metrics. A partial
 - [ ] Discovery briefs, objection tracking, forecast and proposal revision/version history.
 
 ### 4. One-time and retainer delivery
-- [x] Contract snapshots distinguish fixed-scope one-time work from recurring retainer terms (PR #28, unmerged).
-- [x] Founder-governed retainer service periods, included hours, rollover calculation and usage snapshots (PR #28, unmerged).
-- [x] Idempotent recurring invoice draft generation linked uniquely to a closed retainer period; founder approval is still required before issue (PR #28, unmerged).
-- [x] Billable time entry requires an open period for active retainer projects; closed-period backdating is blocked at the API layer (PR #28, unmerged).
+- [x] Contract snapshots distinguish fixed-scope one-time work from recurring retainer terms (merged via PR #29).
+- [x] Founder-governed retainer service periods, included hours, rollover calculation and usage snapshots (merged via PR #29).
+- [x] Idempotent recurring invoice draft generation linked uniquely to a closed retainer period; founder approval is still required before issue (merged via PR #29).
+- [x] Billable time entry requires an open period for active retainer projects; closed-period backdating is blocked at the API layer (merged via PR #29).
 - [ ] Add concurrency and PostgreSQL locking tests for period close versus time entry creation.
 - [ ] Add adjustment/correction workflow for erroneous time entries without mutating closed snapshots.
 - [ ] Add founder approval for overage billability, rate and scope before any additional charge.
@@ -134,15 +134,12 @@ Percentages are weighted engineering estimates, not automated metrics. A partial
 - [ ] Use one deliberate CI validation cycle when the branch is ready; do not merge if required jobs fail.
 - [ ] If Actions quota is exhausted, use an approved local or alternate CI environment and preserve the exact logs/artifacts as evidence.
 
-## Historical PR #28 release gate (superseded by merged PR #29)
-- [ ] Confirm migration graph has one head and PostgreSQL upgrade succeeds from main.
-- [ ] Run backend tests, including new research/outreach and retainer period tests.
-- [ ] Run frontend TypeScript check and production build.
-- [ ] Test retainer period closeout under PostgreSQL transaction locking.
-- [ ] Test organization/workspace isolation for every new endpoint.
-- [ ] Confirm no send/dispatch, payment, renewal or external call side effect exists.
-- [ ] Obtain successful required CI checks and code review.
-- [ ] Merge only after all gates pass.
+## Historical PR #28 / integration PR #29 — merged
+- [x] Confirmed PR #28 was closed unmerged and its overlapping Revenue/Delivery work was reconciled through PR #29.
+- [x] Confirmed PR #29 merged to main with the unified Alembic merge revision l2e8a0b6d549.
+- [x] Confirmed the merged scope includes consent-governed outbound email preparation, source-backed research drafts, proposal catalogue snapshots, one-time/retainer terms, governed retainer periods and idempotent recurring invoice drafts.
+- [x] Preserved the safety boundary: outbound email dispatch, contract signing, invoice sending, payment collection and automatic renewal remain disabled.
+- [ ] Remaining PostgreSQL 16 tenant isolation/locking and external-provider dispatch gates are tracked in the active sections above; PR #29's validation is historical local evidence, not a fresh run against the exact remote commit.
 
 ## Definition of production-grade
 A feature is **production-ready** only when implementation, authorization, tenant isolation, persistence, audit, failure recovery, tests, observability, retention and operational documentation are all evidenced. A schema, UI, action taxonomy or mocked adapter alone is a foundation, not a complete capability.
@@ -368,7 +365,7 @@ A feature is **production-ready** only when implementation, authorization, tenan
 
 **Evidence boundary:** the reconciled branch full backend suite passed 285 tests, with 4 PostgreSQL-only tests skipped because `AGENCY_OS_TEST_DATABASE_URL` was not configured. `q7f2b9d4c631` is the sole Alembic head. A SQLite full-history migration rehearsal stopped at the pre-existing `eb75d47bfc63` migration, which uses an ALTER constraint operation unsupported by SQLite; this did not validate or invalidate the new PostgreSQL migration. No PostgreSQL 16 or live Managed Agents session was available, and no provider tool is enabled in production.
 
-### PR #45 reconciled implementation notes (branch validation complete; merge pending)
+### PR #45 reconciled implementation notes (merged to main)
 
 ## 2026-11-25 — Managed Agents OS custom-tool execution
 
@@ -378,6 +375,7 @@ A feature is **production-ready** only when implementation, authorization, tenan
 - [x] Tool calls use OS machine identity/session grants, DPG, schema validation, idempotency, persisted invocation results and audit.
 - [x] Custom tool call/result handling is bounded; native provider tools, MCP, skills and multiagent features remain disabled.
 - [x] Reconciled PR branch with current `main` and resolved the two source conflicts without dropping the main-branch research review UI or tests.
+- [x] PR #45 merged to `main` (confirmed in GitHub).
 - [x] Exact reconciled branch focused validation passed 154 tests; full backend suite passed 285 tests with 4 PostgreSQL-only skips.
 - [x] Corrected a main-branch `LeadResearchDraft.promoted_lead_id` ORM/migration mismatch exposed during test collection.
 - [x] Added tool-level workforce capability enforcement and stable execution idempotency across session renewal.
@@ -400,3 +398,149 @@ Additional review controls: identity/session locks follow revocation lock order;
 - [x] Documented Claude as the workforce interaction/runtime layer and Agency OS as the authority for identity, grants, business records, budgets, approvals and audit.
 - [x] Documented MCP as a thin Claude-side protocol adapter when required; it must call the OS Tool Gateway and cannot become a second authorization or execution system.
 - [ ] Reconcile the external SkillTree/brain report once its Google Doc content is supplied in an inspectable file. The supplied Google Docs URL could not be opened through an available Drive connector in this environment.
+
+
+## 2026-11-25 — 20-point pre-deploy security audit
+
+- [x] Audited all 20 controls against the reconciled branch; detailed findings, file/line evidence, severities and required patches are in `docs/PRE_DEPLOY_SECURITY_AUDIT_20_POINT.md`.
+- [x] Updated Next.js and matching ESLint config to 15.5.29; pinned PostCSS 8.5.33 and Sharp 0.35.5; committed npm lockfile; `npm audit` reports zero vulnerabilities.
+- [x] Moved pytest out of runtime requirements into `requirements-dev.txt` and upgraded to pytest 9.0.3; `pip-audit` reports no known vulnerabilities in runtime or development requirements.
+- [x] Explicitly disabled production browser source maps in `frontend/next.config.ts`.
+- [ ] Production authentication/session lifecycle, MFA, localStorage removal, PostgreSQL RLS, general rate limiting, safe production defaults, route-wide authorization matrix, full SSRF egress controls and centralized log scrubbing remain release blockers.
+- [ ] Complete PostgreSQL 16 test suite, ESLint flat config and full frontend production build; perform independent security review and secret-history scan.
+
+**Security release decision: NO-GO.** Dependency vulnerabilities found by this audit were patched, but the critical identity, RLS and verification gaps remain. See `docs/PRE_DEPLOY_SECURITY_AUDIT_20_POINT.md` for all 20 controls and evidence boundaries.
+
+
+## 2026-11-25 — Security hardening continuation
+
+- [x] Production startup validation now fails closed for dev auth, mock runtime, weak JWT/database passwords, SQLite, non-TLS Redis, wildcard/non-HTTPS CORS, disabled rate limiting and untrusted Claude API base URLs.
+- [x] Added Redis-backed per-minute request throttling for auth, expensive and general API routes; production returns 503 if Redis is unavailable and 429 with Retry-After when limited.
+- [x] Removed localStorage/sessionStorage bearer-token persistence; development override is memory-only and hidden in production.
+- [x] Removed insecure Docker Compose database-password fallback; POSTGRES_PASSWORD is required.
+- [x] Added ESLint 9 flat config; lint completes with 0 errors (7 existing hook dependency warnings).
+- [x] Production frontend build passes and generates all 31 static pages; build worker count constrained to one to avoid EAGAIN in cloud environments.
+- [x] Backend full suite: 296 passed, 4 PostgreSQL-only tests skipped.
+- [ ] Production identity provider/session lifecycle and MFA still not implemented; no password auth should be added without selecting the identity architecture.
+- [x] Added PostgreSQL RLS migration covering all current org-scoped model tables, transaction-local human/machine context, non-owner NOBYPASSRLS API role, isolated BYPASSRLS worker role and migration-role separation.
+- [ ] Apply and verify the RLS migration on PostgreSQL 16; run live cross-tenant, machine-workspace and pooled-connection tests. Human workspace membership is not yet a separate grant model.
+- [ ] Redis integration/load tests, trusted-proxy setup, SSRF egress controls, complete route authorization review, log redaction, secret-history scan and deployment/restore review remain.
+
+**Security release decision remains NO-GO** until identity/MFA and PostgreSQL RLS are implemented and verified. Full evidence is in `docs/PRE_DEPLOY_SECURITY_AUDIT_20_POINT.md`.
+
+
+## 2026-11-25 — Authentik OIDC integration
+
+- [x] Added Authentik OIDC relying-party adapter using Authlib discovery and Authorization Code flow with PKCE S256, state and nonce handling.
+- [x] Production config requires issuer, client ID/secret, independent OIDC state secret, HTTPS callback and frontend URLs.
+- [x] Only verified email + issuer + subject may bind to an already provisioned active Agency OS user; no JIT users, memberships or role grants.
+- [x] Added unique issuer-subject mapping and Alembic migration `r8a2c4e6f901`.
+- [x] Added HttpOnly browser session cookie, short expiry, logout, current identity and no-store CSRF bootstrap endpoint.
+- [x] Added double-submit CSRF and allowlisted Origin enforcement for cookie-authenticated unsafe methods; bearer service calls remain unaffected.
+- [x] Frontend uses credentialed requests and keeps CSRF material in memory only; Authentik login/logout actions added to settings.
+- [x] OIDC identity and CSRF unit tests pass; full backend suite 320 passed, 4 PostgreSQL-only skipped.
+- [ ] Provision Authentik provider/client and configure secrets/callback in deployment. No live OIDC flow has been run.
+- [ ] Enforce/verify `acr`/`amr` MFA assurance for founder/admin; configure phishing-resistant MFA in Authentik.
+- [x] Add a persistent browser-session/token revocation ledger in the follow-up candidate below; production browser/Safari same-site verification remains pending.
+- [ ] PostgreSQL 16 RLS/non-owner runtime role and integration tests remain a critical release blocker.
+
+**Release decision remains NO-GO** pending live Authentik/MFA assurance and PostgreSQL RLS verification.
+
+- [x] Replaced Starlette's signed-only OIDC state cookie with AES-GCM authenticated encryption for the PKCE verifier and nonce; tests prove round-trip and reject tampered state cookies.
+
+
+## 2026-11-25 — Continuation source review
+
+- [x] Rechecked PR #47 metadata and exact changed-file set; PR #47 remains open and draft. No merge or Actions run was triggered.
+- [x] Re-reviewed OIDC session, CSRF, rate-limit and migration source. The current browser session is a stateless short-lived JWT; logout clears cookies but does not revoke a copied token before expiry.
+- [x] Added a PR review comment documenting the required persisted session/JTI revocation and rotation lifecycle, PostgreSQL 16 RLS/runtime-role requirements, Claude parent/child execution controls and live Authentik assurance verification.
+- [x] Implement and test the server-side session ledger in the follow-up candidate below; logout revokes server-side and replay fails immediately in isolated API tests.
+- [ ] Implement and verify PostgreSQL 16 RLS with a non-owner/non-BYPASSRLS application role, transaction-local tenant context and pooled-connection isolation tests.
+- [ ] Implement durable Claude child-execution correlation, per-child budgets and exact grants, cancellation and provider-event reconciliation before enabling multiagent or side-effecting workflows.
+- [ ] Complete live Authentik OIDC/JWKS/ACR and browser cookie verification.
+- [x] Added route authorization inventory guard, central Python log redaction, JWT current/previous key IDs, frontend session refresh, bounded browser-session retention and OIDC issuer URL validation.
+- [ ] Complete nested-object BOLA review, network-level egress/DNS controls, live MFA/ACR verification, secret-history scan and backup/restore gates.
+
+**Evidence boundary at the 2026-11-25 review checkpoint:** GitHub source review and PR metadata were available, but the then-current cloud development workspace could not establish TLS to GitHub. That limitation was resolved in the 2026-11-26 Upstash Box session; see the subsequent validation/publish record below.
+
+
+## Repository history reconciliation — 2026-11-25
+
+- [x] Verified PR #28 is closed without merge; do not treat it as the integration commit.
+- [x] Verified PR #29 is merged and reconciles the Revenue/Delivery work previously split across PRs #25, #26 and #28.
+- [x] Compared the four proposal/research/retainer migration blobs on PR #28's branch with main; all four are byte-identical on main.
+- [x] Compared the Retainer Operations and Research/Outreach UI paths; the Retainer page is identical and the Outreach page has since evolved on main.
+- [x] Corrected this checklist's historical references to identify PR #29 as the merged integration and PR #45 as the merged Claude custom-tool milestone.
+
+
+## 2026-11-25 — Persistent browser-session revocation candidate
+
+- [x] Added `browser_sessions` with a unique SHA-256 digest of JWT `jti`, user binding, expiry, revocation timestamp and indexed lookup/expiry fields; the raw token and raw `jti` are not persisted.
+- [x] OIDC callback creates the browser session record and creation audit events before returning the HttpOnly cookie.
+- [x] Cookie and signed bearer presentations of browser JWTs now require a live persistent session record, active user and matching subject; dev-only `dev:` bearer tokens retain their existing non-production path.
+- [x] Logout revokes only the current session, records per-organization audit events in the same database transaction and remains idempotent; copied cookie and bearer-token replay are rejected.
+- [x] Added `POST /v1/auth/refresh` to atomically lock/revoke the old session, issue a replacement, record the replacement ID in audit and commit before returning the new HttpOnly cookie.
+- [x] TDD regression suite: **11 focused browser-session tests passed**, including API logout/replay, bearer replay, inactive user, persistent expiry, digest-only storage, repeated revocation and refresh rotation.
+- [x] Full backend suite before the logging hardening update: **332 passed, 4 PostgreSQL-only skipped**.
+- [x] New Alembic revision `s9b5d7f1a204` is the single migration head; isolated upgrade from `r8a2c4e6f901` to the new revision passed on SQLite and verified table columns/indexes.
+- [ ] Full historical SQLite migration rehearsal still stops at pre-existing revision `eb75d47bfc63` (unsupported SQLite ALTER constraint operation); this does not verify the new migration on PostgreSQL. Run PostgreSQL 16 populated-schema upgrade/downgrade before merge.
+- [ ] Wire proactive refresh into the frontend client and verify it under the actual browser topology; PostgreSQL row-lock concurrency testing for simultaneous refresh remains outstanding.
+- [ ] Scheduled retention/deletion, artifact cleanup, Safari same-site cookie verification, Authentik live MFA/ACR verification and PostgreSQL 16 RLS remain outstanding.
+
+
+
+## 2026-11-25 — Route authorization inventory guard
+
+- [x] Added `tests/test_route_auth_inventory.py`: every registered FastAPI API route must depend on the authenticated human principal or machine principal, unless it is in the explicit public/cookie-session allowlist.
+- [x] Explicit public exceptions are limited to OIDC login/callback/CSRF bootstrap, development-only token issuance, health and signed website intake. Logout and refresh are separately allowlisted only as cookie-session handlers and require the installed double-submit CSRF middleware.
+- [x] The route inventory guard passes; it is included in the full backend result of **332 passed, 4 PostgreSQL-only skipped**.
+- [ ] This structural guard does not prove resource-level authorization. Complete the semantic route-by-route organization/workspace/role matrix and negative cross-tenant tests before production.
+
+**Evidence boundary:** source was cloned from public branch `security/predeploy-20-point-audit` at `730b10fb00206afbd02f6f49e17ad3ba8e431a95`. Tests ran in Upstash Box `certain-whale-42014` on Python 3.13.18. Changes were published to the existing draft PR #47 branch; PR #47 remains open/draft and unmerged. No GitHub Actions workflow was triggered.
+
+
+## 2026-11-25 — Central log redaction hardening
+
+- [x] Added `app/log_sanitization.py` to sanitize rendered log messages/arguments, exception tracebacks, stack information and structured `extra` fields before handlers format records. Secret-bearing values replace the containing message/field; supported PII is redacted using the existing deterministic data-protection patterns.
+- [x] Installed the redaction boundary for API logs and worker process logs.
+- [x] Removed founder email addresses from bootstrap and Founder Authority CLI success output; commands now report opaque user IDs.
+- [x] Added 3 focused tests covering email/phone redaction, API-key and bearer-secret replacement, exception traceback scrubbing and structured-extra redaction.
+- [x] Full backend suite after the update: **335 passed, 4 PostgreSQL-only skipped**; compileall and `git diff --check` passed.
+- [ ] Verify deployed Uvicorn/worker logging configuration, third-party/provider/proxy logs, log retention and alerting. This code cannot sanitize logs emitted outside the configured Python process.
+
+
+## 2026-11-26 — PostgreSQL RLS, session lifecycle and authorization hardening candidate
+
+- [x] Added migration `t0a1b2c3d4e5_postgresql_tenant_row_level_security.py`. It covers all **49 current model tables with `org_id`, `organizations`, and user/token-scoped `browser_sessions` (51 policies)**, enables and FORCEs RLS, and installs a restricted `SECURITY DEFINER` membership predicate owned by `agency_os_migrator`.
+- [x] Added transaction-local RLS context binding/reapplication in `app/db.py`; human auth sets user context, machine auth first scopes identity lookup then exact org/workspace context, signed website intake binds its configured org/workspace after signature validation, and browser sessions are limited to the authenticated user or exact presented token digest.
+- [x] Split database roles in Compose: `agency_os_app` is non-owner/NOBYPASSRLS, `agency_os_worker` is non-owner/non-superuser/BYPASSRLS for cross-tenant queue processing, and `agency_os_migrator` is non-superuser/BYPASSRLS and owns migrations. API/worker containers do not receive the migration credential. Role attributes are checked at production startup.
+- [x] Added `docs/POSTGRES_RLS_OPERATIONS.md`, role bootstrap script and separate `.env.example` / `.env.runtime.example` files. Existing volumes require running the idempotent role bootstrap script before migration; no volume reset is required.
+- [x] Added live PostgreSQL RLS test `tests/test_tenant_rls_postgres.py` for cross-org reads/writes, machine workspace scope and pooled connection context cleanup. It is currently skipped because no PostgreSQL test database is configured.
+- [x] Static RLS coverage test ensures every current SQLAlchemy model table with `org_id` is listed in the policy migration. PostgreSQL-only test remains required before merge.
+- [x] Added JWT `kid` allowlisting with a current/previous key overlap and legacy no-`kid` decode path; production validates key ID and previous key length.
+- [x] Added frontend proactive browser session refresh every 15 minutes and on tab visibility return; API helper also refreshes before requests. Dev bearer override bypasses cookie refresh.
+- [x] Added bounded browser-session retention cleanup with metadata-only audit events; worker prunes rows after `BROWSER_SESSION_RETENTION_DAYS` (default 30).
+- [x] Hardened production OIDC issuer URL validation against HTTP, localhost/private IP literals, embedded credentials, query/fragment and non-standard ports. DNS rebinding and egress firewall policy remain infrastructure controls.
+- [x] Extended route inventory tests to require membership/role/founder checks on all `{org_id}` routes and explicit use of `{workspace_id}` on workspace routes. This is structural coverage, not complete nested-object BOLA proof.
+- [ ] Human workspace membership/assignment model remains unimplemented: human org membership currently allows all workspaces in that org. Machine identities are constrained to their exact workspace by RLS.
+- [ ] Worker DB role currently has `BYPASSRLS` to support global queue claiming and outbox maintenance. It is a separate non-superuser credential/process, but is not a strict tenant boundary; replace broad bypass with narrow queue-claim/ack functions and per-execution tenant context before production.
+- [ ] No PostgreSQL server or Docker daemon was available in the Box. RLS SQL was rendered for the isolated revision range; it was not applied to PostgreSQL 16. The full historical offline migration chain is blocked by a pre-existing migration that requires live bind inspection.
+- [ ] Verify migration on PostgreSQL 16, role attributes/ownership, API startup and worker startup, pool reuse, populated-schema upgrade/downgrade and concurrent session refresh. Replace worker `BYPASSRLS` with narrowly scoped queue functions before production.
+
+**Release decision: NO-GO.** This candidate materially closes code-level gaps but is not production approved. External Authentik MFA, PostgreSQL 16 verification, egress restrictions, nested-object authorization, secret-history review and backup/restore remain outstanding.
+
+
+## 2026-11-26 — Candidate validation and publication
+
+- [x] Continued the existing `security/predeploy-20-point-audit` branch and published the candidate commit to PR #47 via the connected GitHub integration: `91be00406c0be9a7b4a83cbab665df399fa7b3f6`. PR #47 remains open and draft; no merge was performed.
+- [x] Backend suite on the candidate: **364 passed, 5 skipped**. All skips require live PostgreSQL test URLs (tenant integrity, RLS, and worker concurrency/recovery).
+- [x] Python `compileall`, `git diff --check`, Compose YAML parsing and executable Postgres role-bootstrap shell syntax passed.
+- [x] Alembic reports one head, `t0a1b2c3d4e5`; isolated PostgreSQL SQL rendering generated all 51 RLS policies. This is SQL-generation evidence, not a live migration.
+- [x] Frontend ESLint completed with 0 errors and 7 existing hook-dependency warnings; Next.js production build passed and generated 31 static routes.
+- [x] Added regression coverage for the development-token endpoint so the persistent browser-session enforcement does not break the explicit non-production token flow.
+- [x] Fixed CSRF cookie lifetime renewal during browser-session refresh and added an endpoint assertion.
+- [ ] PostgreSQL 16 application/integration, populated database upgrade/downgrade, role ownership, pool reuse, worker cross-tenant isolation and concurrent refresh remain unverified.
+- [ ] No GitHub Actions workflows were triggered due the account's constrained Actions allowance.
+
+**Release decision: NO-GO.** The PR is a tested code candidate, not production approval. Restore the repository to private visibility now that the temporary public clone requirement is over; PR #47 remains available to authorized collaborators.
+

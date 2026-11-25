@@ -49,7 +49,7 @@ Every invocation is re-authorized by the OS:
 
 The provider receives only the tool result or a generic error. Raw exceptions, credentials and internal authorization details are not returned to the model. A tool that requires an approval adapter is not exposed to Managed Agents.
 
-Native provider tools, shell, web search/fetch, MCP servers, skills and multiagent workflows remain disabled. This deliberately keeps provider-side child actions outside the OS until every child action can be reconciled into OS-owned tasks, permissions, budgets and audit records. Do not bypass this boundary by changing prompts or enabling provider-side toolsets.
+The initial adapter intentionally disables native provider tools, MCP servers, skills and multiagent workflows. This is a safe baseline, not the target capability ceiling. See `docs/CLAUDE_DELEGATION_AND_OS_CONTROL_BOUNDARY.md` for the phased plan to enable Claude predefined specialists, subagents, dynamic workflows, skills and MCP while preserving OS-owned tasks, permissions, budgets, approvals and audit. Do not enable provider-side child execution until child-thread correlation, per-child budgets, cancellation and reconciliation are implemented and tested.
 
 The worker uses the OS database identity directly; it does not place a machine token or provider secret in prompts or provider event content. Prompts are not the security boundary. Explicit policy denials return a generic tool error to the agent; unexpected gateway/database failures propagate to the worker retry path instead of being presented as a successful tool response.
 

@@ -7,7 +7,10 @@
 ## 1. Founder decisions and access
 
 - [ ] Confirm the production organization and workspace IDs; keep development/staging separate.
-- [ ] Choose the production identity provider and configure OIDC/JWKS, MFA, redirect URIs and session policy. The current dev-token path is development-only.
+- [ ] Provision Authentik and create the confidential OIDC provider/client using `docs/AUTHENTIK_SETUP.md`; register the exact `/v1/auth/callback` URI.
+- [ ] Configure verified-email mapping (Authentik 2025.10+ defaults `email_verified` to false) and a real verification process.
+- [ ] Configure phishing-resistant MFA for founder/admin in Authentik; add the `agency_os_assurance` OIDC scope mapping and verify the actual flow emits the exact `OIDC_REQUIRED_ACR` claim before considering MFA closed.
+- [ ] Inject OIDC issuer, client ID/secret, independent state secret, redirect URI and frontend URL into the secret manager. Do not commit these values.
 - [ ] Provision the founder identity and verify explicit Founder Authority separately from organization-owner membership.
 - [ ] Decide approved sender identities, business contact hours, communication channels and escalation destination.
 - [ ] Approve the initial service catalogue, ICPs, pricing boundaries and proposal approval rules.
@@ -28,7 +31,7 @@
 
 ## 3. AI runtime
 
-**Code status:** Mock runtime and a constrained Managed Agents adapter exist. Live account, environment and provider compatibility are not validated; Claude Agent SDK fallback and OS MCP gateway are not implemented.
+**Code status:** Mock runtime and a constrained Managed Agents adapter exist. The target delegation split and phased Managed Agents multiagent plan are documented in `docs/CLAUDE_DELEGATION_AND_OS_CONTROL_BOUNDARY.md`. Live account, environment and provider compatibility are not validated; child-execution correlation/reconciliation, Claude Agent SDK fallback and OS MCP gateway are not implemented.
 
 - [ ] Confirm Anthropic account/project, billing and Managed Agents availability.
 - [ ] Create a dedicated non-production environment with minimal permissions and restricted egress.
@@ -88,9 +91,12 @@
 These are **not** external setup tasks and cannot be closed by entering credentials:
 
 - [ ] Full cross-workspace authorization tests across APIs, workers, sessions, files and caches; PostgreSQL RLS review.
-- [ ] OIDC/JWKS/MFA integration and secure session lifecycle.
+- [x] Authentik OIDC code path, verified issuer/subject account binding, HttpOnly session cookie and CSRF protection are implemented.
+- [ ] Live OIDC/JWKS/MFA assurance (`acr`/`amr`), token revocation and actual browser session lifecycle verification.
 - [ ] Data Protection Gateway, PII minimization/redaction and retention/deletion implementation.
-- [ ] OS MCP gateway and narrowly scoped tools for agents.
+- [ ] Implement Claude-side MCP adapter(s) over authenticated OS Tool Gateway actions; keep OS policy and audit authoritative.
+- [ ] Implement child-execution persistence/correlation, per-child budgets, cancellation and provider-event reconciliation before enabling Managed Agents subagents or dynamic workflows.
+- [ ] Pilot predefined Claude specialists and read-only dynamic workflows on synthetic/public data; keep inline agents disabled until least-privilege is proven.
 - [ ] Outbound email dispatch, sender registry, consent provenance, suppression, reply/opt-out/bounce stop, idempotency and audit.
 - [ ] CRM relationship activities/timeline, source evidence and duplicate review/merge workflow.
 - [ ] Proposal/estimate/SOW and contract approval lifecycle.
