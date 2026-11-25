@@ -313,18 +313,18 @@ A feature is **production-ready** only when implementation, authorization, tenan
 - [x] PR #39 merged to `main` after fixing the two actionable async UI review findings. PR #37 remains closed as superseded.
 - [ ] Full frontend lint, TypeScript check and production build are still unverified; the corrected PR head had no workflow run, and the previous Actions attempt was blocked by account billing/spending limits. Treat the UI as merged but not fully build-verified.
 
-### Claude Managed Agents OS tool bridge — design
+### Claude Managed Agents tool bridge — custom-tool path design
 - [x] Audited the current Tool Registry, REST gateway, machine identity/session model and Managed Agents adapter.
-- [x] Documented the OS-owned MCP bridge, session-bound credential, per-call authorization, DPG, idempotency, vault lifecycle, recovery and acceptance tests in `docs/CLAUDE_MANAGED_AGENTS_TOOL_BRIDGE.md`.
+- [x] Documented the OS-worker-mediated Managed Agents custom-tool path and retained the MCP connector as a deferred alternative.
 - [ ] Add session-bound bearer credentials (digest-only persistence, expiry/revocation, exact session scope).
-- [ ] Implement an authenticated HTTPS Streamable HTTP MCP endpoint backed by the existing shared Tool Gateway service.
-- [ ] Keep provider-side tools disabled by default; expose only explicit, OS-approved MCP tool names.
-- [ ] Add per-session Claude vault credential provisioning and cleanup/reconciliation; never expose the machine identity's reusable credential to Claude.
-- [ ] Integrate provider MCP connection/auth error events into OS execution failure/review states.
-- [ ] Complete unit, MCP contract, PostgreSQL 16, cross-workspace isolation, duplicate-call, crash-recovery and synthetic end-to-end tests before enabling.
+- [ ] Refactor the current REST Tool Gateway into one shared invocation service for REST and Managed Agents custom-tool callbacks.
+- [ ] Add execution/session-bound custom-tool dispatch in the worker; keep provider tool definitions exact and version-pinned.
+- [ ] Enforce WorkforceCapability grants, machine identity scopes, data class, action policy and budget on every callback.
+- [ ] Add idempotent replay across provider retries and OS session renewal; reconcile missing tool results and worker crashes.
+- [ ] Complete unit, PostgreSQL 16, cross-workspace isolation, duplicate-call, stale-lease, revocation, crash-recovery and synthetic end-to-end tests before enabling.
 - [ ] First pilot is limited to `system.health.read` and public-only `revenue.lead.research.capture`; no CRM promotion, contacts, outbound dispatch, payments or production actions.
 
-**Current verified boundary:** The main branch has a REST Tool Gateway, not an MCP server. The Managed Agents adapter intentionally rejects provider MCP/tools. This continuation adds the design only; no provider tools have been enabled and no runtime code or production configuration has changed.
+**Current verified boundary:** The main branch has a REST Tool Gateway; the Managed Agents adapter still rejects provider custom tools and MCP servers. No provider tools have been enabled and no runtime code or production configuration has changed. The first implementation candidate is worker-mediated custom tools; MCP endpoint/vault work is deferred.
 
 
 ## Founder research review UI — 2026-11-25 (merged PR #39)
@@ -344,10 +344,10 @@ A feature is **production-ready** only when implementation, authorization, tenan
 - [x] Confirmed the branch has 32 commits on its side of the merge-base comparison, but its direct tree comparison against main would change 269 files with approximately 7,292 insertions and 18,811 deletions. This is not a safe merge candidate.
 - [x] Confirmed the signed website lead-intake route and its tests are already present on main with identical Git blob SHAs; the workforce console page is also identical.
 - [x] Confirmed main contains a more extensive workforce API implementation, including founder-governed capability activation/pause, runtime/data-class checks, delegation and orchestration-plan support. The branch's older route/model/test versions must not replace it.
-- [x] Confirmed main registers both website-intake and workforce routers. The current workforce API also explicitly blocks tool grants until the Agency OS MCP gateway exists.
+- [x] Confirmed main registers both website-intake and workforce routers. The current workforce API also explicitly blocks tool grants until an OS-managed runtime tool bridge exists.
 - [x] Decision: do not merge or rebase the stabilization branch wholesale and do not cherry-pick its historical commits without a fresh per-feature comparison. High-value workforce/intake capabilities are already present or superseded on main.
 - [ ] Keep the old branch as a reference until a separate, commit-by-commit audit is complete; no branch deletion, force-push or destructive cleanup was performed.
-- [ ] Continue implementation from current main. The MCP bridge remains a design-only milestone; its authenticated endpoint, session token, vault lifecycle and contract/isolation/recovery tests are still outstanding.
+- [ ] Continue implementation from current main. The custom-tool callback bridge remains a design-only milestone; worker dispatch, workforce capability enforcement, retry-safe replay and contract/isolation/recovery tests are still outstanding. MCP endpoint/token/vault work is deferred.
 
 **Validation boundary:** this was a Git-tree/source comparison through GitHub. No local tests, frontend build, PostgreSQL migration rehearsal or CI run was performed as part of this branch audit.
 
