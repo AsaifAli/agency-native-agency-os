@@ -22,6 +22,7 @@ from app.integrations.runtime import (
     RuntimeManualReviewRequired,
     RuntimeNotConfiguredError,
     RuntimeTransientError,
+    RuntimeToolRejected,
 )
 from app.policy import assert_managed_agents_eligible
 from app.tool_registry import get_tool_by_provider_name, managed_agent_custom_tool_definitions
@@ -266,12 +267,18 @@ class ManagedAgentsRuntime(AgentRuntime):
                     result = request.execute_custom_tool(name, payload, event_id)
                     if not isinstance(result, dict):
                         raise TypeError("Tool result must be an object.")
-                except Exception:
+                except RuntimeToolRejected:
                     result = {
                         "error": "OS_TOOL_CALL_REJECTED",
-                        "message": "The Agency OS denied or could not complete this tool call.",
+                        "message": "The Agency OS denied this tool call by policy.",
                     }
                     is_error = True
+                except Exception:
+                    # Infrastructure or unexpected adapter failures must reach the
+                    # worker retry path; do not let the agent report false success.
+                    raise RuntimeTransientError(
+                        "The OS tool gateway could not complete the tool call."
+                    ) from None
 
             try:
                 result_text = json.dumps(result, ensure_ascii=False, allow_nan=False)
