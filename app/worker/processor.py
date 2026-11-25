@@ -1,5 +1,8 @@
 import json
 import threading
+
+from app.audit import record_event
+from app.data_protection import DataProtectionBlocked, protect_execution_request
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -200,6 +203,55 @@ def process_one_execution(
         )
         runtime_name = execution.runtime
         db.commit()
+
+    try:
+        request, protection_report = protect_execution_request(request)
+    except DataProtectionBlocked as exc:
+        try:
+            with session_factory() as protection_db:
+                record_event(
+                    protection_db, execution.org_id, None,
+                    "execution.data_protection_blocked", "execution", execution_id,
+                    execution.workspace_id,
+                    {"reason_code": exc.code, "data_class": execution.data_class.value},
+                )
+                fail_execution(
+                    protection_db, execution_id=execution_id, attempt_id=attempt_id,
+                    worker_id=worker_id, error_code="DATA_PROTECTION_BLOCKED",
+                    error_message="Execution blocked by data-protection policy.",
+                    retryable=False,
+                )
+                protection_db.commit()
+        except Exception:
+            _record_failure(
+                session_factory, execution_id=execution_id, attempt_id=attempt_id,
+                worker_id=worker_id, error_code="DATA_PROTECTION_AUDIT_FAILED",
+                error_message="Data-protection audit could not be persisted; provider execution was blocked.",
+                retryable=True,
+            )
+        return execution_id
+
+    if protection_report.total_redactions:
+        try:
+            with session_factory() as protection_db:
+                record_event(
+                    protection_db, execution.org_id, None,
+                    "execution.data_redacted", "execution", execution_id,
+                    execution.workspace_id,
+                    {
+                        "redaction_counts": protection_report.redaction_counts,
+                        "data_class": execution.data_class.value,
+                    },
+                )
+                protection_db.commit()
+        except Exception:
+            _record_failure(
+                session_factory, execution_id=execution_id, attempt_id=attempt_id,
+                worker_id=worker_id, error_code="DATA_PROTECTION_AUDIT_FAILED",
+                error_message="Data-protection audit could not be persisted; provider execution was blocked.",
+                retryable=True,
+            )
+            return execution_id
 
     heartbeat = LeaseHeartbeat(
         session_factory=session_factory, execution_id=execution_id,

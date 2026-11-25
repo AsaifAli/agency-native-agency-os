@@ -1,0 +1,89 @@
+import pytest
+
+from app.data_protection import (
+    DataProtectionBlocked,
+    protect_execution_request,
+    sanitize_text,
+)
+from app.integrations.runtime import ExecutionRequest
+from app.models import DataClass
+
+
+def _request(**overrides):
+    values = {
+        "org_id": "org-1",
+        "workspace_id": "workspace-1",
+        "task_id": "task-1",
+        "agent_id": "agent-1",
+        "data_class": DataClass.public,
+        "agent_name": "Research Analyst",
+        "agent_department": "Market Research",
+        "agent_instructions": "Use public sources and cite evidence.",
+        "task_title": "Research public AI trends",
+        "task_description": "Summarize public market information.",
+        "request_metadata": {"purpose": "research.execute"},
+    }
+    values.update(overrides)
+    return ExecutionRequest(**values)
+
+
+def test_sanitize_text_redacts_high_confidence_personal_identifiers():
+    raw = (
+        "Contact jane.doe@example.com, call +91 98765 43210, "
+        "Aadhaar 1234 5678 9012, PAN ABCDE1234F, card 4111 1111 1111 1111."
+    )
+    cleaned, counts = sanitize_text(raw)
+    assert "jane.doe@example.com" not in cleaned
+    assert "98765 43210" not in cleaned
+    assert "1234 5678 9012" not in cleaned
+    assert "ABCDE1234F" not in cleaned
+    assert "4111 1111 1111 1111" not in cleaned
+    assert counts == {
+        "EMAIL": 1,
+        "GOVERNMENT_ID": 2,
+        "PAYMENT_CARD": 1,
+        "PHONE": 1,
+    }
+
+
+def test_sanitize_text_blocks_secrets_without_echoing_secret_value():
+    secret = "sk-ant-api-1234567890abcdefghijkl"
+    with pytest.raises(DataProtectionBlocked) as error:
+        sanitize_text(f"Use this key: {secret}")
+    assert error.value.code == "SECRET_DETECTED"
+    assert secret not in str(error.value)
+
+
+def test_protect_execution_request_redacts_nested_metadata_and_prompt_fields():
+    request = _request(
+        task_description="Contact founder at founder@example.com",
+        request_metadata={"source": {"email": "research@example.com"}},
+    )
+    protected, report = protect_execution_request(request)
+    assert "founder@example.com" not in protected.task_description
+    assert protected.request_metadata["source"]["email"] == "[REDACTED_EMAIL]"
+    assert report.redaction_counts["EMAIL"] == 2
+    assert request.task_description == "Contact founder at founder@example.com"
+
+
+@pytest.mark.parametrize("data_class", [DataClass.confidential, DataClass.regulated])
+def test_protect_execution_request_blocks_restricted_data_classes(data_class):
+    with pytest.raises(DataProtectionBlocked) as error:
+        protect_execution_request(_request(data_class=data_class))
+    assert error.value.code == "DATA_CLASS_NOT_ELIGIBLE"
+
+
+def test_protect_execution_request_requires_authorization_for_commercial_data():
+    with pytest.raises(DataProtectionBlocked) as error:
+        protect_execution_request(_request(data_class=DataClass.commercial))
+    assert error.value.code == "CLIENT_AUTHORIZATION_REQUIRED"
+
+
+def test_protect_execution_request_allows_authorized_commercial_after_redaction():
+    protected, report = protect_execution_request(_request(
+        data_class=DataClass.commercial,
+        client_authorized=True,
+        task_description="Use contact billing@example.com only as a redacted reference.",
+    ))
+    assert "billing@example.com" not in protected.task_description
+    assert report.redaction_counts == {"EMAIL": 1}
