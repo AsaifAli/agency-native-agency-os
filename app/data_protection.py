@@ -122,10 +122,19 @@ def _bounded_json_size(value: Any) -> int:
         raise DataProtectionBlocked("UNSUPPORTED_METADATA") from exc
 
 
-def _sanitize_value(value: Any, counts: dict[str, int], depth: int = 0) -> Any:
+def _sanitize_value(
+    value: Any,
+    counts: dict[str, int],
+    depth: int = 0,
+    *,
+    trusted_internal_id_keys: frozenset[str] = frozenset(),
+    field_name: str | None = None,
+) -> Any:
     if depth > MAX_METADATA_DEPTH:
         raise DataProtectionBlocked("METADATA_TOO_DEEP")
     if isinstance(value, str):
+        if field_name in trusted_internal_id_keys:
+            return _validate_runtime_identifier(value, internal_scope_id=True)
         cleaned, found = sanitize_text(value)
         for key, count in found.items():
             counts[key] = counts.get(key, 0) + count
@@ -133,7 +142,10 @@ def _sanitize_value(value: Any, counts: dict[str, int], depth: int = 0) -> Any:
     if isinstance(value, list):
         if len(value) > MAX_CONTAINER_ITEMS:
             raise DataProtectionBlocked("METADATA_TOO_LARGE")
-        return [_sanitize_value(item, counts, depth + 1) for item in value]
+        return [
+            _sanitize_value(item, counts, depth + 1, trusted_internal_id_keys=trusted_internal_id_keys)
+            for item in value
+        ]
     if isinstance(value, dict):
         if len(value) > MAX_CONTAINER_ITEMS:
             raise DataProtectionBlocked("METADATA_TOO_LARGE")
@@ -146,7 +158,11 @@ def _sanitize_value(value: Any, counts: dict[str, int], depth: int = 0) -> Any:
                 counts[label] = counts.get(label, 0) + count
             if safe_key in cleaned:
                 raise DataProtectionBlocked("DUPLICATE_SANITIZED_METADATA_KEY")
-            cleaned[safe_key] = _sanitize_value(item, counts, depth + 1)
+            cleaned[safe_key] = _sanitize_value(
+                item, counts, depth + 1,
+                trusted_internal_id_keys=trusted_internal_id_keys,
+                field_name=safe_key,
+            )
         return cleaned
     if value is None or isinstance(value, bool) or isinstance(value, int):
         return value
@@ -182,6 +198,8 @@ def _validate_runtime_identifier(
 
 def protect_untrusted_payload(
     payload: Any,
+    *,
+    trusted_internal_id_keys: set[str] | frozenset[str] | None = None,
 ) -> tuple[Any, DataProtectionReport]:
     """Sanitize a bounded JSON-compatible tool, connector, or extracted-text payload.
 
@@ -193,7 +211,10 @@ def protect_untrusted_payload(
     if _bounded_json_size(payload) > MAX_EXECUTION_REQUEST_BYTES:
         raise DataProtectionBlocked("UNTRUSTED_PAYLOAD_TOO_LARGE")
     counts: dict[str, int] = {}
-    protected = _sanitize_value(payload, counts)
+    protected = _sanitize_value(
+        payload, counts,
+        trusted_internal_id_keys=frozenset(trusted_internal_id_keys or ()),
+    )
     if _bounded_json_size(protected) > MAX_EXECUTION_REQUEST_BYTES:
         raise DataProtectionBlocked("UNTRUSTED_PAYLOAD_TOO_LARGE")
     return protected, DataProtectionReport(redaction_counts=dict(counts))
