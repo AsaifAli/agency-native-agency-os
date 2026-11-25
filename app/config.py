@@ -110,6 +110,8 @@ class Settings(BaseSettings):
         allowed_hosts = self.mcp_allowed_hosts_list
         if not allowed_hosts or "*" in allowed_hosts:
             raise ValueError("MCP_ALLOWED_HOSTS must contain explicit public hostnames")
+        if "*" in self.mcp_allowed_origins_list:
+            raise ValueError("MCP_ALLOWED_ORIGINS must contain explicit origins, not a wildcard")
         if not any(
             host in allowed_hosts
             for host in (parsed.netloc, parsed.hostname, f"{parsed.hostname}:*")
