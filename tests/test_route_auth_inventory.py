@@ -99,6 +99,10 @@ def test_workspace_scoped_routes_use_the_centralized_grant_guard():
         "_workspace",
         "_scope",
         "_write",
+        "_write_access",
+        "_read",
+        "_write_or_founder",
+        "_read_or_founder",
         "require_workspace_access",
         "require_workspace_access_from_context",
     }
