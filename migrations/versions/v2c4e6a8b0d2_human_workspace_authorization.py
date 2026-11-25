@@ -236,6 +236,13 @@ def upgrade() -> None:
                 RAISE EXCEPTION 'explicit founder authority required' USING ERRCODE = '42501';
             END IF;
 
+            IF NOT EXISTS (
+                SELECT 1 FROM public.workspaces
+                WHERE org_id = target_org_id AND id = target_workspace_id
+            ) THEN
+                RAISE EXCEPTION 'workspace not found' USING ERRCODE = 'P0002';
+            END IF;
+
             SELECT * INTO grant_row
             FROM public.workspace_grants
             WHERE org_id = target_org_id AND workspace_id = target_workspace_id
