@@ -13,6 +13,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
+import app.security_models  # noqa: F401 — register the machine identity FK target for agent-authored research drafts
 
 
 def _uid() -> str:
