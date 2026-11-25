@@ -10,8 +10,9 @@ from app.auth import Principal, get_principal
 from app.db import Base, get_db
 from app.machine_identity import authenticate_machine_token, authorize_tool_session, create_agent_session
 from app.models import FounderAuthority, Membership, Organization, Role, User, Workspace
-from app.security_models import AgentSession, MachineIdentity
+from app.security_models import AgentSession, MachineIdentity, ToolInvocation
 from app.security_routes import router
+from app.tool_gateway_routes import router as tool_gateway_router
 
 
 @pytest.fixture()
@@ -30,6 +31,7 @@ def security_client():
     db.commit()
     app = FastAPI()
     app.include_router(router)
+    app.include_router(tool_gateway_router)
     def override_db():
         session = factory()
         try: yield session
@@ -258,3 +260,131 @@ def test_session_purpose_with_secret_is_blocked(security_client):
     )
     assert response.status_code == 422
     assert "blocked by data-protection" in response.json()["detail"]
+
+
+def _issue_tool_session(client):
+    issued = _create_identity(
+        client,
+        scopes=["sessions:create", "tools:invoke", "tool:system.health.read"],
+    )
+    headers = {"Authorization": "Bearer " + issued["token"]}
+    created = client.post(
+        "/v1/machine/sessions",
+        headers=headers,
+        json={"purpose": "Read system health", "data_class": "public", "ttl_seconds": 600},
+    )
+    assert created.status_code == 201, created.text
+    return issued, created.json()["id"], headers
+
+
+def test_tool_gateway_executes_registered_read_only_tool_and_persists_audit(security_client):
+    from app.models import AuditEvent
+    issued, session_id, headers = _issue_tool_session(security_client)
+    registry = security_client.get("/v1/machine/tools", headers=headers)
+    assert registry.status_code == 200
+    assert [tool["key"] for tool in registry.json()["tools"]] == ["system.health.read"]
+
+    response = security_client.post(
+        "/v1/machine/tools/system.health.read/invoke",
+        headers={**headers, "Idempotency-Key": "health-read-0001"},
+        json={"session_id": session_id, "input": {}},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "succeeded"
+    assert response.json()["result"] == {"service": "agency-os-api", "database": "ok"}
+    assert response.json()["replayed"] is False
+
+    db = security_client.factory()
+    try:
+        invocation = db.get(ToolInvocation, response.json()["id"])
+        assert invocation.machine_identity_id == issued["id"]
+        assert invocation.session_id == session_id
+        assert invocation.request_payload == {}
+        event = db.query(AuditEvent).filter_by(
+            event_type="tool.invocation.succeeded",
+            resource_id=invocation.id,
+        ).one()
+        assert event.payload["tool_key"] == "system.health.read"
+    finally:
+        db.close()
+
+
+def test_tool_gateway_idempotent_replay_and_session_binding(security_client):
+    issued, first_session, headers = _issue_tool_session(security_client)
+    first = security_client.post(
+        "/v1/machine/tools/system.health.read/invoke",
+        headers={**headers, "Idempotency-Key": "health-read-replay-01"},
+        json={"session_id": first_session, "input": {}},
+    )
+    assert first.status_code == 200
+    replay = security_client.post(
+        "/v1/machine/tools/system.health.read/invoke",
+        headers={**headers, "Idempotency-Key": "health-read-replay-01"},
+        json={"session_id": first_session, "input": {}},
+    )
+    assert replay.status_code == 200
+    assert replay.json()["id"] == first.json()["id"]
+    assert replay.json()["replayed"] is True
+
+    second_session_response = security_client.post(
+        "/v1/machine/sessions",
+        headers=headers,
+        json={"purpose": "Another health check", "data_class": "public", "ttl_seconds": 600},
+    )
+    assert second_session_response.status_code == 201
+    conflict = security_client.post(
+        "/v1/machine/tools/system.health.read/invoke",
+        headers={**headers, "Idempotency-Key": "health-read-replay-01"},
+        json={"session_id": second_session_response.json()["id"], "input": {}},
+    )
+    assert conflict.status_code == 409
+
+
+def test_tool_gateway_rejects_missing_grants_unregistered_tools_and_bad_payloads(security_client):
+    issued = _create_identity(security_client, scopes=["sessions:create"])
+    headers = {"Authorization": "Bearer " + issued["token"]}
+    created = security_client.post(
+        "/v1/machine/sessions",
+        headers=headers,
+        json={"purpose": "Read health", "data_class": "public", "ttl_seconds": 600},
+    )
+    assert created.status_code == 201
+    session_id = created.json()["id"]
+
+    denied = security_client.post(
+        "/v1/machine/tools/system.health.read/invoke",
+        headers={**headers, "Idempotency-Key": "health-read-deny-01"},
+        json={"session_id": session_id, "input": {}},
+    )
+    assert denied.status_code == 403
+
+    missing = security_client.post(
+        "/v1/machine/tools/system.shell.exec/invoke",
+        headers={**headers, "Idempotency-Key": "health-read-missing"},
+        json={"session_id": session_id, "input": {}},
+    )
+    assert missing.status_code == 404
+
+
+def test_tool_gateway_data_protection_blocks_secret_payload(security_client):
+    issued, session_id, headers = _issue_tool_session(security_client)
+    blocked = security_client.post(
+        "/v1/machine/tools/system.health.read/invoke",
+        headers={**headers, "Idempotency-Key": "health-read-secret"},
+        json={
+            "session_id": session_id,
+            "input": {"credential": "sk-ant-api-1234567890abcdefghijkl"},
+        },
+    )
+    assert blocked.status_code == 422
+    assert "data-protection" in blocked.json()["detail"]
+
+
+def test_tool_gateway_rejects_schema_extra_fields(security_client):
+    issued, session_id, headers = _issue_tool_session(security_client)
+    invalid = security_client.post(
+        "/v1/machine/tools/system.health.read/invoke",
+        headers={**headers, "Idempotency-Key": "health-read-schema"},
+        json={"session_id": session_id, "input": {"arbitrary": "not allowed"}},
+    )
+    assert invalid.status_code == 422
