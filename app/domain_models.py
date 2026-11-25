@@ -28,6 +28,11 @@ class Client(Base):
     __table_args__ = (
         UniqueConstraint("org_id", "workspace_id", "external_key",
                          name="uq_client_workspace_external_key"),
+        UniqueConstraint("org_id", "workspace_id", "id", name="uq_clients_scope_id"),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id"], ["workspaces.org_id", "workspaces.id"],
+            ondelete="CASCADE", name="fk_clients_workspace_scope",
+        ),
         Index("ix_clients_scope_status", "org_id", "workspace_id", "status"),
     )
 
@@ -53,6 +58,11 @@ class Contact(Base):
         ForeignKeyConstraint(
             ["org_id", "workspace_id"], ["workspaces.org_id", "workspaces.id"],
             ondelete="CASCADE", name="fk_contacts_workspace_scope",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "client_id"],
+            ["clients.org_id", "clients.workspace_id", "clients.id"],
+            ondelete="RESTRICT", name="fk_contacts_client_scope",
         ),
         Index("ix_contacts_scope_client", "org_id", "workspace_id", "client_id"),
         CheckConstraint("phone_call_consent_status IN ('unknown','pending','granted','withdrawn')", name="ck_contact_phone_call_consent_status"),
@@ -81,6 +91,15 @@ class ContactActivity(Base):
     """Append-only CRM interaction history; never triggers external communication."""
     __tablename__ = "contact_activities"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id"], ["workspaces.org_id", "workspaces.id"],
+            ondelete="CASCADE", name="fk_contact_activities_workspace_scope",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "contact_id"],
+            ["contacts.org_id", "contacts.workspace_id", "contacts.id"],
+            ondelete="CASCADE", name="fk_contact_activities_contact_scope",
+        ),
         Index("ix_contact_activities_scope_contact_time", "org_id", "workspace_id", "contact_id", "occurred_at"),
         CheckConstraint("activity_type IN ('note','call','email','meeting','task','status_update')", name="ck_contact_activity_type"),
         CheckConstraint("direction IN ('none','inbound','outbound','internal')", name="ck_contact_activity_direction"),
@@ -108,6 +127,16 @@ class Lead(Base):
         ForeignKeyConstraint(
             ["org_id", "workspace_id"], ["workspaces.org_id", "workspaces.id"],
             ondelete="CASCADE", name="fk_leads_workspace_scope",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "client_id"],
+            ["clients.org_id", "clients.workspace_id", "clients.id"],
+            ondelete="RESTRICT", name="fk_leads_client_scope",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "contact_id"],
+            ["contacts.org_id", "contacts.workspace_id", "contacts.id"],
+            ondelete="RESTRICT", name="fk_leads_contact_scope",
         ),
         Index("ix_leads_scope_stage_created", "org_id", "workspace_id", "stage", "created_at"),
         UniqueConstraint("org_id", "workspace_id", "source", "external_key", name="uq_lead_external_source_key"),
