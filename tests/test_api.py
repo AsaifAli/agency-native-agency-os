@@ -7,7 +7,7 @@ from app.main import app
 from app.db import Base, engine, SessionLocal
 from app.models import (
     User, Organization, Membership, Workspace, Role,
-    Agent, Task, DataClass, AuditEvent, Execution, ExecutionStatus,
+    Agent, Task, DataClass, AuditEvent, Execution, ExecutionStatus, WorkspaceGrant,
 )
 from app.config import settings
 from app.worker.processor import process_one_execution
@@ -20,7 +20,11 @@ def setup_module():
     org = Organization(name="Test Org")
     db.add_all([user, org]); db.flush()
     db.add(Membership(org_id=org.id, user_id=user.id, role=Role.owner))
-    db.add(Workspace(id="ws-test", org_id=org.id, name="Test Workspace"))
+    db.add(Workspace(id="ws-test", org_id=org.id, name="Test Workspace", created_by=user.id))
+    db.flush()
+    db.add(WorkspaceGrant(
+        org_id=org.id, workspace_id="ws-test", user_id=user.id, granted_by=user.id,
+    ))
     db.commit()
     db.close()
 
