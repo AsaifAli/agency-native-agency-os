@@ -103,6 +103,7 @@ def test_workspace_scoped_routes_use_the_centralized_grant_guard():
         "_read",
         "_write_or_founder",
         "_read_or_founder",
+        "_project",
         "require_workspace_access",
         "require_workspace_access_from_context",
     }
@@ -114,13 +115,14 @@ def test_workspace_scoped_routes_use_the_centralized_grant_guard():
         source = inspect.getsource(route.endpoint)
         tree = ast.parse(source)
         names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+        attributes = {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
         args = {
             arg.arg
             for node in ast.walk(tree)
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
             for arg in node.args.args
         }
-        if "workspace_id" not in names and "workspace_id" not in args:
+        if "workspace_id" not in names and "workspace_id" not in args and "workspace_id" not in attributes:
             continue
         calls = {
             node.func.id
