@@ -349,10 +349,6 @@ def upgrade() -> None:
     # has workspace_id. Nullable workspace rows remain explicitly org-scoped;
     # non-null workspace rows require the exact grant. Machine scope is intact.
     for table in WORKSPACE_TABLES:
-        identity_lookup = (
-            " OR id = nullif(current_setting('agency_os.machine_identity_lookup_id', true), '')"
-            if table == "machine_identities" else ""
-        )
         op.execute(f'DROP POLICY IF EXISTS tenant_isolation ON public."{table}"')
         if table in ORG_LEVEL_NULLABLE_WORKSPACE_TABLES:
             human_predicate = """
@@ -391,10 +387,21 @@ def upgrade() -> None:
             machine_predicate = """
                 (
                     org_id = nullif(current_setting('agency_os.machine_org_id', true), '')
+                    AND (
+                        workspace_id = nullif(current_setting('agency_os.machine_workspace_id', true), '')
+                        OR (
+                            id = nullif(current_setting('agency_os.machine_identity_lookup_id', true), '')
+                            AND 1 = 1
+                        )
+                    )
+                )
+            """ if table == "machine_identities" else """
+                (
+                    org_id = nullif(current_setting('agency_os.machine_org_id', true), '')
                     AND workspace_id = nullif(current_setting('agency_os.machine_workspace_id', true), '')
                 )
             """
-        policy = f"({human_predicate}) OR ({machine_predicate}){identity_lookup}"
+        policy = f"({human_predicate}) OR ({machine_predicate})"
         op.execute(f'''
             CREATE POLICY tenant_isolation ON public."{table}"
             USING ({policy})
