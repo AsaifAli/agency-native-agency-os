@@ -604,3 +604,8 @@ def test_revenue_research_tool_rejects_duplicate_source_references(security_clie
         json={"session_id": session_id, "input": payload},
     )
     assert response.status_code == 422
+
+
+def test_lead_research_draft_model_matches_promoted_lead_migration():
+    from app.domain_models import LeadResearchDraft
+    assert "promoted_lead_id" in LeadResearchDraft.__table__.columns
