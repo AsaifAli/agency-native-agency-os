@@ -11,6 +11,7 @@ import app.telephony.models  # noqa: F401 — register telephony/outbox metadata
 import app.operations_models  # noqa: F401 — register delivery operations metadata
 import app.outreach.models  # noqa: F401 — register governed outbound communication metadata
 import app.workforce_models  # noqa: F401 — register governed workforce metadata
+import app.security_models  # noqa: F401 — register machine identity/session metadata
 
 
 config = context.config
