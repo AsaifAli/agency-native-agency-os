@@ -875,3 +875,8 @@ app.include_router(machine_security_router)
 # Machine-to-OS tool gateway; only code-registered adapters can execute.
 from app.tool_gateway_routes import router as machine_tool_gateway_router
 app.include_router(machine_tool_gateway_router)
+
+
+# Founder-reviewed agent research drafts; CRM promotion remains an explicit human action.
+from app.revenue_research_routes import router as revenue_research_router
+app.include_router(revenue_research_router)
