@@ -157,22 +157,22 @@ def _sanitize_value(value: Any, counts: dict[str, int], depth: int = 0) -> Any:
     raise DataProtectionBlocked("UNSUPPORTED_METADATA")
 
 
+_INTERNAL_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+
 def _validate_runtime_identifier(
-    value: str | None, *, allow_phone_like: bool = False,
+    value: str | None, *, internal_scope_id: bool = False,
 ) -> str | None:
-    """Reject sensitive identifiers without misclassifying internal IDs as phones."""
+    """Validate opaque database IDs separately from provider-returned identifiers."""
     if value is None:
         return None
     if not isinstance(value, str):
         raise DataProtectionBlocked("INVALID_RUNTIME_IDENTIFIER")
     if any(pattern.search(value) for pattern in _SECRET_PATTERNS):
         raise DataProtectionBlocked("SECRET_DETECTED")
-    if allow_phone_like:
-        if _EMAIL.search(value) or _PAN.search(value) or _AADHAAR.search(value):
-            raise DataProtectionBlocked("SENSITIVE_RUNTIME_IDENTIFIER")
-        for match in _CARD.finditer(value):
-            if _luhn_valid(match.group(0)):
-                raise DataProtectionBlocked("SENSITIVE_RUNTIME_IDENTIFIER")
+    if internal_scope_id:
+        if not _INTERNAL_ID.fullmatch(value):
+            raise DataProtectionBlocked("INVALID_RUNTIME_IDENTIFIER")
         return value
     cleaned, counts = sanitize_text(value)
     if counts or cleaned != value:
@@ -251,7 +251,7 @@ def protect_execution_request(
             raise DataProtectionBlocked("INVALID_RUNTIME_IDENTIFIER")
     safe_identifiers = {
         key: _validate_runtime_identifier(
-            value, allow_phone_like=key in {"org_id", "workspace_id", "task_id", "agent_id"}
+            value, internal_scope_id=key in {"org_id", "workspace_id", "task_id", "agent_id"}
         )
         for key, value in identifier_fields.items()
     }
