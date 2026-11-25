@@ -7,6 +7,7 @@ workflow run has ended and the primary turn reaches end_turn.
 """
 from __future__ import annotations
 
+import json
 import time
 from typing import Callable
 
