@@ -160,9 +160,9 @@ A feature is **production-ready** only when implementation, authorization, tenan
 
 ## Consolidation sprint — 2026-11-25
 - [x] Merge governed agent operating-model reference integration (PR #31) into main: `f8fc318cfece0dafb64a846d93fe7d78e64c5593`. The four new skills remain disabled, tool-free and public/synthetic-only; loops remain design artifacts, not active automation.
-- [x] Harden PR #32 DPG metadata boundary: total serialized-size limit, string-only sanitized keys, redaction-key collision rejection, non-finite number rejection, and adversarial regression tests.
+- [x] Harden PR #33 DPG metadata boundary: total serialized-size limit, string-only sanitized keys, redaction-key collision rejection, non-finite number rejection, and adversarial regression tests.
 - [ ] Execute the expanded DPG unit tests and full backend suite on an available runner.
-- [ ] Execute PR #32 tenant migration, preflight-abort fixture, cross-tenant insert tests, and upgrade/downgrade rehearsal on isolated PostgreSQL 16.
+- [ ] Execute PR #33 tenant migration, preflight-abort fixture, cross-tenant insert tests, and upgrade/downgrade rehearsal on isolated PostgreSQL 16.
 - [ ] Review ORM/migration parity and all existing production data before any populated-database migration.
 - [ ] Complete tenant isolation audit beyond outreach tables (APIs, workers, files, sessions, caches and database row-level controls).
 - [ ] Implement machine identities, session lifecycle, and OS Tool Gateway before enabling agent tool grants.
@@ -172,8 +172,8 @@ A feature is **production-ready** only when implementation, authorization, tenan
 - [ ] Complete delivery QA/handover, support/SLA/renewal, finance reconciliation, backup restore, SBOM, monitoring/alerts and independent security review.
 - [ ] Complete external configuration and synthetic end-to-end deployment verification for the website bridge and provider integrations.
 
-**Release boundary:** PR #32 is open and unverified; PR #30 was closed as superseded after rebasing its changes onto current main. GitHub Actions runner allocation is blocked by account billing; no Actions reruns were started. No claim of production readiness, live autonomous dispatch, or compliance is made.
+**Release boundary:** PR #33 is open and unverified; PR #30 and PR #32 were closed as superseded after rebasing their changes onto current main. GitHub Actions runner allocation is blocked by account billing; no Actions reruns were started. No claim of production readiness, live autonomous dispatch, or compliance is made.
 
 
-- PR #30 was closed as superseded (not merged); PR #32 carries the tenant/DPG work on the current main head. Its branch is 8 commits ahead and 0 behind; test and migration execution remain outstanding.
+- PR #30 was closed as superseded (not merged); PR #33 carries the tenant/DPG work on the current main head. Its branch is 10 commits ahead and 0 behind at the latest comparison; test and migration execution remain outstanding.
 - Progress percentages remain at the last evidence-backed snapshot (52% internal implementation, 49% overall including integrations, 20% production verification, 5% external configuration). They are not increased for unmerged or unexecuted work.
