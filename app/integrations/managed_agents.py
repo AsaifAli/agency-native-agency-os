@@ -238,10 +238,8 @@ class ManagedAgentsRuntime(AgentRuntime):
             event_id = event["id"]
             name = event.get("name")
             payload = event.get("input")
-            is_error = False
             if not isinstance(name, str) or name not in enabled_tools:
                 result = {"error": "TOOL_NOT_ENABLED", "message": "This tool is not enabled for the Agency OS agent."}
-                is_error = True
             elif not isinstance(payload, dict):
                 result = {"error": "INVALID_TOOL_INPUT", "message": "The tool input must be a JSON object."}
                 is_error = True
@@ -256,19 +254,16 @@ class ManagedAgentsRuntime(AgentRuntime):
                 except Exception:
                     # Provider receives a stable denial, never raw exception or secret data.
                     result = {"error": "OS_TOOL_CALL_REJECTED", "message": "The Agency OS denied or could not complete this tool call."}
-                    is_error = True
             try:
                 result_text = json.dumps(result, ensure_ascii=False, allow_nan=False)
             except (TypeError, ValueError):
                 result_text = json.dumps(
                     {"error": "INVALID_TOOL_RESULT", "message": "The Agency OS could not serialize the tool result."}
                 )
-                is_error = True
             if len(result_text.encode("utf-8")) > 16000:
                 result_text = json.dumps(
                     {"error": "TOOL_RESULT_TOO_LARGE", "message": "The tool result exceeded the response limit."}
                 )
-                is_error = True
             self._request(
                 client,
                 "POST",
@@ -278,7 +273,6 @@ class ManagedAgentsRuntime(AgentRuntime):
                         "type": "user.custom_tool_result",
                         "custom_tool_use_id": event_id,
                         "content": [{"type": "text", "text": result_text}],
-                        "is_error": is_error,
                     }]
                 },
             )
