@@ -30,6 +30,8 @@ WORKSPACE_TABLES = (
 
 
 def upgrade() -> None:
+    # The initial schema predates the composite key required by the grant FK.
+    op.create_unique_constraint("uq_workspaces_org_id", "workspaces", ["org_id", "id"])
     op.add_column(
         "workspaces",
         sa.Column("created_by", sa.String(length=36), nullable=True),
@@ -483,3 +485,4 @@ def downgrade() -> None:
     op.drop_table("workspace_grants")
     op.drop_constraint("fk_workspaces_created_by_users", "workspaces", type_="foreignkey")
     op.drop_column("workspaces", "created_by")
+    op.drop_constraint("uq_workspaces_org_id", "workspaces", type_="unique")
