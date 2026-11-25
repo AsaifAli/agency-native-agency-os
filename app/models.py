@@ -132,6 +132,16 @@ class Execution(Base):
         ),
         CheckConstraint("max_attempts >= 1", name="ck_execution_max_attempts"),
         CheckConstraint("attempt_count >= 0", name="ck_execution_attempt_count"),
+        UniqueConstraint(
+            "org_id", "workspace_id", "machine_session_id",
+            name="uq_execution_machine_session_scope",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "machine_session_id"],
+            ["agent_sessions.org_id", "agent_sessions.workspace_id", "agent_sessions.id"],
+            ondelete="RESTRICT",
+            name="fk_execution_machine_session_scope",
+        ),
         Index(
             "ix_execution_org_workspace_status_created",
             "org_id", "workspace_id", "status", "created_at",
@@ -187,6 +197,7 @@ class Execution(Base):
 
     # Only sanitized, allowlisted metadata belongs here.
     # Do not store raw prompts, secrets or unrestricted client payloads.
+    machine_session_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     request_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
     result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
