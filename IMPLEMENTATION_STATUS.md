@@ -202,3 +202,14 @@ Merged work includes PR #17 (contact timeline), PR #19 (leads/opportunities), PR
 - [ ] Add session expiry scheduler, retention/deletion, artifact cleanup and operational recovery.
 
 **Current gateway boundary:** only `system.health.read` is executable. This PR does not enable client-data tools, provider-side MCP, arbitrary shell/network access, outbound communications, payments or other side effects. It is a secure invocation foundation, not yet the complete autonomous Revenue/Delivery toolset.
+
+
+## Session lifecycle worker update — 2026-11-25
+
+- [x] Added `expire_due_agent_sessions`: bounded batch size (1–1000), due-time filtering, deterministic ordering, row locking with `SKIP LOCKED`, status transition to expired, end timestamp and per-session audit event.
+- [x] Integrated expiry sweeps into the existing worker maintenance interval in a separate committed transaction; the existing execution and outbox maintenance transactions remain separate.
+- [x] Added worker-runner tests for the separate expiry transaction and service/API tests for audited session expiry.
+- [x] Latest isolated-candidate focused validation totals **136 passed**: machine identity/tool gateway 18, worker runner 7, worker service 55, API 5, workforce 20, approvals 5, action policy 11, execution service 12 and outreach API 3. Modules were run in separate pytest invocations.
+- [x] Python compile check passed; Alembic reports one head `o5c3d9e1f742`.
+- [ ] Session retention/deletion, artifact cleanup, recovery of interrupted long-running tool sessions and PostgreSQL 16 row-lock/FK verification remain outstanding.
+- [ ] Full backend suite on exact remote PR #35 head remains unverified; a previous full-suite attempt in the isolated candidate timed out around 56%.
