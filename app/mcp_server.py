@@ -111,5 +111,7 @@ def create_mcp_gateway():
         session_factory=SessionLocal,
         requests_per_minute=settings.mcp_requests_per_minute,
         max_concurrent_requests=settings.mcp_max_concurrent_requests,
+        allowed_hosts=settings.mcp_allowed_hosts_list,
+        allowed_origins=settings.mcp_allowed_origins_list,
     )
     return mcp_app, authenticated_app
