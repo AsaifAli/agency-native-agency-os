@@ -181,3 +181,24 @@ Merged work includes PR #17 (contact timeline), PR #19 (leads/opportunities), PR
 
 
 **Full-suite validation boundary:** A full `pytest -q tests` attempt in the isolated candidate timed out after reaching approximately 56% progress. Do not claim a full-suite pass. The focused test modules above completed in separate invocations and passed.
+
+
+## OS Tool Gateway update — 2026-11-25 (stacked PR #35 candidate)
+
+- [x] Added a versioned, code-owned Tool Registry with typed input/output contracts, risk level, allowed data classes and approval metadata.
+- [x] Added a machine-authenticated Tool Gateway. It requires the exact active identity/session, workspace scope, data-class eligibility, `tools:invoke` and exact per-tool grant.
+- [x] Added DPG protection for decoded tool input and typed tool output; raw secret-like input is rejected before adapter execution.
+- [x] Added durable `ToolInvocation` records with sanitized input/result, request hash, idempotency key, session/identity scope and completion timestamp.
+- [x] Added organization/workspace-scoped unique idempotency and request binding to identity, session, tool version and sanitized input.
+- [x] Added success audit records with tool/version/session/data class and redaction counts only.
+- [x] Registered one deliberately narrow read-only tool: `system.health.read` (database `SELECT 1`; no client records or external side effects).
+- [x] Added API tests for registry filtering, successful invocation, durable persistence/audit, idempotent replay, cross-session idempotency conflict, missing grants, unknown tools, schema rejection and secret blocking.
+- [x] Added migration `o5c3d9e1f742`; SQLite rehearsal from `m3f9c2a7e514` through `n4a7c2e91b60` to `o5c3d9e1f742`, downgrade to `n4a7c2e91b60`, and re-upgrade passed.
+- [x] Alembic reports one head: `o5c3d9e1f742`; Python compile check passed.
+- [x] Independent focused validation in the isolated candidate: 17 machine identity/session/tool gateway tests, 5 API tests, 20 workforce tests, 5 approval tests, 11 action-policy tests, 12 execution-service tests and 3 outreach API tests passed in separate invocations (**73 total**).
+- [ ] PostgreSQL 16 migration and composite foreign-key verification for both new migrations.
+- [ ] Full backend suite on the exact remote PR #35 head. A previous full-suite attempt in the isolated candidate timed out around 56%; no full-suite pass is claimed.
+- [ ] Expand the registry with approved Revenue/Delivery tools only after per-tool data policies, approval consumption, budgets, async execution/outbox, cancellation/reconciliation and end-to-end isolation tests exist.
+- [ ] Add session expiry scheduler, retention/deletion, artifact cleanup and operational recovery.
+
+**Current gateway boundary:** only `system.health.read` is executable. This PR does not enable client-data tools, provider-side MCP, arbitrary shell/network access, outbound communications, payments or other side effects. It is a secure invocation foundation, not yet the complete autonomous Revenue/Delivery toolset.
