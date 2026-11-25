@@ -23,9 +23,7 @@ WRITERS = {Role.owner, Role.admin, Role.operator}
 
 
 def _workspace(db: Session, org_id: str, workspace_id: str) -> None:
-    from app.models import Workspace
-    if not db.query(Workspace.id).filter_by(id=workspace_id, org_id=org_id).first():
-        raise HTTPException(404, "Workspace not found")
+    require_workspace_access_from_context(org_id, workspace_id, db)
 
 
 def _scoped_parent(db: Session, model, *, object_id: str, org_id: str, workspace_id: str, label: str):
