@@ -1,7 +1,7 @@
 """Machine identities and bounded execution sessions owned by Agency OS."""
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, Index, JSON, String, UniqueConstraint
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, JSON, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db import Base
 
@@ -40,6 +40,10 @@ class AgentSession(Base):
     __tablename__ = "agent_sessions"
     __table_args__ = (
         UniqueConstraint("org_id", "workspace_id", "id", name="uq_agent_session_scope_id"),
+        UniqueConstraint(
+            "org_id", "workspace_id", "machine_identity_id", "id",
+            name="uq_agent_session_identity_scope_id",
+        ),
         ForeignKeyConstraint(["org_id", "workspace_id", "machine_identity_id"], ["machine_identities.org_id", "machine_identities.workspace_id", "machine_identities.id"], ondelete="CASCADE", name="fk_agent_session_identity_scope"),
         CheckConstraint("status IN ('active','cancelled','expired','closed')", name="ck_agent_session_status"),
         CheckConstraint("data_class IN ('synthetic','public','commercial','confidential','regulated')", name="ck_agent_session_data_class"),
@@ -57,6 +61,73 @@ class AgentSession(Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MachineSessionCredential(Base):
+    """Short-lived bearer credential bound to exactly one OS agent session."""
+    __tablename__ = "machine_session_credentials"
+    __table_args__ = (
+        UniqueConstraint(
+            "org_id", "workspace_id", "id",
+            name="uq_machine_session_credential_scope_id",
+        ),
+        UniqueConstraint("token_hash", name="uq_machine_session_credential_token_hash"),
+        UniqueConstraint(
+            "org_id", "workspace_id", "session_id", "credential_version",
+            name="uq_machine_session_credential_version",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "machine_identity_id"],
+            ["machine_identities.org_id", "machine_identities.workspace_id", "machine_identities.id"],
+            ondelete="CASCADE",
+            name="fk_machine_session_credential_identity_scope",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "machine_identity_id", "session_id"],
+            [
+                "agent_sessions.org_id",
+                "agent_sessions.workspace_id",
+                "agent_sessions.machine_identity_id",
+                "agent_sessions.id",
+            ],
+            ondelete="CASCADE",
+            name="fk_machine_session_credential_session_identity_scope",
+        ),
+        CheckConstraint("credential_version >= 1", name="ck_machine_session_credential_version"),
+        CheckConstraint("request_count_window >= 0", name="ck_machine_session_credential_request_count"),
+        CheckConstraint(
+            "provider_credential_status IN ('not_created','active','delete_pending','deleted','failed')",
+            name="ck_machine_session_credential_provider_status",
+        ),
+        Index(
+            "ix_machine_session_credential_session_revoked",
+            "org_id", "workspace_id", "session_id", "revoked_at",
+        ),
+        Index(
+            "ix_machine_session_credential_provider_cleanup",
+            "provider_credential_status", "created_at",
+        ),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    machine_identity_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    session_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    token_prefix: Mapped[str] = mapped_column(String(80), nullable=False)
+    credential_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revocation_reason: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    request_window_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    request_count_window: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    provider_vault_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    provider_credential_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    provider_credential_status: Mapped[str] = mapped_column(String(24), default="not_created", nullable=False)
+    provider_credential_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    provider_credential_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 
 
 class ToolInvocation(Base):
