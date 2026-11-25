@@ -1,9 +1,8 @@
 # Agency OS Production Readiness Checklist
 
 **Last reviewed:** 2026-11-25  
-**Tracking branch:** `feature/revenue-research-tool`  
-**Latest merged milestone:** [PR #35](https://github.com/AsaifAli/agency-native-agency-os/pull/35)  
-**Current integration PR:** [#36](https://github.com/AsaifAli/agency-native-agency-os/pull/36)  
+**Tracking branch:** `main`  
+**Latest merged milestone:** [PR #36](https://github.com/AsaifAli/agency-native-agency-os/pull/36)  
 **Status:** Active development candidate — not a certification or release approval.
 
 ## Progress snapshot
@@ -290,3 +289,15 @@ A feature is **production-ready** only when implementation, authorization, tenan
 - [ ] Commercial/client data grants, outbound communication, pricing, contracts, payments and other side-effecting tools remain blocked pending client policy, approvals, budgets, consent/suppression and asynchronous recovery controls.
 
 **Revenue capability boundary:** this is the first operational agent write tool, but it captures public research as a review draft. It does not itself browse the web, verify source truth, add contacts, send outreach or autonomously promote CRM records.
+
+
+## Revenue agent research merge confirmation — 2026-11-25
+
+- [x] PR #36 merged to main as squash commit `844d2d6b14f537b53d05f5e56aaba69b248329c0`.
+- [x] Main now includes the public-only Revenue research capture tool, DPG-protected source-backed drafts, founder-only review/rejection and explicit idempotent CRM promotion.
+- [x] Alembic head is now `p6d8e2a4f913`, following `n4a7c2e91b60` and `o5c3d9e1f742`.
+- [x] Independent isolated-candidate validation: 196 focused tests passed across 15 modules; Python compile check passed; SQLite upgrade/downgrade/re-upgrade through all three new migrations passed.
+- [ ] PostgreSQL 16 verification, full backend suite on exact main, and production migration review remain pending.
+- [ ] Founder UI for draft review/promotion and actual public-source research connectors remain outstanding. The tool stores source references supplied by an agent and does not independently verify them.
+- [ ] Further Revenue/Delivery tools, client-data eligibility, approval/budget integration, external adapters, retention/deletion and recovery remain outstanding.
+- [ ] No production deployment or external outreach was performed.
