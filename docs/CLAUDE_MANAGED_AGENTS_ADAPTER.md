@@ -51,7 +51,9 @@ The provider receives only the tool result or a generic error. Raw exceptions, c
 
 Native provider tools, shell, web search/fetch, MCP servers, skills and multiagent workflows remain disabled. This deliberately keeps provider-side child actions outside the OS until every child action can be reconciled into OS-owned tasks, permissions, budgets and audit records. Do not bypass this boundary by changing prompts or enabling provider-side toolsets.
 
-The worker uses the OS database identity directly; it does not place a machine token or provider secret in prompts or provider event content. Prompts are not the security boundary.
+The worker uses the OS database identity directly; it does not place a machine token or provider secret in prompts or provider event content. Prompts are not the security boundary. Explicit policy denials return a generic tool error to the agent; unexpected gateway/database failures propagate to the worker retry path instead of being presented as a successful tool response.
+
+The current registry does **not** expose web search, web fetch, arbitrary URL retrieval, contact enrichment or prospect discovery. The lead-research capture tool stores source references supplied by the agent; those references are not independently verified by this adapter. Autonomous source discovery and source verification remain a separate milestone.
 
 ## External configuration
 
