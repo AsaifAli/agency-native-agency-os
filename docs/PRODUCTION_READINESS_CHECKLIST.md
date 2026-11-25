@@ -301,3 +301,13 @@ A feature is **production-ready** only when implementation, authorization, tenan
 - [ ] Founder UI for draft review/promotion and actual public-source research connectors remain outstanding. The tool stores source references supplied by an agent and does not independently verify them.
 - [ ] Further Revenue/Delivery tools, client-data eligibility, approval/budget integration, external adapters, retention/deletion and recovery remain outstanding.
 - [ ] No production deployment or external outreach was performed.
+
+
+## Founder research review UI — 2026-11-25 (PR #37 candidate)
+
+- [x] Added `/research-drafts` to the Founder Console and sidebar navigation.
+- [x] Added workspace/status filtering, evidence and source-reference display, fit/confidence scores, review notes, approve/reject actions and explicit CRM promotion for approved drafts.
+- [x] UI explains that source URLs are agent-supplied and unverified, and that no contact or outreach action occurs.
+- [x] TSX syntax parsing passed for the new page and updated sidebar.
+- [ ] Full Next.js lint, typecheck and production build remain unverified. The isolated environment has no frontend dependencies; `npm install` timed out, so no build success is claimed.
+- [ ] Merge PR #37 only after a full frontend dependency install, lint, TypeScript check and Next build pass.
