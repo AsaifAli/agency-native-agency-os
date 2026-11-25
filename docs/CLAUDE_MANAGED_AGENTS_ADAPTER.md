@@ -22,7 +22,7 @@ Managed Agents is beta and is not Zero Data Retention or HIPAA BAA eligible. The
 ## What the adapter does
 
 - Requires an explicit enable flag, API key, pre-created Managed Agent ID and environment ID.
-- Before creating a new session, retrieves the provider Agent and fails closed if it is archived, has tools, MCP servers, skills or multiagent features configured. This is a temporary safety gate until the OS MCP gateway and authorization enforcement are implemented.
+- Before creating or resuming a session, retrieves the provider Agent and fails closed if it is archived, has built-in toolsets, MCP servers, provider skills or multiagent features configured. Exact OS-registered custom tools are the only permitted provider tools. Their callbacks are executed by the OS worker and authorized by the shared Tool Gateway.
 - Sends the pre-created Agent ID, environment, bounded budget, metadata and initial task event.
 - Uses the OS Agent instructions/department and persisted OS Task as task-specific context.
 - Persists the session ID to the active execution attempt after a successful create response; subsequent attempts reuse the saved session ID.

@@ -1,10 +1,10 @@
 # Claude Managed Agents — OS Tool Bridge Design
 
-**Status:** Design decision only. No provider-side tools, MCP connection, session credential, or autonomous side effect is enabled by this document.
+**Status:** Design decision only. No provider-side tools, MCP connection, session credential, or autonomous side effect is enabled. The first integration candidate is Managed Agents custom tools handled by the OS worker; the MCP connector path is deferred pending a specific need for provider-initiated HTTP connectivity.
 
 ## 1. Objective
 
-Connect Claude Managed Agents to the Agency OS through an OS-owned Model Context Protocol (MCP) endpoint. Claude may reason and request tools; the OS remains the sole authority for identity, workspace scope, data eligibility, tool grants, approvals, budgets, persistence and audit.
+Connect Claude Managed Agents to the Agency OS through application-executed custom tools. Claude may request a registered tool; the OS worker validates and executes it using OS-owned identity, workspace scope, data eligibility, workforce capability grants, approvals, budgets, persistence and audit. An MCP connector remains a future alternative if direct provider-to-OS connectivity becomes necessary.
 
 This is an internal operating capability, not a public SaaS integration.
 
@@ -19,20 +19,20 @@ The current main branch contains:
 - Only two registered tools: `system.health.read` and `revenue.lead.research.capture`.
 - A Claude Managed Agents adapter that deliberately rejects provider-side tools, MCP servers, skills and multiagent configuration.
 
-The existing REST gateway is not yet an MCP server. The Claude adapter does not yet pass per-session vault credentials. This design closes those two gaps without relaxing the current boundary.
+The existing REST gateway is not yet an MCP server, and the Claude adapter still rejects provider tools. The first custom-tool implementation does not require a public MCP endpoint or per-session vault credential. Those remain deferred unless the MCP connector is later adopted.
 
 ## 3. Trust boundaries
 
 1. **Claude is an untrusted execution runtime.** Prompt instructions are not authorization.
-2. **The OS MCP endpoint is a narrow adapter.** It exposes only tools registered and enabled by OS policy; it never exposes SQL, ORM models, arbitrary HTTP, shell, filesystem, or provider credentials.
+2. **The OS worker custom-tool handler is a narrow adapter.** It exposes only tools registered and enabled by OS policy; it never exposes SQL, ORM models, arbitrary HTTP, shell, filesystem, or provider credentials.
 3. **Every tool call is re-authorized.** Check active machine identity, exact session, workspace, data class, tool scope, tool version, action policy, budget and approval state on every invocation.
-4. **The provider receives a session-bound bearer token, not the machine identity's reusable credential.** Persist only a digest in the OS. Deliver the raw token to the provider vault over TLS and never put it in prompts, logs, source control or tool results.
+4. **The custom-tool path sends no OS bearer credential to the provider.** The worker handles tool events and authorizes each call against the persisted OS execution, machine identity, session and capability grants. If a future MCP connector is selected, it must use a session-bound token—not the machine identity's reusable credential—and persist only its digest.
 5. **Provider-side tools remain off by default.** Do not enable Bash, arbitrary file operations, general web search/fetch, provider skills or multiagent delegation as a side effect of enabling MCP.
 6. **All business state remains OS-owned.** The provider's session history is not the system of record for tasks, CRM, approvals, costs or audit.
 
 ## 4. Proposed components and contracts
 
-### 4.1 Session-scoped MCP credential
+### 4.1 Optional future MCP connector credential (deferred)
 
 Add an OS-owned credential record linked by composite foreign key to one `AgentSession` and its `MachineIdentity` scope. Store:
 
@@ -44,17 +44,15 @@ Issue a high-entropy, single-session token only after the OS session is persiste
 
 The MCP request's bearer token determines the machine identity and exact session. The model must not supply or override the session ID as a tool argument.
 
-### 4.2 MCP transport
+### 4.2 Managed Agents custom-tool callback (preferred first path)
 
-Expose a dedicated HTTPS Streamable HTTP MCP endpoint (for example, `/mcp/agency-os`) on the OS API service. Use a maintained MCP SDK and pin a compatible version. Keep transport stateless unless the SDK requires protocol state; business/session state remains in PostgreSQL.
+Do not expose a new public MCP endpoint for the first integration. Configure only exact OS-registered Managed Agents custom tool definitions on the provider Agent. The OS worker polls provider events, recognizes `agent.custom_tool_use`, executes the callback in-process through the shared OS Tool Gateway service, persists invocation and audit, then posts the matching `user.custom_tool_result`.
 
-Authentication middleware must validate the session-bound token before dispatch. Tool handlers use the authenticated identity/session context and the same authorization service as the REST Tool Gateway. Do not duplicate or weaken policy checks in MCP-specific code.
-
-The endpoint must enforce request size, timeouts, concurrency limits, JSON/schema validation, safe error responses, origin/host policy and rate limits. It must not accept arbitrary callback URLs or network destinations.
+For every event, the worker must revalidate the active execution lease, attempt, machine identity, session, workspace, data class, WorkforceCapability grant, tool scope, action policy, budget and approval state. The provider event is untrusted input, not authorization. Bound pending/total calls, event pagination, result bytes, polling and execution duration. Unknown events, schema drift, stale leases, revoked identities, expired sessions and policy denials fail closed. Provider/network calls remain outside database transactions; return success to Claude only after durable invocation persistence.
 
 ### 4.3 Tool exposure
 
-The MCP `tools/list` result is the intersection of:
+The custom tool definitions configured on the provider Agent are a static, versioned allowlist. Runtime authorization is the intersection of:
 
 - Code-registered tools.
 - The machine identity's explicit `tools:invoke` and `tool:<key>` scopes.
@@ -62,7 +60,7 @@ The MCP `tools/list` result is the intersection of:
 - The agent's OS capability grants and runtime policy.
 - The current tool version and enabled state.
 
-The MCP server returns only safe names, descriptions and JSON input schemas. Every `tools/call` repeats the authorization and DPG checks. A hidden tool is also rejected if called directly.
+The provider receives only safe names, descriptions and JSON input schemas. Every `agent.custom_tool_use` event repeats authorization and DPG checks in the worker. A tool omitted from the runtime allowlist is rejected even if the provider emits it.
 
 Initial rollout must expose only:
 - `system.health.read` for a read-only smoke test.
@@ -72,46 +70,38 @@ Do not expose CRM promotion, contacts, outreach dispatch, pricing, contracts, pa
 
 ### 4.4 Idempotency and durable invocation
 
-Reuse the OS Tool Registry and invocation service rather than creating a second execution path. MCP tool calls must create the same durable invocation and audit records as REST calls.
+Reuse the OS Tool Registry and invocation service rather than creating a second execution path. Custom tool callbacks must create the same durable invocation and audit records as REST calls.
 
 For the initial draft-capture tool, define a deterministic idempotency strategy that survives provider retries and does not collapse distinct intentional drafts. Same key plus same canonical sanitized request replays the stored result; same key plus a different request is a conflict. In-flight duplicates must not execute concurrently. Do not infer exactly-once delivery from MCP request IDs.
 
 Keep external provider/network calls outside database transactions. The tool bridge itself must not perform external side effects.
 
-### 4.5 Claude Managed Agents configuration
+### 4.5 Claude Managed Agents configuration (custom tools)
 
-Anthropic's current Managed Agents MCP contract separates reusable agent configuration from per-session authentication:
+The saved Agent declares only exact `type: custom` tools with names, descriptions and JSON input schemas generated from the OS Tool Registry. The adapter verifies the provider Agent's actual custom tool definitions against the current registry on every execution and resume; schema drift, duplicate names, built-in toolsets, MCP servers, skills and provider multiagent features remain disabled.
 
-- The saved Agent declares an MCP server by `type`, `name` and HTTPS `url`.
-- A matching `mcp_toolset` references that server.
-- Toolset configuration should set `default_config.enabled=false` and explicitly enable the approved bare tool names.
-- Session creation attaches the session credential through a pre-registered vault ID (`vault_ids`); credentials are matched by MCP server URL.
-- The MCP server URL and credential URL must match exactly after documented URL normalization.
+The adapter must not create a new provider Agent on every execution. Maintain a versioned, OS-controlled provider Agent configuration and verify its actual tools/configuration before use. Do not silently accept drift in provider-side configuration.
 
-The adapter must not create a new provider Agent on every execution. Maintain a versioned, OS-controlled provider Agent configuration and verify its actual tools/MCP configuration before use. Do not silently accept drift in provider-side configuration.
-
-The OS must create or select a vault, register the session-bound static bearer credential, and attach the vault to the provider session. Persist provider vault/credential IDs as external references only; never persist or log the raw bearer token. Define bounded cleanup and reconciliation for vault credentials and provider sessions after success, failure, timeout, cancellation and worker crash.
+The OS worker handles each custom tool event and returns a bounded, sanitized result. No OS machine credential or session bearer is included in the provider Agent definition, session prompt or event payload. The worker's Anthropic API credential remains a restricted runtime secret and is never exposed to the model. Vault credential lifecycle is not required for this custom-tool path; it remains mandatory only if the MCP connector is later adopted.
 
 ### 4.6 Runtime lifecycle
 
 Required sequence:
 
 1. Claim the OS execution and persist an active `AgentSession` with exact identity, workspace, purpose, data class and expiry.
-2. Issue a session-bound MCP token; persist only its digest.
-3. Create/register the provider vault credential for the exact MCP endpoint.
-4. Create/resume the Managed Agent session with the vault reference and approved budget.
-5. Persist provider session ID before any subsequent polling or event processing.
-6. On each MCP call, authenticate and authorize against current OS state.
-7. Persist tool invocation, sanitized result and audit before returning success to Claude.
-8. Reconcile provider session status and all tool invocations before marking the OS execution complete.
-9. Revoke the OS session token and clean up provider vault/credential/session according to retention policy.
-10. If the worker crashes or the provider result is unknown, recover by persisted provider IDs and reconciliation; do not blindly create a replacement session or replay a write.
+2. Create/resume the Managed Agent session with the approved budget and persist provider session ID before polling or event processing.
+3. Verify the provider Agent's custom tool allowlist and schema/version against the OS registry.
+4. On each `agent.custom_tool_use`, revalidate the execution lease, attempt, identity, session, workspace, data class, workforce capability and tool authorization.
+5. Apply DPG, validate the exact schema, execute only the registered in-process adapter and persist invocation/result/audit.
+6. Post the matching `user.custom_tool_result` only after durable OS success; return generic policy errors without leaking internal details.
+7. Reconcile provider session status and all tool invocations before marking the OS execution complete.
+8. On worker crash or unknown provider result, recover by persisted provider event/session IDs and idempotency records; do not blindly create a replacement session or repeat a write.
 
 A timeout or lost response is an unknown outcome until reconciled. Provider session completion alone does not prove that every OS tool invocation was persisted successfully.
 
 ## 5. Approval, budget and data policy
 
-- The MCP bridge cannot approve actions. Founder approval remains an OS-owned, single-use authorization consumed atomically with the protected action.
+- The custom-tool bridge cannot approve actions. Founder approval remains an OS-owned, single-use authorization consumed atomically with the protected action.
 - Tool risk levels and approval metadata are enforced by the OS gateway, not trusted from provider tool descriptions.
 - Per-session and per-tool budgets must be checked before invocation and recorded with actual usage where measurable.
 - The first integration remains public/synthetic-only. Commercial data requires client authorization and runtime eligibility. Confidential and regulated data remain ineligible for Managed Agents under the current product restrictions.
@@ -122,53 +112,70 @@ A timeout or lost response is an unknown outcome until reconciled. Provider sess
 
 Persist and monitor:
 - OS execution ID, machine identity ID, OS session ID, provider session ID, provider vault/credential references, correlation ID and tool invocation IDs.
-- Provider status, MCP connection/auth errors, tool error code, attempt count, elapsed time, budget/cost and cleanup state.
+- Provider status, custom-tool event/result errors, tool error code, attempt count, elapsed time, budget/cost and cleanup state.
 - Retry classification, lease/heartbeat, cancellation, dead-letter and reconciliation outcome.
 
-Use bounded retries with backoff for transient failures only. Authentication, policy, schema and data-protection failures are non-retryable until corrected. A provider session that reports an MCP connection/auth error must not be marked as successful merely because its text turn reached `end_turn`.
+Use bounded retries with backoff for transient failures only. Authentication, policy, schema and data-protection failures are non-retryable until corrected. A provider session with unresolved custom-tool events or missing tool results must not be marked successful merely because its text turn reached `end_turn`.
 
 ## 7. Required tests before enabling
 
 ### Unit and contract tests
-- Session token is high entropy, digest-only, constant-time verified, session-bound, expiring and revocable.
 - Wrong identity, workspace, session, data class, scope, tool version or disabled tool is rejected.
-- MCP tool list is filtered and direct invocation of hidden tools is denied.
+- Provider custom tool definitions match the versioned OS registry exactly; unknown and hidden tool calls are denied.
 - DPG blocks secrets and redacts PII before schema validation/persistence.
 - Invalid schemas, oversized inputs/outputs and malicious/untrusted tool results fail closed.
 - Idempotent replay, same-key/different-payload conflict and concurrent duplicate calls.
-- MCP errors never reveal tokens, provider secrets, SQL or internal exception strings.
+- Custom-tool callback errors never reveal provider secrets, SQL or internal exception strings.
 
 ### Integration and recovery tests
-- Managed Agent session receives only the correct vault credential for its OS session.
-- MCP server authentication failure and connection failure are detected from provider events and block success.
+- Managed Agent custom-tool events are dispatched only through the OS worker callback; results are posted only after durable invocation persistence.
+- Provider session errors, missing tool results and incomplete event histories block success.
 - Tool invocation persists before success is returned to Claude.
-- Session expiry/revocation invalidates MCP calls immediately.
-- Worker crash after vault creation, provider session creation, tool execution and provider completion is reconciled without duplicate writes.
-- Provider vault/credential cleanup is retried and audited.
-- Cross-workspace isolation across MCP calls, API routes, sessions and invocation records.
+- Session expiry/revocation invalidates custom-tool calls immediately.
+- Worker crash after provider session creation, tool execution and provider completion is reconciled without duplicate writes.
+- Duplicate provider events after retry or OS session renewal replay the original durable result without executing a second write.
+- Cross-workspace isolation across custom-tool calls, API routes, sessions and invocation records.
 - PostgreSQL 16 migration/locking tests, not SQLite-only evidence.
 
 ### Release gate
-Do not enable the MCP endpoint for Managed Agents until the above tests pass, the provider Agent definition is reviewed/version-pinned, the public HTTPS endpoint and network policy are configured, secret handling and cleanup are demonstrated, and a founder-approved synthetic pilot is completed. Keep the current no-provider-tools behavior until then.
+Do not enable custom tools for Managed Agents until the above tests pass, the provider Agent definition is reviewed/version-pinned, capability checks are enforced by backend code, retry/replay behavior is proven, and a founder-approved synthetic pilot is completed. Keep the current no-provider-tools behavior until then.
 
 ## 8. Implementation sequence
 
-1. Add session-bound token model, migration, issuance/revocation and tests.
-2. Add maintained MCP SDK and stateless Streamable HTTP server with authenticated request context.
-3. Refactor REST and MCP invocation through one shared gateway service; preserve existing REST behavior.
-4. Add MCP transport/schema/authorization/idempotency/isolation tests.
-5. Add provider vault and credential lifecycle adapter with secret-safe tests.
-6. Add a versioned Claude Agent MCP configuration with explicit tool allowlist and configuration-drift checks.
-7. Integrate vault references and MCP error-event handling into Managed Agents runtime.
-8. Add crash recovery, cleanup reconciliation, metrics and founder monitoring.
-9. Run PostgreSQL 16 migration/integration tests and a synthetic end-to-end pilot.
-10. Enable only the first two low-risk tools after founder review; expand capabilities one tool at a time.
+1. Refactor the current REST Tool Gateway into one shared invocation service without changing its behavior.
+2. Add execution/session-bound custom-tool dispatch in the worker, including lease checks and durable provider-event idempotency.
+3. Enforce WorkforceCapability grants, machine identity scopes, action policy, data class and budget before dispatch.
+4. Add exact provider Agent custom-tool configuration and schema-drift checks.
+5. Add tests for denial, workspace isolation, revocation, expired lease/session, duplicate events, retry after session renewal, provider errors and crash recovery.
+6. Run PostgreSQL 16 migration/integration tests and a synthetic end-to-end pilot.
+7. Enable only the first two low-risk tools after founder review; expand capabilities one tool at a time.
+8. Adopt an MCP connector only if a concrete use case requires provider-side connectivity; implement its deferred session-token/vault lifecycle separately.
 
 ## 9. References
 
-- [Claude Managed Agents MCP connector](https://platform.claude.com/docs/en/managed-agents/mcp-connector)
+- [Claude Managed Agents tools and custom-tool event flow](https://platform.claude.com/docs/en/managed-agents/tools)\n- [Claude Managed Agents MCP connector](https://platform.claude.com/docs/en/managed-agents/mcp-connector)
 - [Claude Managed Agents vaults](https://platform.claude.com/docs/en/managed-agents/vaults)
 - [Create a vault credential API](https://platform.claude.com/docs/en/api/http/beta/vaults/credentials/create)
 - [Claude Managed Agents overview and data handling](https://platform.claude.com/docs/en/managed-agents/overview)
 
 **Important:** Managed Agents is beta and is not eligible for Zero Data Retention or HIPAA BAA under the current documentation. Do not claim compliance or use ineligible data classes.
+
+
+## Architecture decision review — 2026-11-25
+
+**Decision candidate: use Managed Agents custom tools through the OS worker for the first integration; defer a provider-facing MCP endpoint.**
+
+Anthropic documents custom tools as application-executed calls: the agent emits `agent.custom_tool_use`, the session pauses, the application executes the tool and posts `user.custom_tool_result`. This matches the Agency OS worker model and avoids exposing a public MCP endpoint or issuing a provider-held OS session bearer credential for the first pilot.
+
+The unmerged `feature/managed-agent-os-tool-execution` branch is a useful implementation reference, not merge-ready code. Source review found that it has execution-bound callbacks, machine-session persistence, event idempotency and focused tests, but it still needs:
+- Explicit linkage from each tool call to an enabled WorkforceCapability for the exact Agent/member/workspace; machine identity scopes alone are not a substitute for the workforce grant.
+- Retry recovery that can replay a committed invocation result if the provider event is re-delivered after the original OS session expired or was renewed.
+- Integration against current main without reverting the current DPG, REST Tool Gateway, worker lifecycle, authorization and checklist work.
+- Fresh focused tests, PostgreSQL 16 migration/locking verification and a synthetic end-to-end run.
+
+This is an architecture review only. No custom tools have been enabled and no code from the feature branch has been merged. MCP remains a valid future option when direct provider-to-OS connectivity is genuinely needed; if adopted, the session-bound token and vault requirements above remain mandatory.
+
+
+## Claude-side MCP boundary
+
+MCP is implemented, if required by the selected Claude experience, as a thin Claude integration adapter. It is not a standalone core OS service or an alternative tool authorization plane. The adapter forwards tool calls to the authenticated OS Tool Gateway; the OS rechecks the workforce member, exact enabled tool/action/data-class/scope grant, machine identity/session, workspace, data-protection policy, budget and approvals. The adapter owns only protocol translation and connection lifecycle. The OS remains authoritative for executions, results, business records, idempotency and audit. Native Managed Agents custom-tool event callbacks remain a distinct transport and do not imply that an MCP server must be exposed.

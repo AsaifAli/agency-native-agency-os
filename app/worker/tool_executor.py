@@ -201,6 +201,7 @@ def build_machine_tool_executor(
                     tool_key=spec.key,
                     payload=payload,
                     idempotency_key=idempotency_key,
+                    idempotency_context={"execution_id": execution_id},
                 )
             except HTTPException as exc:
                 raise ToolExecutionRejected("OS_TOOL_CALL_REJECTED") from exc

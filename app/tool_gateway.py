@@ -15,6 +15,7 @@ from app.audit import record_event
 from app.data_protection import DataProtectionBlocked, protect_untrusted_payload
 from app.machine_identity import MachinePrincipal, authorize_tool_session
 from app.security_models import AgentSession, ToolInvocation
+from app.workforce_models import WorkforceCapability, WorkforceMember
 from app.tool_registry import (
     execute_tool,
     get_tool,
@@ -69,6 +70,7 @@ def invoke_registered_tool(
     tool_key: str,
     payload: dict,
     idempotency_key: str,
+    idempotency_context: dict | None = None,
 ) -> dict:
     """Authorize, protect, validate, execute and persist one registered tool call."""
     identity = principal.identity
@@ -147,6 +149,44 @@ def invoke_registered_tool(
             tool_key=spec.key,
             data_class=session.data_class,
         )
+        # Claude agent identities must also hold a live, founder-enabled workforce
+        # grant for this exact tool, action and data class. Machine scopes alone
+        # are not an organizational capability grant.
+        if identity.subject_type == "agent":
+            member = (
+                db.query(WorkforceMember)
+                .filter_by(
+                    org_id=identity.org_id,
+                    workspace_id=identity.workspace_id,
+                    agent_id=identity.subject_id,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if member is None or member.status != "active" or member.is_founder_reserved:
+                raise HTTPException(403, "Workforce member is not active")
+            scope_rank = {"self": 0, "team": 1, "workspace": 2}
+            grants = (
+                db.query(WorkforceCapability)
+                .filter_by(
+                    org_id=identity.org_id,
+                    workspace_id=identity.workspace_id,
+                    member_id=member.id,
+                    enabled=True,
+                )
+                .with_for_update()
+                .all()
+            )
+            eligible = any(
+                spec.key in (grant.tool_allowlist or [])
+                and spec.required_action in (grant.allowed_actions or [])
+                and session.data_class in (grant.allowed_data_classes or [])
+                and grant.scope in scope_rank
+                and scope_rank[grant.scope] >= scope_rank[spec.minimum_scope]
+                for grant in grants
+            )
+            if not eligible:
+                raise HTTPException(403, "No enabled workforce capability authorizes this tool")
     except HTTPException:
         _deny(
             db, org_id=org_id, workspace_id=workspace_id, identity_id=identity_id,
@@ -157,7 +197,8 @@ def invoke_registered_tool(
     canonical = json.dumps(
         {
             "identity_id": identity.id,
-            "session_id": session.id,
+            "session_id": session.id if idempotency_context is None else None,
+            "idempotency_context": idempotency_context or {},
             "tool_key": spec.key,
             "version": spec.version,
             "input": validated_input,

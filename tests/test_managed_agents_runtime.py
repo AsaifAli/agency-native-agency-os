@@ -101,6 +101,8 @@ def test_managed_agents_resumes_persisted_session_without_creating_another():
 
     def handler(req):
         calls.append((req.method, req.url.path))
+        if req.method == "GET" and req.url.path == "/v1/agents/agent_test":
+            return httpx.Response(200, json={"id": "agent_test", "archived_at": None, "tools": [], "mcp_servers": [], "skills": [], "multiagent": {"type": "disabled"}})
         if req.method == "GET" and req.url.path == "/v1/sessions/sesn_existing":
             return httpx.Response(200, json={"id": "sesn_existing", "status": "idle"})
         if req.method == "GET" and req.url.path == "/v1/sessions/sesn_existing/events":
@@ -118,7 +120,11 @@ def test_managed_agents_resumes_persisted_session_without_creating_another():
     result = runtime.start(request(external_run_id="sesn_existing"))
     assert result.external_run_id == "sesn_existing"
     assert result.detail == "Recovered result."
-    assert calls == [("GET", "/v1/sessions/sesn_existing"), ("GET", "/v1/sessions/sesn_existing/events")]
+    assert calls == [
+        ("GET", "/v1/agents/agent_test"),
+        ("GET", "/v1/sessions/sesn_existing"),
+        ("GET", "/v1/sessions/sesn_existing/events"),
+    ]
 
 
 def test_managed_agents_never_auto_confirms_tool_actions():

@@ -90,6 +90,8 @@ class ToolSpec:
     description: str
     risk_level: str
     allowed_data_classes: tuple[str, ...]
+    required_action: str
+    minimum_scope: str
     requires_approval: bool
     input_model: type[BaseModel]
     output_model: type[BaseModel]
@@ -103,6 +105,8 @@ TOOLS = {
         description="Read the Agency OS API database health without accessing client records.",
         risk_level="read_only",
         allowed_data_classes=("synthetic", "public"),
+        required_action="task.execute",
+        minimum_scope="self",
         requires_approval=False,
         input_model=HealthReadInput,
         output_model=HealthReadOutput,
@@ -114,6 +118,8 @@ TOOLS = {
         description="Save source-backed public company research as a founder-review draft; does not create a CRM lead or contact.",
         risk_level="write_draft",
         allowed_data_classes=("public",),
+        required_action="research.execute",
+        minimum_scope="workspace",
         requires_approval=False,
         input_model=LeadResearchCaptureInput,
         output_model=LeadResearchCaptureOutput,

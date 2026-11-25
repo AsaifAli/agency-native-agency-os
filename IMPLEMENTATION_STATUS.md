@@ -274,3 +274,10 @@ Merged work includes PR #17 (contact timeline), PR #19 (leads/opportunities), PR
 
 
 Additional hardening during review: identity/session row locks follow the same order as revocation (identity before session); provider policy denials are returned as generic tool errors while unexpected gateway/database failures propagate to the worker retry path. Trusted output identifier exemptions are limited to explicit draft/lead/research-record ID fields. The current registry does not provide web search/fetch or autonomous prospect discovery; research capture stores agent-supplied references that are not independently verified.
+
+
+## 2026-11-25 — Managed Agents tool execution reconciliation
+
+The PR #45 implementation has been reconciled with current `main` on `fix/pr45-reconciled`. The shared Tool Gateway now enforces an active WorkforceMember and exact enabled WorkforceCapability grant for agent identities (tool key, required action, data class and minimum scope) in addition to machine identity/session checks. Worker callbacks use execution-scoped idempotency context so a provider event replay after OS session renewal returns the persisted result only after the renewed session is reauthorized. DPG permits internal IDs only for a fixed allowlist of resource-ID fields and validates their format. The LeadResearchDraft ORM now includes the migration-backed `promoted_lead_id` column.
+
+Validation: 285 backend tests passed, 4 PostgreSQL-only tests skipped; compileall passed; Alembic has one head (`q7f2b9d4c631`). PostgreSQL 16 migration/concurrency tests and live Claude provider validation remain pending. Frontend build compiled and passed TypeScript validation but page generation failed with environment `EAGAIN`; ESLint is blocked by missing ESLint v9 flat configuration. No provider tools have been enabled for production.

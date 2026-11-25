@@ -610,6 +610,7 @@ def test_revenue_research_tool_rejects_duplicate_source_references(security_clie
 def _seed_worker_execution_and_identity(security_client):
     from app.machine_identity import issue_machine_credential
     from app.models import Agent, DataClass, Execution, ExecutionAttempt, ExecutionAttemptStatus, ExecutionStatus, Task
+    from app.workforce_models import WorkforceMember, WorkforceCapability
 
     now = datetime.now(timezone.utc)
     _secret, token_hash, token_prefix = issue_machine_credential()
@@ -673,7 +674,35 @@ def _seed_worker_execution_and_identity(security_client):
             status=ExecutionAttemptStatus.running,
             lease_expires_at=now + timedelta(minutes=5),
         )
-        db.add_all([agent, task, identity, execution, attempt])
+        member = WorkforceMember(
+            org_id=security_client.org_id,
+            workspace_id=security_client.workspace_id,
+            agent_id=agent.id,
+            member_type="agent",
+            name="Research Worker",
+            title="Lead Research Specialist",
+            department_key="business_development_sales",
+            responsibilities=["Capture public research"],
+            autonomy_level=1,
+            status="active",
+            is_founder_reserved=False,
+        )
+        db.add(member)
+        db.flush()
+        capability = WorkforceCapability(
+            org_id=security_client.org_id,
+            workspace_id=security_client.workspace_id,
+            member_id=member.id,
+            capability_key="public_lead_research",
+            scope="workspace",
+            allowed_data_classes=["public"],
+            allowed_actions=["research.execute"],
+            tool_allowlist=["revenue.lead.research.capture"],
+            budget_minor=0,
+            currency="INR",
+            enabled=True,
+        )
+        db.add_all([agent, task, identity, execution, attempt, capability])
         db.commit()
         return agent.id, execution.id, identity.id, attempt.id
     finally:
@@ -704,6 +733,18 @@ def test_worker_custom_tool_executor_persists_session_and_replays_idempotently(s
         session_ttl_seconds=600,
     )
     first = executor("os_revenue_lead_research_capture", _research_payload(), "sevt_worker_tool_1")
+    db = security_client.factory()
+    try:
+        execution = db.get(Execution, execution_id)
+        previous_session = db.get(AgentSession, execution.machine_session_id)
+        previous_session.status = "expired"
+        previous_session.ended_at = datetime.now(timezone.utc)
+        db.commit()
+        previous_session_id = previous_session.id
+    finally:
+        db.close()
+    # The provider retries the same event after OS session renewal. Authorization
+    # must use the new live session, while idempotency remains execution-scoped.
     replay = executor("os_revenue_lead_research_capture", _research_payload(), "sevt_worker_tool_1")
     assert first["status"] == "pending_review"
     assert replay["draft_id"] == first["draft_id"]
@@ -722,6 +763,7 @@ def test_worker_custom_tool_executor_persists_session_and_replays_idempotently(s
         ).all()
         assert session.machine_identity_id == identity_id
         assert session.status == "active"
+        assert session.id != previous_session_id
         assert invocation.status == "succeeded"
         assert len(drafts) == 1 and drafts[0].id == first["draft_id"]
     finally:
@@ -896,3 +938,63 @@ def test_execution_machine_session_mapping_uses_composite_workspace_scope():
     assert [column.name for column in unique_key.columns] == [
         "org_id", "workspace_id", "machine_session_id",
     ]
+
+def test_lead_research_draft_model_matches_promoted_lead_migration():
+    from app.domain_models import LeadResearchDraft
+    assert "promoted_lead_id" in LeadResearchDraft.__table__.columns
+
+
+def test_worker_custom_tool_executor_rechecks_paused_workforce_member(security_client):
+    from app.integrations.runtime import ExecutionRequest
+    from app.models import DataClass
+    from app.workforce_models import WorkforceMember
+    from app.worker.tool_executor import build_machine_tool_executor, ToolExecutionRejected
+
+    _agent_id, execution_id, _identity_id, attempt_id = _seed_worker_execution_and_identity(security_client)
+    db = security_client.factory()
+    try:
+        member = db.query(WorkforceMember).filter_by(agent_id="agent-research-worker").one()
+        member.status = "paused"
+        db.commit()
+    finally:
+        db.close()
+    executor = build_machine_tool_executor(
+        session_factory=security_client.factory,
+        request=ExecutionRequest(
+            org_id=security_client.org_id, workspace_id=security_client.workspace_id,
+            task_id="task-research-worker", agent_id="agent-research-worker",
+            data_class=DataClass.public, task_title="Research target company",
+        ),
+        execution_id=execution_id, attempt_id=attempt_id,
+        worker_id="worker-research-worker", session_ttl_seconds=600,
+    )
+    with pytest.raises(ToolExecutionRejected):
+        executor("os_revenue_lead_research_capture", _research_payload(), "sevt_paused_member")
+
+
+def test_worker_custom_tool_executor_rechecks_revoked_workforce_capability(security_client):
+    from app.integrations.runtime import ExecutionRequest
+    from app.models import DataClass
+    from app.workforce_models import WorkforceCapability
+    from app.worker.tool_executor import build_machine_tool_executor, ToolExecutionRejected
+
+    _agent_id, execution_id, _identity_id, attempt_id = _seed_worker_execution_and_identity(security_client)
+    db = security_client.factory()
+    try:
+        grant = db.query(WorkforceCapability).filter_by(capability_key="public_lead_research").one()
+        grant.enabled = False
+        db.commit()
+    finally:
+        db.close()
+    executor = build_machine_tool_executor(
+        session_factory=security_client.factory,
+        request=ExecutionRequest(
+            org_id=security_client.org_id, workspace_id=security_client.workspace_id,
+            task_id="task-research-worker", agent_id="agent-research-worker",
+            data_class=DataClass.public, task_title="Research target company",
+        ),
+        execution_id=execution_id, attempt_id=attempt_id,
+        worker_id="worker-research-worker", session_ttl_seconds=600,
+    )
+    with pytest.raises(ToolExecutionRejected):
+        executor("os_revenue_lead_research_capture", _research_payload(), "sevt_revoked_grant")

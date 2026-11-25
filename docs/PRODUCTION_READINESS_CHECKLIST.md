@@ -1,19 +1,19 @@
 # Agency OS Production Readiness Checklist
 
-**Last reviewed:** 2026-11-25  
-**Tracking branch:** `main`  
-**Latest merged milestone:** [PR #36](https://github.com/AsaifAli/agency-native-agency-os/pull/36)  
-**Status:** Active development candidate — not a certification or release approval.
+**Last reviewed:** 2026-11-25
+**Tracking branch:** `feature/managed-agent-os-tool-execution` (reconciled candidate)
+**Latest merged milestone:** [PR #44](https://github.com/AsaifAli/agency-native-agency-os/pull/44)
+**Status:** PR #45 reconciled with main and locally validated in the cloud workspace; push/merge and PostgreSQL/live-provider gates remain. Not a certification or release approval.
 
 ## Progress snapshot
 
 | Measure | Estimate | Meaning |
 |---|---:|---|
-| Internal implementation | **52%** | Share of planned internal code capability implemented or substantially scaffolded |
-| Overall scope including external integrations | **49%** | Includes provider setup, credentials, legal review and production operations |
-| Production verification | **20%** | Evidence from tests, CI, security review, migration rehearsal and recovery drills |
+| Internal implementation | **56%** | Share of planned internal code capability implemented or substantially scaffolded |
+| Overall scope including external integrations | **51%** | Includes provider setup, credentials, legal review and production operations |
+| Production verification | **28%** | Evidence from tests, CI, security review, migration rehearsal and recovery drills |
 | External configuration | **5%** | Only limited setup is evidenced; most providers remain unconfigured |
-| Release readiness | **Not ready** | Current PR is unmerged and its new code has not passed a fresh validation run |
+| Release readiness | **Not ready** | Backend suite passes on reconciled branch; PostgreSQL 16 and live Claude provider validation remain unverified |
 
 Percentages are weighted engineering estimates, not automated metrics. A partially implemented feature does not count as complete. The production verification percentage is intentionally lower than implementation because code presence is not proof of safe operation.
 
@@ -22,13 +22,13 @@ Percentages are weighted engineering estimates, not automated metrics. A partial
 | Workstream | Done | Left | Current evidence / remaining work |
 |---|---:|---:|---|
 | Platform, API and data foundation | 70% | 30% | Modular FastAPI/Next.js foundation, PostgreSQL models, migrations, org/workspace scoping, core CRM and project records. Remaining: complete cross-domain invariants, performance/index review, migration rehearsal and stronger API contract coverage. |
-| Founder authority, workforce and Claude runtime | 40% | 60% | Workforce hierarchy, departments/teams/positions, capability grants, delegation, draft planning, mock runtime and opt-in Claude Managed Agents adapter. Remaining: production tool gateway, per-tool authorization, runtime/session lifecycle hardening, budget enforcement and provider integration verification. |
+| Founder authority, workforce and Claude runtime | 55% | 45% | Workforce hierarchy, 16 departments, positions, delegation, draft planning, Claude adapter, worker-mediated custom tools and exact workforce capability authorization. Remaining: PostgreSQL validation, budget reservation/usage ledger, provider live validation, session ambiguous-create reconciliation and Claude-side MCP adapter runtime validation if required. |
 | Revenue engine | 48% | 52% | CRM, contact timeline, leads/opportunities, service catalogue, proposal/contract approval, onboarding, invoices/receivables foundations, research records and reviewed outreach drafts. Remaining: prospect discovery/enrichment, dedupe/merge workflow, consent/provenance, approved dispatch, stop conditions, campaign tracking, sales forecasting and attribution. |
 | Delivery and client success | 55% | 45% | Projects, milestones, playbooks, onboarding, time/cost, scope changes, financial summaries and retainer usage-period ledger. Remaining: requirements traceability, acceptance evidence, independent QA/rework gates, release/handover, support, SLA measurement, client health and renewal/termination workflows. |
-| Security and governance | 55% | 45% | Founder-only approval patterns, single-use approvals, workspace scoping, autonomy classification, synthetic-only Managed Agents policy and audit/outbox foundations. Remaining: comprehensive Data Protection Gateway, tenant isolation test matrix, scoped tool credentials, secrets/egress controls, retention/deletion and independent security review. |
-| Automation and execution reliability | 50% | 50% | Persisted executions/attempts, leases, heartbeat/recovery, retries, outbox and selected event dispatch. Remaining: complete idempotency/reconciliation across integrations, dead-letter operations, cancellation, replay, worker load tests and operational alerts. |
+| Security and governance | 60% | 40% | Founder-only approvals, workspace scoping, autonomy policy, machine identity/session grants, DPG redaction, exact workforce tool grants and denial audit. Remaining: PostgreSQL lock/isolation verification, secrets/egress controls, retention/deletion and independent security review. |
+| Automation and execution reliability | 55% | 45% | Persisted executions/attempts, leases, heartbeat/recovery, retries, outbox and execution-scoped idempotent Claude tool callbacks. Remaining: integration-wide reconciliation, dead-letter operations, cancellation, worker load tests and operational alerts. |
 | Founder Console | 60% | 40% | Workforce, tasks, operations, approvals, CRM, proposals, contracts, onboarding, invoices, audit/monitoring, research/outreach and retainer page foundations. Remaining: integrated lifecycle views, tool/permission controls, finance and client-health views, accessible UX and end-to-end workflow polish. |
-| Verification and operations | 20% | 80% | Main has previously passed a backend suite and frontend type/build checks. Current PR #28 has not passed fresh validation. Remaining: PostgreSQL migration tests, backend/frontend CI, tenant isolation, security scans, SBOM, backup restore drill, alerting, RPO/RTO and runbooks. |
+| Verification and operations | 28% | 72% | Reconciled branch full backend suite: 285 passed, 4 PostgreSQL-only skipped; compileall passed. Remaining: PostgreSQL 16 migrations/concurrency, frontend lint/static generation, tenant isolation, security scans, SBOM, backup restore, alerting, RPO/RTO and runbooks. |
 | External integrations and configuration | 5% | 95% | Website intake is designed to be disabled until configured. Remaining: Claude production account/runtime, approved research sources, email/LinkedIn providers, telephony, object storage, secrets, webhook endpoints, domain/DNS and external legal/provider review. |
 
 ## Detailed delivery checklist
@@ -49,9 +49,10 @@ Percentages are weighted engineering estimates, not automated metrics. A partial
 - [x] Capability grants, data-class limits, allowed actions, tool allowlists and budgets as registry fields.
 - [x] Delegation lineage and persisted orchestration-plan drafts.
 - [x] Mock runtime and isolated Claude Managed Agents adapter foundation.
-- [ ] Implement central Tool Registry with versioned JSON schemas and risk classification.
-- [ ] Implement per-agent, per-workspace and per-session tool grants, expiry and revocation.
-- [ ] Implement an OS tool gateway: authenticate actor/session, validate schema, classify data, check workspace, action policy, budget and approval, execute adapter, persist result and audit.
+- [x] Implement central Tool Registry with versioned JSON schemas and risk classification.
+- [x] Implement per-agent, per-workspace and per-session tool grants, expiry and revocation, including exact workforce tool/action/data-class/scope checks.
+- [x] Implement shared OS Tool Gateway: authenticate machine/session, validate schema, classify data, check workspace, workforce action/tool grants, execute registered adapter, persist result and audit.
+- [ ] Complete per-execution budget reservation/settlement and approval adapters for approval-gated tools.
 - [ ] Prevent provider runtime from receiving direct database credentials or unrestricted network access.
 - [ ] Add session cancellation, expiry, retention, artifact cleanup and recovery.
 - [ ] Add runtime adapter conformance tests and provider migration tests.
@@ -305,26 +306,69 @@ A feature is **production-ready** only when implementation, authorization, tenan
 
 ## Current continuation checkpoint — 2026-11-25
 
-### Founder research review UI — PR #37
+### Founder research review UI — PR #39 (rebased successor to PR #37)
 - [x] PR #37 adds the Founder Console `/research-drafts` page, workspace/status filters, evidence/source display, approve/reject notes and explicit CRM promotion.
 - [x] The UI keeps approval and CRM promotion as separate founder actions; it does not create contacts or send outreach.
 - [ ] Frontend dependency installation, TypeScript check and production build remain unverified.
-- [ ] Latest PR #37 Actions run (run `45630633706`) did not execute job steps; both jobs are marked failed and the account billing/spending-limit block must be resolved before CI can provide evidence.
-- [ ] Do not merge PR #37 until frontend validation is completed in an available local/alternate runner or CI is restored. The branch is reported mergeable, but mergeability is not test evidence.
+- [ ] Prior PR #37 Actions run (run `45630633706`) did not execute job steps; both jobs are marked failed and the account billing/spending-limit block must be resolved before CI can provide evidence.
+- [x] PR #39 merged to `main` after fixing the two actionable async UI review findings. PR #37 remains closed as superseded.
+- [ ] Full frontend lint, TypeScript check and production build are still unverified; the corrected PR head had no workflow run, and the previous Actions attempt was blocked by account billing/spending limits. Treat the UI as merged but not fully build-verified.
 
-### Claude Managed Agents OS tool bridge — design
+### Claude Managed Agents tool bridge — custom-tool path design
 - [x] Audited the current Tool Registry, REST gateway, machine identity/session model and Managed Agents adapter.
-- [x] Documented the OS-owned MCP bridge, session-bound credential, per-call authorization, DPG, idempotency, vault lifecycle, recovery and acceptance tests in `docs/CLAUDE_MANAGED_AGENTS_TOOL_BRIDGE.md`.
+- [x] Documented the OS-worker-mediated Managed Agents custom-tool path and retained the MCP connector as a deferred alternative.
 - [ ] Add session-bound bearer credentials (digest-only persistence, expiry/revocation, exact session scope).
-- [ ] Implement an authenticated HTTPS Streamable HTTP MCP endpoint backed by the existing shared Tool Gateway service.
-- [ ] Keep provider-side tools disabled by default; expose only explicit, OS-approved MCP tool names.
-- [ ] Add per-session Claude vault credential provisioning and cleanup/reconciliation; never expose the machine identity's reusable credential to Claude.
-- [ ] Integrate provider MCP connection/auth error events into OS execution failure/review states.
-- [ ] Complete unit, MCP contract, PostgreSQL 16, cross-workspace isolation, duplicate-call, crash-recovery and synthetic end-to-end tests before enabling.
+- [ ] Refactor the current REST Tool Gateway into one shared invocation service for REST and Managed Agents custom-tool callbacks.
+- [ ] Add execution/session-bound custom-tool dispatch in the worker; keep provider tool definitions exact and version-pinned.
+- [ ] Enforce WorkforceCapability grants, machine identity scopes, data class, action policy and budget on every callback.
+- [ ] Add idempotent replay across provider retries and OS session renewal; reconcile missing tool results and worker crashes.
+- [ ] Complete unit, PostgreSQL 16, cross-workspace isolation, duplicate-call, stale-lease, revocation, crash-recovery and synthetic end-to-end tests before enabling.
 - [ ] First pilot is limited to `system.health.read` and public-only `revenue.lead.research.capture`; no CRM promotion, contacts, outbound dispatch, payments or production actions.
 
-**Current verified boundary:** The main branch has a REST Tool Gateway, not an MCP server. The Managed Agents adapter intentionally rejects provider MCP/tools. This continuation adds the design only; no provider tools have been enabled and no runtime code or production configuration has changed.
+**Current verified boundary:** The main branch has a REST Tool Gateway; the Managed Agents adapter still rejects provider custom tools and MCP servers. No provider tools have been enabled and no runtime code or production configuration has changed. The first implementation candidate is worker-mediated custom tools; MCP endpoint/vault work is deferred.
 
+
+## Founder research review UI — 2026-11-25 (merged PR #39)
+
+- [x] Added `/research-drafts` to the Founder Console and sidebar navigation in PR #39.
+- [x] Added workspace/status filtering, evidence and source-reference display, fit/confidence scores, review notes, approve/reject actions and explicit CRM promotion for approved drafts.
+- [x] UI explains that source URLs are agent-supplied and unverified, and that no contact or outreach action occurs.
+- [x] TSX syntax parsing passed for the new page and updated sidebar.
+- [ ] Full Next.js lint, typecheck and production build remain unverified. The isolated environment has no frontend dependencies; `npm install` timed out, so no build success is claimed.
+- [x] PR #39 merged to `main` after review-finding fixes.
+- [ ] Full frontend dependency install, lint, TypeScript check and Next build remain pending; no successful full build is claimed.
+
+
+## Stabilization branch reconciliation — 2026-11-25
+
+- [x] Fetched and compared `origin/feature/agency-os-v5-stabilization` against current `main` at `20f57af4bff2409ea9721da3168f742cbc3da279`.
+- [x] Confirmed the branch has 32 commits on its side of the merge-base comparison, but its direct tree comparison against main would change 269 files with approximately 7,292 insertions and 18,811 deletions. This is not a safe merge candidate.
+- [x] Confirmed the signed website lead-intake route and its tests are already present on main with identical Git blob SHAs; the workforce console page is also identical.
+- [x] Confirmed main contains a more extensive workforce API implementation, including founder-governed capability activation/pause, runtime/data-class checks, delegation and orchestration-plan support. The branch's older route/model/test versions must not replace it.
+- [x] Confirmed main registers both website-intake and workforce routers. The current workforce API also explicitly blocks tool grants until an OS-managed runtime tool bridge exists.
+- [x] Decision: do not merge or rebase the stabilization branch wholesale and do not cherry-pick its historical commits without a fresh per-feature comparison. High-value workforce/intake capabilities are already present or superseded on main.
+- [ ] Keep the old branch as a reference until a separate, commit-by-commit audit is complete; no branch deletion, force-push or destructive cleanup was performed.
+- [ ] Continue implementation from current main. The custom-tool callback bridge remains a design-only milestone; worker dispatch, workforce capability enforcement, retry-safe replay and contract/isolation/recovery tests are still outstanding. MCP endpoint/token/vault work is deferred.
+
+**Validation boundary:** this was a Git-tree/source comparison through GitHub. No local tests, frontend build, PostgreSQL migration rehearsal or CI run was performed as part of this branch audit.
+
+
+## Managed Agents tool transport decision review — 2026-11-25
+
+- [x] Reviewed the unmerged `feature/managed-agent-os-tool-execution` implementation against current main and Anthropic's documented custom-tool event flow.
+- [x] Recorded the preferred first integration: OS-worker-executed Managed Agents custom tools, with no public MCP endpoint or provider-held OS bearer token.
+- [x] Selected worker-mediated Managed Agents custom-tool callbacks as the first native Claude tool transport.
+- [x] Selected a thin Claude-side MCP protocol adapter only when the Claude experience requires MCP; it must call the same OS Tool Gateway and must not own permissions or business state.
+- [x] Ported the shared invocation service and execution-scoped custom-tool callback onto a branch reconciled with current main.
+- [x] Enforced exact enabled WorkforceCapability grants (tool key, required action, data class and minimum scope) in addition to machine identity/session scopes.
+- [x] Added stable execution-scoped idempotency so provider retries survive OS session renewal while live session authorization is rechecked before replay.
+- [x] Added paused-member and disabled-grant denial tests, session-renewal replay coverage, DPG internal-ID allowlist tests and workforce grant activation/scope tests.
+- [ ] PostgreSQL 16 locking/migration, populated-schema upgrade/downgrade and production recovery validation remain release gates.
+- [ ] Keep provider tools disabled until live provider compatibility, ambiguous session-create reconciliation and founder-approved synthetic pilot are complete.
+
+**Evidence boundary:** the reconciled branch full backend suite passed 285 tests, with 4 PostgreSQL-only tests skipped because `AGENCY_OS_TEST_DATABASE_URL` was not configured. `q7f2b9d4c631` is the sole Alembic head. A SQLite full-history migration rehearsal stopped at the pre-existing `eb75d47bfc63` migration, which uses an ALTER constraint operation unsupported by SQLite; this did not validate or invalidate the new PostgreSQL migration. No PostgreSQL 16 or live Managed Agents session was available, and no provider tool is enabled in production.
+
+### PR #45 reconciled implementation notes (branch validation complete; merge pending)
 
 ## 2026-11-25 — Managed Agents OS custom-tool execution
 
@@ -333,13 +377,26 @@ A feature is **production-ready** only when implementation, authorization, tenan
 - [x] Provider Agent is revalidated on new and resumed attempts; only exact OS-registry custom-tool definitions are allowed.
 - [x] Tool calls use OS machine identity/session grants, DPG, schema validation, idempotency, persisted invocation results and audit.
 - [x] Custom tool call/result handling is bounded; native provider tools, MCP, skills and multiagent features remain disabled.
-- [ ] Run tests against the exact remote branch and complete the full backend suite.
+- [x] Reconciled PR branch with current `main` and resolved the two source conflicts without dropping the main-branch research review UI or tests.
+- [x] Exact reconciled branch focused validation passed 154 tests; full backend suite passed 285 tests with 4 PostgreSQL-only skips.
+- [x] Corrected a main-branch `LeadResearchDraft.promoted_lead_id` ORM/migration mismatch exposed during test collection.
+- [x] Added tool-level workforce capability enforcement and stable execution idempotency across session renewal.
+- [x] Alembic graph reports `q7f2b9d4c631` as the single head.
 - [ ] Verify migration `q7f2b9d4c631` on PostgreSQL 16, including upgrade/downgrade and populated-schema checks.
 - [ ] Configure the exact custom-tool definitions on the pre-created Claude Managed Agent and provision an agent machine identity with least-privilege scopes.
 - [ ] Run synthetic end-to-end tests against the live Managed Agents provider; verify execution, tool authorization, persistence, replay, denial audit and recovery.
 - [ ] Complete provider session ambiguous-create reconciliation and production recovery before unattended rollout.
 
-**Evidence boundary:** 47 machine identity/Managed Agents tests and 6 selected worker processor tests passed in an isolated candidate copy; compileall passed. These are not exact-branch or PostgreSQL 16 results. Full suite and live provider compatibility are not verified.
+**Evidence boundary:** 285 backend tests passed on the reconciled cloud branch; 4 PostgreSQL integration/concurrency tests were skipped without a configured PostgreSQL test database. `compileall` passed. Frontend Next.js compilation and TypeScript validation passed, but static page generation terminated with an environment `EAGAIN` process-spawn error. ESLint could not run because the repository has no ESLint v9 flat config. PostgreSQL 16, live provider compatibility and production configuration remain unverified.
 
 
 Additional review controls: identity/session locks follow revocation lock order; policy denials are generic to the model while unexpected gateway/database failures enter worker retry; internal-ID PII exemptions are limited to explicit draft/lead/research-record fields. The current tools do not yet perform autonomous web search, web fetch or prospect discovery; supplied research references remain unverified.
+
+
+## 2026-11-25 — Department map and Claude workforce boundary
+
+- [x] Confirmed the canonical organization registry contains 16 departments, 5 group heads, 22+ teams and 80+ positions; workforce bootstrap tests assert the 16-department structure.
+- [x] Documented the SkillTree's eight radial labels as presentation clusters over the 16 canonical departments; the visual clusters do not merge department responsibilities or permission scopes.
+- [x] Documented Claude as the workforce interaction/runtime layer and Agency OS as the authority for identity, grants, business records, budgets, approvals and audit.
+- [x] Documented MCP as a thin Claude-side protocol adapter when required; it must call the OS Tool Gateway and cannot become a second authorization or execution system.
+- [ ] Reconcile the external SkillTree/brain report once its Google Doc content is supplied in an inspectable file. The supplied Google Docs URL could not be opened through an available Drive connector in this environment.

@@ -973,7 +973,7 @@ def test_skill_catalog_api_is_authenticated_and_tool_free(app_client):
     response = app_client.get(f"/v1/orgs/{identity['org'].id}/skills")
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert len(payload["skills"]) == 18
+    assert len(payload["skills"]) == 22
     assert all(skill["enabled"] is False for skill in payload["skills"])
     assert all(skill["allowed_tools"] == [] for skill in payload["skills"])
 
@@ -988,3 +988,97 @@ def test_skill_catalog_api_is_authenticated_and_tool_free(app_client):
         f"/v1/orgs/{identity['org'].id}/skills/not-a-real-skill"
     )
     assert missing.status_code == 404
+
+
+def test_founder_can_enable_exact_registered_tool_grant(app_client, monkeypatch):
+    from app.config import settings
+    from app.models import Agent, DataClass
+    from app.workforce_models import WorkforceMember
+
+    monkeypatch.setattr(settings, "app_env", "test")
+    monkeypatch.setattr(settings, "mock_runtime_enabled", True)
+    i = app_client.identity
+    boot = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/bootstrap",
+        params={"workspace_id": i["workspace"].id},
+    )
+    assert boot.status_code == 200, boot.text
+    db = app_client.factory()
+    try:
+        member = db.query(WorkforceMember).filter_by(
+            org_id=i["org"].id, workspace_id=i["workspace"].id,
+            department_key="ai_engineering_development",
+        ).one()
+        agent = db.get(Agent, member.agent_id)
+        agent.runtime = "mock"
+        agent.data_class = DataClass.synthetic
+        db.commit()
+        member_id = member.id
+    finally:
+        db.close()
+    created = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/{member_id}/capabilities",
+        params={"workspace_id": i["workspace"].id},
+        json={
+            "capability_key": "system.health.read",
+            "scope": "self",
+            "allowed_data_classes": ["synthetic"],
+            "allowed_actions": ["task.execute"],
+            "tool_allowlist": ["system.health.read"],
+            "budget_minor": 0,
+            "currency": "INR",
+        },
+    )
+    assert created.status_code == 201, created.text
+    enabled = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/{member_id}/capabilities/{created.json()['id']}/enable",
+        params={"workspace_id": i["workspace"].id},
+    )
+    assert enabled.status_code == 200, enabled.text
+    assert enabled.json()["enabled"] is True
+
+
+def test_founder_cannot_enable_tool_grant_with_insufficient_scope(app_client, monkeypatch):
+    from app.config import settings
+    from app.models import Agent, DataClass
+    from app.workforce_models import WorkforceMember
+
+    monkeypatch.setattr(settings, "app_env", "test")
+    monkeypatch.setattr(settings, "mock_runtime_enabled", True)
+    i = app_client.identity
+    app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/bootstrap",
+        params={"workspace_id": i["workspace"].id},
+    )
+    db = app_client.factory()
+    try:
+        member = db.query(WorkforceMember).filter_by(
+            org_id=i["org"].id, workspace_id=i["workspace"].id,
+            department_key="business_development_sales",
+        ).one()
+        agent = db.get(Agent, member.agent_id)
+        agent.runtime = "mock"
+        agent.data_class = DataClass.synthetic
+        db.commit()
+        member_id = member.id
+    finally:
+        db.close()
+    created = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/{member_id}/capabilities",
+        params={"workspace_id": i["workspace"].id},
+        json={
+            "capability_key": "lead.research.capture",
+            "scope": "self",
+            "allowed_data_classes": ["public"],
+            "allowed_actions": ["research.execute"],
+            "tool_allowlist": ["revenue.lead.research.capture"],
+            "budget_minor": 0,
+            "currency": "INR",
+        },
+    )
+    assert created.status_code == 201, created.text
+    enabled = app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/{member_id}/capabilities/{created.json()['id']}/enable",
+        params={"workspace_id": i["workspace"].id},
+    )
+    assert enabled.status_code == 403

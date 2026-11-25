@@ -22,6 +22,8 @@ def _tool_view(spec, identity_allowed_data_classes: list[str]):
         "version": spec.version,
         "description": spec.description,
         "risk_level": spec.risk_level,
+        "required_action": spec.required_action,
+        "minimum_scope": spec.minimum_scope,
         "allowed_data_classes": sorted(set(spec.allowed_data_classes).intersection(identity_allowed_data_classes)),
         "requires_approval": spec.requires_approval,
     }

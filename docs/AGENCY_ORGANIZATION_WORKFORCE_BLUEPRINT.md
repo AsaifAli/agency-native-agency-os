@@ -142,3 +142,21 @@ Market Research → Marketing → BD/Sales → Solutions Consulting → Finance 
 Organization & Workforce; Agent Registry; Revenue Engine; Solutions & Commercial; Delivery Engine; Finance; Approval Center; Execution Engine; Integration Hub; Knowledge & Artifacts; Evaluation & QA; Operations & Monitoring. Do not create sixteen separate applications.
 
 **Implementation status:** target operating model; not evidence that every position, agent, workflow, API or UI is already implemented.
+
+
+## SkillTree visual map mapping (presentation only)
+
+The Claude workforce experience may present eight radial map clusters matching the SkillTree view. These are visual groupings, not replacements for the canonical departments or permission boundaries:
+
+| SkillTree cluster | Canonical Agency OS departments represented |
+|---|---|
+| Leadership | Office of the CEO / Chief of Staff; Human Resources & People Operations |
+| Growth | Market Research & Intelligence |
+| Marketing | Marketing & Brand |
+| Sales | Business Development & Sales |
+| Deals | Solutions Consulting & Strategy; Legal, Risk & Compliance |
+| Finance | Finance & Accounts; Administration & Procurement (commercial administration only) |
+| Customer | Client Success & Support |
+| Operations | AI Research & Innovation; AI Engineering & Development; Automation & Integration Engineering; Infrastructure & IT Operations; Project Management Office; Delivery & Implementation; Quality Assurance & Security |
+
+All sixteen canonical departments remain distinct in the OS organization registry, with their own responsibilities, positions, skills, autonomy ceilings and audit scope. The eight clusters are a navigational visualization only. The company-brain node is the Claude Chief of Staff experience; it does not gain founder authority. Skills and subagents are shown under their owning department/position, while authorization remains an OS decision on each execution.
