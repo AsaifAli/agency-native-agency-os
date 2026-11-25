@@ -39,14 +39,14 @@ For an Agent with ID `{agent_id}`, issue a founder-governed machine identity in 
 - allowed data classes: `public` only
 - bounded expiry and revocation policy
 
-The worker lazily creates/reuses a durable `AgentSession` when the provider emits a custom tool event. Its ID is stored on the scoped `Execution.machine_session_id` column. A session is never shared across executions or workspaces.
+The worker lazily creates/reuses a durable `AgentSession` when the provider emits a custom tool event. Its ID is stored on the scoped `Execution.machine_session_id` column through a composite org/workspace/session foreign key. A session is never shared across executions or workspaces. Session creation audit is emitted by the shared lifecycle service for both HTTP and worker paths.
 
 If the identity is missing, expired, revoked, lacks session permission, or lacks the exact tool grant, the OS returns a generic tool-denied result. It does not fall back to provider permissions.
 
 ## Reliability
 
 - Provider custom-tool event IDs are deterministically hashed into OS idempotency keys.
-- Tool invocation and business draft persist before the provider receives the result event.
+- Tool invocation and business draft persist before the provider receives the result event. Denied calls roll back uncommitted adapter work and persist a safe reason-code audit event.
 - If the worker restarts after the OS commit but before returning the event, the same event ID replays the stored result rather than creating another draft.
 - The adapter checks event history while sessions are running, not only after idle.
 - It waits for the provider to resume after a custom-tool result, but does not auto-confirm built-in tool actions.
@@ -69,3 +69,8 @@ If the identity is missing, expired, revoked, lacks session permission, or lacks
 5. Run the synthetic end-to-end tool test and PostgreSQL 16 migration verification before production use.
 
 Claude Managed Agents is beta and not eligible for ZDR or HIPAA BAA. Do not route confidential or regulated client data through this runtime. This adapter is not a compliance claim.
+
+
+## API contract reference
+
+The adapter follows the Managed Agents custom-tool event contract: the provider emits `agent.custom_tool_use`; the application executes the tool; the application sends a `user.custom_tool_result` event with the original `custom_tool_use_id` and text content. The worker watches event history while the session is running and waits for the provider to resume after the result. It never sends `user.tool_confirmation` for built-in actions.
