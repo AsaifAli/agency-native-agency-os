@@ -51,6 +51,23 @@ def test_postgres_rls_blocks_cross_org_reads_writes_and_pool_context_leaks():
             assert {r.id for r in db.query(Workspace).all()} == {ws_a.id}
             assert {r.token_hash for r in db.query(BrowserSession).all()} == {session_hash_a}
             db.commit()
+        # Revocation must take effect on the next transaction even when the
+        # same pooled API connection is reused.
+        with Admin() as db:
+            grant = db.query(WorkspaceGrant).filter_by(
+                org_id=org_a.id, workspace_id=ws_a.id, user_id=user_a.id,
+                revoked_at=None,
+            ).one()
+            grant.revoked_at = datetime.now(timezone.utc)
+            db.commit()
+        with App() as db:
+            set_rls_context(db, user_id=user_a.id)
+            assert db.query(Task).count() == 0
+            db.commit()
+        with Admin() as db:
+            grant = db.query(WorkspaceGrant).filter_by(id=grant.id).one()
+            grant.revoked_at = None
+            db.commit()
         with App() as db:
             set_rls_context(db, browser_session_token_hash=session_hash_b)
             assert {r.token_hash for r in db.query(BrowserSession).all()} == {session_hash_b}
@@ -66,6 +83,10 @@ def test_postgres_rls_blocks_cross_org_reads_writes_and_pool_context_leaks():
         with App() as db:
             set_rls_context(db, user_id=user_a.id)
             db.add(Task(org_id=org_a.id, workspace_id=ws_a2.id, title="Cross-workspace write", created_by=user_a.id))
+            with pytest.raises(DBAPIError):
+                db.flush()
+            db.rollback()
+            db.add(Task(org_id=org_b.id, workspace_id=ws_b.id, title="Cross-org write", created_by=user_a.id))
             with pytest.raises(DBAPIError):
                 db.flush()
             db.rollback()
