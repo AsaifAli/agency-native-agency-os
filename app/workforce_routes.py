@@ -27,10 +27,7 @@ WRITERS = {Role.owner, Role.admin, Role.operator}
 
 
 def _workspace(db: Session, org_id: str, workspace_id: str):
-    row = db.query(Workspace).filter_by(id=workspace_id, org_id=org_id).first()
-    if row is None:
-        raise HTTPException(404, "Workspace not found")
-    return row
+    return require_workspace_access_from_context(org_id, workspace_id, db)
 
 
 def _member(db: Session, org_id: str, workspace_id: str, member_id: str):
