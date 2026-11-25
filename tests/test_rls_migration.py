@@ -125,3 +125,16 @@ def test_only_explicit_org_level_tables_allow_null_workspace_rows():
         and table.name in migration.WORKSPACE_TABLES
     }
     assert nullable == set(migration.ORG_LEVEL_NULLABLE_WORKSPACE_TABLES)
+
+
+def test_workspace_grant_migration_preserves_machine_scope_and_audits_backfill():
+    path = PATH.with_name("v2c4e6a8b0d2_human_workspace_authorization.py")
+    source = path.read_text()
+    assert "JOIN public.memberships AS m ON m.org_id = w.org_id" in source
+    assert "JOIN public.users AS u ON u.id = m.user_id" in source
+    assert "WHERE u.active IS TRUE" in source
+    assert "ON CONFLICT (org_id, workspace_id, user_id)" in source
+    assert "GRANT EXECUTE ON FUNCTION" in source
+    assert "TO agency_os_app, agency_os_worker" in source
+    assert "agency_os.machine_identity_lookup_id" in source
+    assert "workspace_id IS NULL" in source
