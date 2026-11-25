@@ -297,6 +297,12 @@ def upgrade() -> None:
                 org_id = nullif(current_setting('agency_os.machine_org_id', true), '')
                 AND id = nullif(current_setting('agency_os.machine_workspace_id', true), '')
             )
+            OR EXISTS (
+                SELECT 1 FROM public.founder_authorities AS f
+                WHERE f.org_id = workspaces.org_id
+                  AND f.user_id = nullif(current_setting('agency_os.user_id', true), '')
+                  AND f.active IS TRUE
+            )
         )
     """)
     op.execute("""
