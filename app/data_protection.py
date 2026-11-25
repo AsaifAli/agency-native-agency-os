@@ -157,12 +157,23 @@ def _sanitize_value(value: Any, counts: dict[str, int], depth: int = 0) -> Any:
     raise DataProtectionBlocked("UNSUPPORTED_METADATA")
 
 
-def _validate_runtime_identifier(value: str | None) -> str | None:
-    """Reject PII/secrets in identifiers because redaction would break correlation."""
+def _validate_runtime_identifier(
+    value: str | None, *, allow_phone_like: bool = False,
+) -> str | None:
+    """Reject sensitive identifiers without misclassifying internal IDs as phones."""
     if value is None:
         return None
     if not isinstance(value, str):
         raise DataProtectionBlocked("INVALID_RUNTIME_IDENTIFIER")
+    if any(pattern.search(value) for pattern in _SECRET_PATTERNS):
+        raise DataProtectionBlocked("SECRET_DETECTED")
+    if allow_phone_like:
+        if _EMAIL.search(value) or _PAN.search(value) or _AADHAAR.search(value):
+            raise DataProtectionBlocked("SENSITIVE_RUNTIME_IDENTIFIER")
+        for match in _CARD.finditer(value):
+            if _luhn_valid(match.group(0)):
+                raise DataProtectionBlocked("SENSITIVE_RUNTIME_IDENTIFIER")
+        return value
     cleaned, counts = sanitize_text(value)
     if counts or cleaned != value:
         raise DataProtectionBlocked("SENSITIVE_RUNTIME_IDENTIFIER")
@@ -239,7 +250,9 @@ def protect_execution_request(
         if not isinstance(identifier_fields[key], str) or not identifier_fields[key]:
             raise DataProtectionBlocked("INVALID_RUNTIME_IDENTIFIER")
     safe_identifiers = {
-        key: _validate_runtime_identifier(value)
+        key: _validate_runtime_identifier(
+            value, allow_phone_like=key in {"org_id", "workspace_id", "task_id", "agent_id"}
+        )
         for key, value in identifier_fields.items()
     }
     values = {
