@@ -191,13 +191,20 @@ class ManagedAgentsRuntime(AgentRuntime):
         if not isinstance(stop_reason, dict) or stop_reason.get("type") != "requires_action":
             return False
         event_ids = stop_reason.get("event_ids") or []
-        if not isinstance(event_ids, list) or not event_ids:
+        if not isinstance(event_ids, list) or not event_ids or any(not isinstance(event_id, str) for event_id in event_ids):
             return False
         by_id = {
             event.get("id"): event
             for event in events
             if isinstance(event.get("id"), str)
         }
+        malformed = [
+            event for event in events
+            if event.get("type") == "agent.custom_tool_use"
+            and not isinstance(event.get("id"), str)
+        ]
+        if malformed:
+            raise RuntimeExecutionError("Claude Managed Agents returned a malformed custom tool event.")
         answered = {
             event.get("custom_tool_use_id")
             for event in events
