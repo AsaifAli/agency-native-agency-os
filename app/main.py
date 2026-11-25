@@ -59,6 +59,7 @@ from app.schemas import (
 from app.audit import record_event
 from app.browser_sessions import (
     issue_browser_session, authenticate_browser_session, revoke_browser_session,
+    rotate_browser_session,
 )
 from app.security_models import BrowserSession  # noqa: F401 — register browser session metadata
 from app.policy import assert_managed_agents_eligible
@@ -205,6 +206,38 @@ def authentik_logout(
     response.delete_cookie(settings.oidc_session_cookie_name, path="/")
     response.delete_cookie(settings.oidc_csrf_cookie_name, path="/")
     return {"status": "signed_out"}
+
+
+@app.post("/v1/auth/refresh")
+def refresh_browser_session(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    token = request.cookies.get(settings.oidc_session_cookie_name)
+    if not token:
+        raise HTTPException(401, "Authenticated browser session required")
+
+    old_session, new_session, new_token = rotate_browser_session(
+        db, token, ttl_seconds=settings.oidc_session_ttl_seconds
+    )
+    memberships = db.query(Membership).filter_by(user_id=old_session.user_id).all()
+    for membership in memberships:
+        record_event(
+            db, membership.org_id, old_session.user_id, "auth.browser_session_rotated",
+            "browser_session", old_session.id,
+            payload={"replacement_session_id": new_session.id},
+        )
+    db.commit()
+
+    secure = settings.app_env.lower() == "production"
+    response.set_cookie(
+        settings.oidc_session_cookie_name, new_token,
+        max_age=settings.oidc_session_ttl_seconds, httponly=True,
+        secure=secure, samesite="none" if secure else "lax", path="/",
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return {"status": "refreshed"}
 
 
 @app.get("/v1/auth/me")

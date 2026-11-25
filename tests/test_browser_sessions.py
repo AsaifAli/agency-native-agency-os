@@ -16,6 +16,7 @@ from app.browser_sessions import (
     authenticate_browser_session,
     issue_browser_session,
     revoke_browser_session,
+    rotate_browser_session,
 )
 
 
@@ -171,3 +172,59 @@ def test_revoked_browser_jwt_is_not_accepted_as_bearer_token(browser_db):
     with pytest.raises(HTTPException) as error:
         get_principal(authorization=f"Bearer {token}", session_cookie=None, db=db)
     assert error.value.status_code == 401
+
+
+def test_browser_session_rotation_revokes_old_and_issues_new(browser_db):
+    db, user = browser_db
+    old_token = issue_browser_session(db, user, ttl_seconds=600)
+    db.commit()
+
+    old_session, new_session, new_token = rotate_browser_session(
+        db, old_token, ttl_seconds=600
+    )
+    db.commit()
+
+    assert old_session.revoked_at is not None
+    assert new_session.id != old_session.id
+    assert authenticate_browser_session(db, new_token).id == new_session.id
+    with pytest.raises(HTTPException) as error:
+        authenticate_browser_session(db, old_token)
+    assert error.value.status_code == 401
+
+
+def test_refresh_endpoint_rotates_cookie_and_audits_replacement(browser_db):
+    from fastapi.testclient import TestClient
+    from app.db import get_db
+    from app.main import app
+    from app.config import settings
+
+    db, user = browser_db
+    old_token = issue_browser_session(db, user, ttl_seconds=600)
+    db.commit()
+
+    def override_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        client = TestClient(app)
+        client.cookies.set(settings.oidc_session_cookie_name, old_token, domain="testserver.local", path="/")
+        client.cookies.set(settings.oidc_csrf_cookie_name, "csrf-refresh-value", domain="testserver.local", path="/")
+        headers = {
+            "Origin": "http://localhost:3000",
+            "X-CSRF-Token": "csrf-refresh-value",
+        }
+        refreshed = client.post("/v1/auth/refresh", headers=headers)
+        assert refreshed.status_code == 200
+        new_token = client.cookies.get(settings.oidc_session_cookie_name, domain="testserver.local", path="/")
+        assert new_token and new_token != old_token
+        assert client.get("/v1/auth/me").status_code == 200
+
+        client.cookies.set(settings.oidc_session_cookie_name, old_token, domain="testserver.local", path="/")
+        assert client.get("/v1/auth/me").status_code == 401
+
+        events = db.query(AuditEvent).filter_by(event_type="auth.browser_session_rotated").all()
+        assert len(events) == 1
+        assert events[0].payload["replacement_session_id"]
+    finally:
+        app.dependency_overrides.pop(get_db, None)

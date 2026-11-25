@@ -98,3 +98,37 @@ def revoke_browser_session(db: Session, token: str) -> BrowserSession | None:
         return None
     session.revoked_at = _utcnow()
     return session
+
+
+def rotate_browser_session(
+    db: Session, token: str, *, ttl_seconds: int
+) -> tuple[BrowserSession, BrowserSession, str]:
+    """Atomically revoke one live session and issue its replacement.
+
+    The row lock serializes concurrent refresh attempts on PostgreSQL. The
+    caller owns the transaction and must commit the revocation and replacement
+    together before returning the replacement cookie to the browser.
+    """
+    claims = _decode_claims(token)
+    old_session = (
+        db.query(BrowserSession)
+        .filter_by(token_hash=_token_hash(claims["jti"]))
+        .with_for_update()
+        .first()
+    )
+    now = _utcnow()
+    if (
+        old_session is None
+        or old_session.revoked_at is not None
+        or _aware(old_session.expires_at) <= now
+    ):
+        raise HTTPException(401, "Invalid or revoked browser session")
+
+    user = db.query(User).filter(User.id == old_session.user_id, User.active.is_(True)).first()
+    if user is None or user.email.lower() != str(claims["sub"]).lower():
+        raise HTTPException(401, "Unknown, inactive, or revoked user session")
+
+    old_session.revoked_at = now
+    new_token = issue_browser_session(db, user, ttl_seconds=ttl_seconds)
+    new_session = authenticate_browser_session(db, new_token)
+    return old_session, new_session, new_token
