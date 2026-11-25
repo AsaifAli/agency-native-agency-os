@@ -165,7 +165,7 @@ export default function ResearchDraftsPage() {
                   <span className={`status ${draft.status}`}>{draft.status.replaceAll("_", " ")}</span>
                 </div>
                 <p style={{ lineHeight: 1.65, whiteSpace: "pre-wrap" }}>{draft.summary}</p>
-                <div className="grid-two">
+                <div className="two-col">
                   <div>
                     <div className="panel-note">BUYING SIGNALS</div>
                     {draft.buying_signals.length ? <ul>{draft.buying_signals.map((signal) => <li key={signal}>{signal}</li>)}</ul> : <p className="activity-meta">None supplied</p>}
