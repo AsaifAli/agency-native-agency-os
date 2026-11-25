@@ -816,7 +816,7 @@ def get_execution_trace(
 )
 def list_approvals(
     org_id: str,
-    workspace_id: str | None = None,
+    workspace_id: str,
     db: Session = Depends(get_db),
     p: Principal = Depends(get_principal),
 ):
@@ -826,11 +826,8 @@ def list_approvals(
     ):
         raise HTTPException(403, "Insufficient permission to view approval requests")
 
-    query = db.query(Approval).filter_by(org_id=org_id)
-
-    if workspace_id:
-        workspace_in_org(db, org_id, workspace_id)
-        query = query.filter_by(workspace_id=workspace_id)
+    workspace_in_org(db, org_id, workspace_id)
+    query = db.query(Approval).filter_by(org_id=org_id, workspace_id=workspace_id)
 
     return (
         query
@@ -990,16 +987,18 @@ def decide_approval(
 )
 def list_audit(
     org_id: str,
+    workspace_id: str,
     limit: int = 100,
     db: Session = Depends(get_db),
     p: Principal = Depends(get_principal),
 ):
     role = require_membership(org_id, p, db)
     require_role(role, {Role.owner, Role.admin, Role.reviewer})
+    workspace_in_org(db, org_id, workspace_id)
 
     return (
         db.query(AuditEvent)
-        .filter_by(org_id=org_id)
+        .filter_by(org_id=org_id, workspace_id=workspace_id)
         .order_by(AuditEvent.created_at.desc())
         .limit(min(limit, 500))
         .all()
