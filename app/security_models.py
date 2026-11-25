@@ -27,7 +27,7 @@ class MachineIdentity(Base):
     subject_type: Mapped[str] = mapped_column(String(16), nullable=False)
     subject_id: Mapped[str] = mapped_column(String(36), nullable=False)
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    token_prefix: Mapped[str] = mapped_column(String(24), nullable=False)
+    token_prefix: Mapped[str] = mapped_column(String(48), nullable=False)
     scopes: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     allowed_data_classes: Mapped[list] = mapped_column(JSON, default=lambda: ["synthetic"], nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
