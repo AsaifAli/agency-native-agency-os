@@ -1,3 +1,5 @@
+from urllib.parse import urlsplit
+
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -45,6 +47,19 @@ class Settings(BaseSettings):
     claude_managed_poll_interval_seconds: float = Field(default=2.0, ge=0.2, le=30)
     anthropic_request_timeout_seconds: float = Field(default=20.0, ge=1, le=120)
 
+    # Session-bound MCP endpoint. Disabled until a public HTTPS URL and strict
+    # Host allowlist are configured; only read-only tools are enabled by default.
+    mcp_gateway_enabled: bool = False
+    mcp_public_url: str = ""
+    mcp_allowed_hosts: str = ""
+    mcp_allowed_origins: str = ""
+    mcp_enabled_tool_keys: str = "system.health.read"
+    mcp_session_token_ttl_seconds: int = Field(default=900, ge=60, le=3600)
+    mcp_requests_per_minute: int = Field(default=120, ge=1, le=10000)
+    mcp_max_tool_calls_per_session: int = Field(default=50, ge=1, le=1000)
+    mcp_max_request_body_bytes: int = Field(default=65536, ge=4096, le=1048576)
+    mcp_max_concurrent_requests: int = Field(default=16, ge=1, le=256)
+
     # Optional signed server-to-server intake from the public agency website.
     # Disabled until a dedicated secret and fixed org/workspace mapping are configured.
     website_lead_intake_enabled: bool = False
@@ -61,6 +76,48 @@ class Settings(BaseSettings):
                 "OUTBOX_MAX_RETRY_SECONDS must be greater than or equal "
                 "to OUTBOX_BASE_RETRY_SECONDS"
             )
+        return self
+
+    @property
+    def mcp_allowed_hosts_list(self) -> list[str]:
+        return [value.strip() for value in self.mcp_allowed_hosts.split(",") if value.strip()]
+
+    @property
+    def mcp_allowed_origins_list(self) -> list[str]:
+        return [value.strip() for value in self.mcp_allowed_origins.split(",") if value.strip()]
+
+    @property
+    def mcp_enabled_tool_keys_list(self) -> list[str]:
+        return [value.strip() for value in self.mcp_enabled_tool_keys.split(",") if value.strip()]
+
+    @model_validator(mode="after")
+    def validate_mcp_settings(self):
+        if not self.mcp_gateway_enabled:
+            return self
+        parsed = urlsplit(self.mcp_public_url)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+            or parsed.path != "/mcp/agency-os"
+        ):
+            raise ValueError(
+                "MCP_PUBLIC_URL must be an HTTPS URL ending exactly in /mcp/agency-os"
+            )
+        allowed_hosts = self.mcp_allowed_hosts_list
+        if not allowed_hosts or "*" in allowed_hosts:
+            raise ValueError("MCP_ALLOWED_HOSTS must contain explicit public hostnames")
+        if not any(
+            host in allowed_hosts
+            for host in (parsed.netloc, parsed.hostname, f"{parsed.hostname}:*")
+        ):
+            raise ValueError("MCP_ALLOWED_HOSTS must allow the host in MCP_PUBLIC_URL")
+        tool_keys = self.mcp_enabled_tool_keys_list
+        if not tool_keys or len(set(tool_keys)) != len(tool_keys):
+            raise ValueError("MCP_ENABLED_TOOL_KEYS must contain unique registered tool keys")
         return self
 
 
