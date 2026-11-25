@@ -1,9 +1,9 @@
 # Agency OS Production Readiness Checklist
 
 **Last reviewed:** 2026-11-25
-**Tracking branch:** `feature/managed-agent-os-tool-execution` (reconciled candidate)
-**Latest merged milestone:** [PR #44](https://github.com/AsaifAli/agency-native-agency-os/pull/44)
-**Status:** PR #45 reconciled with main and locally validated in the cloud workspace; push/merge and PostgreSQL/live-provider gates remain. Not a certification or release approval.
+**Tracking branch:** `main` (PR #45 merged); `security/predeploy-20-point-audit` (PR #47 open draft)
+**Latest merged milestone:** [PR #45](https://github.com/AsaifAli/agency-native-agency-os/pull/45)
+**Status:** PR #45 is merged. PR #47 remains an open draft; its security hardening and OIDC implementation are not production-approved. PostgreSQL 16 RLS, server-side session revocation, live identity/MFA verification and other release gates remain. Not a certification or release approval.
 
 ## Progress snapshot
 
@@ -368,7 +368,7 @@ A feature is **production-ready** only when implementation, authorization, tenan
 
 **Evidence boundary:** the reconciled branch full backend suite passed 285 tests, with 4 PostgreSQL-only tests skipped because `AGENCY_OS_TEST_DATABASE_URL` was not configured. `q7f2b9d4c631` is the sole Alembic head. A SQLite full-history migration rehearsal stopped at the pre-existing `eb75d47bfc63` migration, which uses an ALTER constraint operation unsupported by SQLite; this did not validate or invalidate the new PostgreSQL migration. No PostgreSQL 16 or live Managed Agents session was available, and no provider tool is enabled in production.
 
-### PR #45 reconciled implementation notes (branch validation complete; merge pending)
+### PR #45 reconciled implementation notes (merged to main)
 
 ## 2026-11-25 — Managed Agents OS custom-tool execution
 
@@ -378,6 +378,7 @@ A feature is **production-ready** only when implementation, authorization, tenan
 - [x] Tool calls use OS machine identity/session grants, DPG, schema validation, idempotency, persisted invocation results and audit.
 - [x] Custom tool call/result handling is bounded; native provider tools, MCP, skills and multiagent features remain disabled.
 - [x] Reconciled PR branch with current `main` and resolved the two source conflicts without dropping the main-branch research review UI or tests.
+- [x] PR #45 merged to `main` (confirmed in GitHub).
 - [x] Exact reconciled branch focused validation passed 154 tests; full backend suite passed 285 tests with 4 PostgreSQL-only skips.
 - [x] Corrected a main-branch `LeadResearchDraft.promoted_lead_id` ORM/migration mismatch exposed during test collection.
 - [x] Added tool-level workforce capability enforcement and stable execution idempotency across session renewal.
@@ -448,3 +449,17 @@ Additional review controls: identity/session locks follow revocation lock order;
 **Release decision remains NO-GO** pending live Authentik/MFA assurance and PostgreSQL RLS verification.
 
 - [x] Replaced Starlette's signed-only OIDC state cookie with AES-GCM authenticated encryption for the PKCE verifier and nonce; tests prove round-trip and reject tampered state cookies.
+
+
+## 2026-11-25 — Continuation source review
+
+- [x] Rechecked PR #47 metadata and exact changed-file set; PR #47 remains open and draft. No merge or Actions run was triggered.
+- [x] Re-reviewed OIDC session, CSRF, rate-limit and migration source. The current browser session is a stateless short-lived JWT; logout clears cookies but does not revoke a copied token before expiry.
+- [x] Added a PR review comment documenting the required persisted session/JTI revocation and rotation lifecycle, PostgreSQL 16 RLS/runtime-role requirements, Claude parent/child execution controls and live Authentik assurance verification.
+- [ ] Implement and test the server-side session ledger before production; verify logout revokes server-side and replay fails immediately.
+- [ ] Implement and verify PostgreSQL 16 RLS with a non-owner/non-BYPASSRLS application role, transaction-local tenant context and pooled-connection isolation tests.
+- [ ] Implement durable Claude child-execution correlation, per-child budgets and exact grants, cancellation and provider-event reconciliation before enabling multiagent or side-effecting workflows.
+- [ ] Complete live Authentik OIDC/JWKS/ACR and browser cookie verification.
+- [ ] Complete remaining route authorization, SSRF egress, log redaction, secret-history and backup/restore gates.
+
+**Evidence boundary:** GitHub source review and PR metadata were available. The cloud development workspace could not establish TLS to GitHub, so no source code was modified and no tests were rerun during this continuation. Existing test counts above are historical branch evidence, not fresh verification.
