@@ -155,3 +155,14 @@ A feature is **production-ready** only when implementation, authorization, tenan
 - The 209-pass SQLite suite, 3 PostgreSQL worker tests, PostgreSQL migration to `l2e8a0b6d549`, frontend lint/typecheck/build and zero-vulnerability npm audit were run against the reconciled local tree before remote publication. They are not fresh exact-commit CI evidence.
 - GitHub Actions runner allocation remains blocked by account billing. Development is continuing without repeated reruns; required production verification remains open.
 - Outbound messages remain internal queue records. No provider send adapter or signed provider webhook is enabled.
+
+
+## Security hardening slice — PR #30
+- [x] Add database-enforced organization/workspace consistency for contacts, leads, approvals, outbound senders, consent records, suppression blocks, outbound messages and message events.
+- [x] Add migration preflight queries that abort without modifying data when mismatched existing relationships are found.
+- [x] Add PostgreSQL-only regression coverage for cross-organization/workspace inserts. The test is authored but not yet executed.
+- [x] Add deterministic execution-boundary data protection: block confidential/regulated and unauthorized commercial inputs; block credential-like secrets; redact high-confidence emails, phones, Aadhaar/PAN identifiers and payment-card numbers from provider inputs and outputs.
+- [x] Record redaction counts and policy blocks in the OS audit log without recording raw values. Provider execution is blocked if the required redaction audit cannot be persisted.
+- [ ] Run the PostgreSQL tenant-integrity migration and regression test against an isolated PostgreSQL database.
+- [ ] Run all eight data-protection unit tests and the full backend suite against the branch.
+- [ ] Extend classification/redaction to uploaded files, extracted documents and future RAG/tool payloads. Regex-based detection is a first deterministic boundary, not a complete PII classifier or compliance certification.

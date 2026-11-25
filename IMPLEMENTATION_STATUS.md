@@ -135,3 +135,10 @@ Merged work includes PR #17 (contact timeline), PR #19 (leads/opportunities), PR
 - Proposal drafts combine immutable service-catalogue snapshots with one-time/retainer engagement terms. Retainer service periods and recurring invoice drafts are founder-governed; no automatic renewal, invoice sending or payment collection is enabled.
 - The feature migration graph has one merge head, `l2e8a0b6d549`. The fresh PostgreSQL migration and worker concurrency evidence, frontend checks and 209-pass backend suite were recorded against the reconciled local tree before remote publication; exact-commit CI remains unverified because GitHub could not allocate runners.
 - Follow-on hardening is focused on database-enforced organization/workspace relationship integrity, then the Data Protection Gateway and OS tool gateway. The OS remains a development foundation, not a production-ready or fully autonomous deployment.
+
+
+## Security hardening increment — PR #30 (in progress)
+- Database composite unique keys and foreign keys enforce org/workspace alignment for outreach parent and child records; a preflight migration refuses to proceed if existing relationships are inconsistent.
+- The execution worker now sanitizes agent/task inputs and provider output before provider use or result persistence. It blocks confidential/regulated and unauthorized commercial classes, credential-like secrets, and records only redaction counts/policy reasons in audit events.
+- The initial DPG detector covers email, phone, Aadhaar/PAN, Luhn-valid payment-card patterns and common credential formats. This is a conservative first slice; file attachments, extracted documents, RAG content and richer per-client classification remain unimplemented.
+- PostgreSQL tenant-integrity regression tests and eight DPG unit tests are authored but have not been executed against this branch. PR #30 is open and not production-ready.
