@@ -418,6 +418,90 @@ def create_workspace(
     return workspace
 
 
+@app.post("/v1/orgs/{org_id}/workspaces/{workspace_id}/grants")
+def create_workspace_grant(
+    org_id: str, workspace_id: str, user_id: str,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    require_membership(org_id, p, db)
+    require_founder_authority(db, org_id, p.user.id)
+    workspace = db.query(Workspace).filter_by(org_id=org_id, id=workspace_id).first()
+    if workspace is None:
+        raise HTTPException(404, "Workspace not found")
+    target = db.query(User).filter_by(id=user_id, active=True).first()
+    if target is None or not db.query(Membership.id).filter_by(
+        org_id=org_id, user_id=user_id
+    ).first():
+        raise HTTPException(404, "Active organization member not found")
+    try:
+        if db.get_bind().dialect.name == "postgresql":
+            grant_id = db.execute(
+                text("SELECT agency_os_private.grant_workspace_access(:org_id, :workspace_id, :user_id, :actor_id)"),
+                {"org_id": org_id, "workspace_id": workspace_id,
+                 "user_id": user_id, "actor_id": p.user.id},
+            ).scalar_one()
+        else:
+            existing = db.query(WorkspaceGrant).filter_by(
+                org_id=org_id, workspace_id=workspace_id, user_id=user_id,
+                revoked_at=None,
+            ).first()
+            if existing:
+                grant_id = existing.id
+            else:
+                grant = WorkspaceGrant(
+                    org_id=org_id, workspace_id=workspace_id, user_id=user_id,
+                    granted_by=p.user.id,
+                )
+                db.add(grant)
+                db.flush()
+                grant_id = grant.id
+                record_event(db, org_id, p.user.id, "workspace.access_granted",
+                             "workspace_grant", grant.id, workspace_id,
+                             {"user_id": user_id})
+        db.commit()
+        return {"workspace_id": workspace_id, "user_id": user_id,
+                "grant_id": grant_id, "status": "active"}
+    except Exception:
+        db.rollback()
+        raise
+
+
+@app.delete("/v1/orgs/{org_id}/workspaces/{workspace_id}/grants/{user_id}")
+def revoke_workspace_grant(
+    org_id: str, workspace_id: str, user_id: str,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    require_membership(org_id, p, db)
+    require_founder_authority(db, org_id, p.user.id)
+    workspace = db.query(Workspace).filter_by(org_id=org_id, id=workspace_id).first()
+    if workspace is None:
+        raise HTTPException(404, "Workspace not found")
+    try:
+        if db.get_bind().dialect.name == "postgresql":
+            revoked = db.execute(
+                text("SELECT agency_os_private.revoke_workspace_access(:org_id, :workspace_id, :user_id, :actor_id)"),
+                {"org_id": org_id, "workspace_id": workspace_id,
+                 "user_id": user_id, "actor_id": p.user.id},
+            ).scalar_one()
+        else:
+            grant = db.query(WorkspaceGrant).filter_by(
+                org_id=org_id, workspace_id=workspace_id, user_id=user_id,
+                revoked_at=None,
+            ).with_for_update().first()
+            revoked = grant is not None
+            if grant is not None:
+                grant.revoked_at = datetime.now(timezone.utc)
+                record_event(db, org_id, p.user.id, "workspace.access_revoked",
+                             "workspace_grant", grant.id, workspace_id,
+                             {"user_id": user_id})
+        db.commit()
+        return {"workspace_id": workspace_id, "user_id": user_id,
+                "status": "revoked" if revoked else "not_active"}
+    except Exception:
+        db.rollback()
+        raise
+
+
 # ---------------------------------------------------------------------------
 # Agents
 # ---------------------------------------------------------------------------
