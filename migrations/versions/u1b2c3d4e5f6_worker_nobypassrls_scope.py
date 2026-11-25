@@ -13,6 +13,30 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # The worker must be able to evaluate policies that reference this helper,
+    # but must never use it as a membership oracle.
+    op.execute("""
+        CREATE OR REPLACE FUNCTION agency_os_private.user_has_org_access(
+            target_org_id text, actor_user_id text
+        ) RETURNS boolean
+        LANGUAGE sql
+        STABLE
+        SECURITY DEFINER
+        SET search_path = pg_catalog, public
+        AS $function$
+            SELECT actor_user_id IS NOT NULL
+               AND session_user <> 'agency_os_worker'
+               AND EXISTS (
+                    SELECT 1 FROM public.memberships AS m
+                    WHERE m.org_id = target_org_id
+                      AND m.user_id = actor_user_id
+               )
+        $function$
+    """)
+    op.execute("""
+        ALTER FUNCTION agency_os_private.user_has_org_access(text, text)
+        OWNER TO agency_os_migrator
+    """)
     op.execute("""
         CREATE OR REPLACE FUNCTION agency_os_private.worker_workspace_scopes()
         RETURNS TABLE(org_id text, workspace_id text)
