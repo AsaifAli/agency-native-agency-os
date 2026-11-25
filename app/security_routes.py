@@ -174,6 +174,48 @@ def revoke_machine_identity(
     }
 
 
+@router.post("/v1/orgs/{org_id}/workspaces/{workspace_id}/machine-sessions/{session_id}/close")
+def founder_close_machine_session(
+    org_id: str,
+    workspace_id: str,
+    session_id: str,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_principal),
+):
+    require_membership(org_id, principal, db)
+    require_founder_authority(db, org_id, principal.user.id)
+    identity_session = (
+        db.query(AgentSession)
+        .filter_by(
+            id=session_id,
+            org_id=org_id,
+            workspace_id=workspace_id,
+        )
+        .first()
+    )
+    if identity_session is None:
+        raise HTTPException(404, "Agent session not found")
+    identity = (
+        db.query(MachineIdentity)
+        .filter_by(
+            id=identity_session.machine_identity_id,
+            org_id=org_id,
+            workspace_id=workspace_id,
+        )
+        .first()
+    )
+    if identity is None:
+        raise HTTPException(404, "Machine identity not found")
+    closed = close_agent_session(
+        db,
+        MachinePrincipal(identity=identity),
+        session_id=session_id,
+        status="closed",
+        reason_code="FOUNDER_CLOSED_SESSION",
+    )
+    return {"id": closed.id, "status": closed.status}
+
+
 @router.post("/v1/machine/sessions", status_code=201)
 def create_machine_session(
     body: MachineSessionCreate, db: Session = Depends(get_db),
