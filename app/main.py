@@ -672,6 +672,7 @@ def create_execution_endpoint(
 ):
     role = require_membership(org_id, p, db)
     require_role(role, {Role.owner, Role.admin, Role.operator})
+    workspace_in_org(db, org_id, body.workspace_id)
 
     try:
         execution = create_execution(
@@ -947,6 +948,7 @@ def decide_approval(
 
     if not approval:
         raise HTTPException(404, "Approval not found")
+    workspace_in_org(db, org_id, approval.workspace_id)
 
     if approval.status != ApprovalStatus.pending:
         raise HTTPException(409, "Approval already decided")
