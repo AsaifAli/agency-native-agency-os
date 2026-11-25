@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 from app.db import get_db
+from app.audit import record_event
 from app.data_protection import DataProtectionBlocked, sanitize_text
 from app.security_models import AgentSession, MachineIdentity
 
@@ -129,3 +130,34 @@ def authorize_tool_session(db: Session, principal: MachinePrincipal, *, session_
     session.last_seen_at = now
     identity.last_used_at = now
     return session
+
+
+
+def expire_due_agent_sessions(db: Session, *, limit: int = 100) -> int:
+    """Expire a bounded batch of sessions and audit each transition.
+
+    Caller owns the transaction. Row locks make concurrent worker sweeps safe.
+    """
+    if not 1 <= limit <= 1000:
+        raise ValueError("limit must be between 1 and 1000")
+    now = _utcnow()
+    rows = (
+        db.query(AgentSession)
+        .filter(AgentSession.status == "active", AgentSession.expires_at <= now)
+        .order_by(AgentSession.expires_at.asc(), AgentSession.id.asc())
+        .with_for_update(skip_locked=True)
+        .limit(limit)
+        .all()
+    )
+    for session in rows:
+        session.status = "expired"
+        session.ended_at = now
+        record_event(
+            db, session.org_id, None, "agent_session.expired",
+            "agent_session", session.id, session.workspace_id,
+            {"machine_identity_id": session.machine_identity_id,
+             "reason_code": "SESSION_TTL_EXPIRED"},
+        )
+    if rows:
+        db.flush()
+    return len(rows)
