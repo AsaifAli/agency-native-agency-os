@@ -194,6 +194,7 @@ def invoke_registered_tool(
             "result": existing.result,
             "replayed": True,
         }
+        db.commit()
 
     try:
         raw_result = execute_tool(
