@@ -16,13 +16,13 @@ class ToolInvokeRequest(BaseModel):
     input: dict = Field(default_factory=dict)
 
 
-def _tool_view(spec):
+def _tool_view(spec, identity_allowed_data_classes: list[str]):
     return {
         "key": spec.key,
         "version": spec.version,
         "description": spec.description,
         "risk_level": spec.risk_level,
-        "allowed_data_classes": list(spec.allowed_data_classes),
+        "allowed_data_classes": sorted(set(spec.allowed_data_classes).intersection(identity_allowed_data_classes)),
         "requires_approval": spec.requires_approval,
     }
 
@@ -35,7 +35,7 @@ def list_machine_tools(
     identity = principal.identity
     return {
         "tools": [
-            _tool_view(spec)
+            _tool_view(spec, identity.allowed_data_classes)
             for spec in list_tools()
             if "tools:invoke" in identity.scopes
             and f"tool:{spec.key}" in identity.scopes
