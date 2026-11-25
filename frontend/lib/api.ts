@@ -1,5 +1,6 @@
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 let inMemoryAccessToken = "";
+let inMemoryCsrfToken = "";
 
 export function setInMemoryAccessToken(token: string) {
   inMemoryAccessToken = token.trim();
@@ -7,6 +8,7 @@ export function setInMemoryAccessToken(token: string) {
 
 export function clearInMemoryAccessToken() {
   inMemoryAccessToken = "";
+  inMemoryCsrfToken = "";
 }
 
 export function orgId(){return process.env.NEXT_PUBLIC_ORG_ID || ""}
@@ -17,8 +19,22 @@ export function authHeaders(): HeadersInit {
   const token = inMemoryAccessToken || (allowDev ? `dev:${email}` : "");
   return { "Content-Type":"application/json", ...(token ? { "Authorization":`Bearer ${token}` } : {}) };
 }
+async function csrfHeaders(method: string): Promise<HeadersInit> {
+  if (["GET", "HEAD", "OPTIONS", "TRACE"].includes(method.toUpperCase())) return {};
+  if (!inMemoryCsrfToken) {
+    const response = await fetch(`${API}/v1/auth/csrf`, { credentials: "include", cache: "no-store" });
+    if (!response.ok) throw new Error("Unable to establish a secure browser session");
+    const body = await response.json();
+    inMemoryCsrfToken = String(body.csrf_token || "");
+    if (!inMemoryCsrfToken) throw new Error("CSRF token was not issued");
+  }
+  return { "X-CSRF-Token": inMemoryCsrfToken };
+}
+
 export async function api<T>(path:string, init:RequestInit={}):Promise<T>{
-  const response=await fetch(`${API}${path}`,{...init,headers:{...authHeaders(),...(init.headers||{})},cache:"no-store"});
+  const method = init.method || "GET";
+  const csrf = await csrfHeaders(method);
+  const response=await fetch(`${API}${path}`,{...init,credentials:"include",headers:{...authHeaders(),...csrf,...(init.headers||{})},cache:"no-store"});
   if(!response.ok){let detail=`Request failed (${response.status})`;try{const body=await response.json();detail=body.detail||detail}catch{}throw new Error(detail)}
   if(response.status===204)return undefined as T;
   return response.json();

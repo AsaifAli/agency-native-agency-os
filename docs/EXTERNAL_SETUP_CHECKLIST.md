@@ -7,7 +7,10 @@
 ## 1. Founder decisions and access
 
 - [ ] Confirm the production organization and workspace IDs; keep development/staging separate.
-- [ ] Choose the production identity provider and configure OIDC/JWKS, MFA, redirect URIs and session policy. The current dev-token path is development-only.
+- [ ] Provision Authentik and create the confidential OIDC provider/client using `docs/AUTHENTIK_SETUP.md`; register the exact `/v1/auth/callback` URI.
+- [ ] Configure verified-email mapping (Authentik 2025.10+ defaults `email_verified` to false) and a real verification process.
+- [ ] Configure phishing-resistant MFA for founder/admin in Authentik; add the `agency_os_assurance` OIDC scope mapping and verify the actual flow emits the exact `OIDC_REQUIRED_ACR` claim before considering MFA closed.
+- [ ] Inject OIDC issuer, client ID/secret, independent state secret, redirect URI and frontend URL into the secret manager. Do not commit these values.
 - [ ] Provision the founder identity and verify explicit Founder Authority separately from organization-owner membership.
 - [ ] Decide approved sender identities, business contact hours, communication channels and escalation destination.
 - [ ] Approve the initial service catalogue, ICPs, pricing boundaries and proposal approval rules.
@@ -88,7 +91,8 @@
 These are **not** external setup tasks and cannot be closed by entering credentials:
 
 - [ ] Full cross-workspace authorization tests across APIs, workers, sessions, files and caches; PostgreSQL RLS review.
-- [ ] OIDC/JWKS/MFA integration and secure session lifecycle.
+- [x] Authentik OIDC code path, verified issuer/subject account binding, HttpOnly session cookie and CSRF protection are implemented.
+- [ ] Live OIDC/JWKS/MFA assurance (`acr`/`amr`), token revocation and actual browser session lifecycle verification.
 - [ ] Data Protection Gateway, PII minimization/redaction and retention/deletion implementation.
 - [ ] OS MCP gateway and narrowly scoped tools for agents.
 - [ ] Outbound email dispatch, sender registry, consent provenance, suppression, reply/opt-out/bounce stop, idempotency and audit.

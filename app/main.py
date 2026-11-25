@@ -1,14 +1,19 @@
 
 from datetime import datetime, timezone
+import secrets
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import text, or_
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.db import get_db
 from app.rate_limit import RedisRateLimitMiddleware
+from app.csrf import CookieCSRFMiddleware
+from app.session import EncryptedSessionMiddleware
+from app.oidc_auth import configure_oidc, link_provisioned_user, oidc_client, verified_identity
 from app.config import settings
 from app.workforce_service import initialize_workforce
 from app.auth import (
@@ -33,6 +38,7 @@ from app.models import (
     Execution,
     ExecutionAttempt,
     ExecutionStatus,
+    Membership,
 )
 from app.schemas import (
     WorkspaceCreate,
@@ -72,6 +78,17 @@ app = FastAPI(
     description="Founder-controlled Agency OS foundation",
 )
 
+configure_oidc()
+
+app.add_middleware(
+    EncryptedSessionMiddleware,
+    secret_key=settings.oidc_state_secret or settings.jwt_secret,
+    session_cookie=settings.oidc_state_cookie_name,
+    max_age=600,
+    same_site="lax",
+    https_only=settings.app_env.lower() == "production",
+)
+app.add_middleware(CookieCSRFMiddleware)
 app.add_middleware(RedisRateLimitMiddleware)
 
 app.add_middleware(
@@ -83,9 +100,94 @@ app.add_middleware(
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
+    allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "X-CSRF-Token"],
 )
 
+
+
+@app.get("/v1/auth/login")
+async def authentik_login(request: Request):
+    client = oidc_client()
+    return await client.authorize_redirect(request, settings.oidc_redirect_uri)
+
+
+@app.get("/v1/auth/callback")
+async def authentik_callback(request: Request, db: Session = Depends(get_db)):
+    client = oidc_client()
+    try:
+        token = await client.authorize_access_token(request)
+        claims = token.get("userinfo")
+        if not claims or claims.get("iss") != settings.oidc_issuer:
+            raise HTTPException(401, "Identity issuer validation failed")
+        subject, email = verified_identity(dict(claims), settings.oidc_required_acr)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Do not expose token exchange, state, nonce or provider internals.
+        raise HTTPException(401, "Identity provider authentication failed") from exc
+
+    issuer = settings.oidc_issuer
+    user = link_provisioned_user(db, issuer, subject, email)
+
+    memberships = db.query(Membership).filter_by(user_id=user.id).all()
+    for membership in memberships:
+        record_event(
+            db, membership.org_id, user.id, "auth.oidc_login",
+            "user", user.id, payload={"provider": "authentik", "method": "oidc"},
+        )
+    db.commit()
+    db.refresh(user)
+
+    csrf_token = secrets.token_urlsafe(32)
+    session_token = issue_access_token(user.email, settings.oidc_session_ttl_seconds)
+    redirect = RedirectResponse(settings.oidc_frontend_url.rstrip("/") + "/", status_code=303)
+    secure = settings.app_env.lower() == "production"
+    cookie_samesite = "none" if secure else "lax"
+    redirect.set_cookie(
+        settings.oidc_session_cookie_name, session_token,
+        max_age=settings.oidc_session_ttl_seconds, httponly=True,
+        secure=secure, samesite=cookie_samesite, path="/",
+    )
+    redirect.set_cookie(
+        settings.oidc_csrf_cookie_name, csrf_token,
+        max_age=settings.oidc_session_ttl_seconds, httponly=False,
+        secure=secure, samesite=cookie_samesite, path="/",
+    )
+    request.session.clear()
+    return redirect
+
+
+@app.get("/v1/auth/csrf")
+def get_csrf_token(request: Request, response: Response):
+    token = request.cookies.get(settings.oidc_csrf_cookie_name)
+    if not token:
+        token = secrets.token_urlsafe(32)
+        secure = settings.app_env.lower() == "production"
+        response.set_cookie(
+            settings.oidc_csrf_cookie_name, token,
+            max_age=settings.oidc_session_ttl_seconds, httponly=False,
+            secure=secure, samesite="none" if secure else "lax", path="/",
+        )
+    response.headers["Cache-Control"] = "no-store"
+    return {"csrf_token": token}
+
+
+@app.post("/v1/auth/logout")
+def authentik_logout(response: Response):
+    response.delete_cookie(settings.oidc_session_cookie_name, path="/")
+    response.delete_cookie(settings.oidc_csrf_cookie_name, path="/")
+    return {"status": "signed_out"}
+
+
+@app.get("/v1/auth/me")
+def current_identity(p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+    memberships = db.query(Membership).filter_by(user_id=p.user.id).all()
+    return {
+        "user_id": p.user.id,
+        "email": p.user.email,
+        "display_name": p.user.display_name,
+        "memberships": [{"org_id": item.org_id, "role": item.role.value} for item in memberships],
+    }
 
 
 @app.post("/v1/auth/dev-token")

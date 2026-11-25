@@ -428,3 +428,23 @@ Additional review controls: identity/session locks follow revocation lock order;
 - [ ] Redis integration/load tests, trusted-proxy setup, SSRF egress controls, complete route authorization review, log redaction, secret-history scan and deployment/restore review remain.
 
 **Security release decision remains NO-GO** until identity/MFA and PostgreSQL RLS are implemented and verified. Full evidence is in `docs/PRE_DEPLOY_SECURITY_AUDIT_20_POINT.md`.
+
+
+## 2026-11-25 — Authentik OIDC integration
+
+- [x] Added Authentik OIDC relying-party adapter using Authlib discovery and Authorization Code flow with PKCE S256, state and nonce handling.
+- [x] Production config requires issuer, client ID/secret, independent OIDC state secret, HTTPS callback and frontend URLs.
+- [x] Only verified email + issuer + subject may bind to an already provisioned active Agency OS user; no JIT users, memberships or role grants.
+- [x] Added unique issuer-subject mapping and Alembic migration `r8a2c4e6f901`.
+- [x] Added HttpOnly browser session cookie, short expiry, logout, current identity and no-store CSRF bootstrap endpoint.
+- [x] Added double-submit CSRF and allowlisted Origin enforcement for cookie-authenticated unsafe methods; bearer service calls remain unaffected.
+- [x] Frontend uses credentialed requests and keeps CSRF material in memory only; Authentik login/logout actions added to settings.
+- [x] OIDC identity and CSRF unit tests pass; full backend suite 320 passed, 4 PostgreSQL-only skipped.
+- [ ] Provision Authentik provider/client and configure secrets/callback in deployment. No live OIDC flow has been run.
+- [ ] Enforce/verify `acr`/`amr` MFA assurance for founder/admin; configure phishing-resistant MFA in Authentik.
+- [ ] Add server-side session/token revocation ledger and verify actual Safari same-site cookie behavior.
+- [ ] PostgreSQL 16 RLS/non-owner runtime role and integration tests remain a critical release blocker.
+
+**Release decision remains NO-GO** pending live Authentik/MFA assurance and PostgreSQL RLS verification.
+
+- [x] Replaced Starlette's signed-only OIDC state cookie with AES-GCM authenticated encryption for the PKCE verifier and nonce; tests prove round-trip and reject tampered state cookies.

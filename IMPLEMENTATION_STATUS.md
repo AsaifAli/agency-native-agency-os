@@ -58,7 +58,7 @@
 - The pre-created Managed Agent owns its tools/MCP/skills. The adapter now queries the provider Agent and rejects non-empty tools/MCP/skills or enabled multiagent configuration; actual account configuration and environment sandbox/egress still require live verification.
 - Claude Agent SDK adapter is not implemented.
 - Agency OS MCP server and narrowly scoped OS tools are not implemented; this is the prerequisite for enabling real agent capabilities and OS-mediated side effects.
-- Full OIDC/JWKS/MFA, secure frontend session lifecycle and scoped machine identities are not implemented.
+- Authentik OIDC authorization-code + PKCE, pre-provisioned subject linking, HttpOnly session cookies and CSRF checks are now implemented on the security branch. Live Authentik/JWKS/MFA assurance and session revocation remain unverified; PostgreSQL RLS remains absent.
 - Complete cross-workspace isolation across APIs/workers/files/sessions/caches and PostgreSQL RLS are not validated.
 - Complete Data Protection Gateway, PII redaction and retention/deletion lifecycle are not implemented.
 - Revenue operations remain partial: CRM clients/contacts/leads/opportunities, contact activity history, lead suppression, proposal drafts and founder pricing approval are implemented. Prospect research/enrichment, evidence/provenance capture at scale, deduplication/merge review, governed outreach drafting/dispatch, sender identity, reply/opt-out/bounce event handling, campaign operations and revenue attribution remain incomplete. No external message dispatch is enabled.
@@ -291,3 +291,8 @@ Completed a 20-control source/configuration audit. Findings and exact remediatio
 ## 2026-11-25 — Security hardening continuation
 
 Added production fail-closed configuration checks, Redis-backed request throttling, removal of browser-persisted bearer tokens, required Compose DB password, ESLint 9 flat config, production source-map disablement and constrained successful Next.js build. Validation: backend 298 passed / 4 PostgreSQL-only skipped; npm audit 0 vulnerabilities; frontend lint 0 errors / 7 warnings; frontend build successful with 31 static pages. Security release remains NO-GO because production identity/session/MFA and PostgreSQL 16 RLS/runtime-role isolation are not implemented or verified. See `docs/PRE_DEPLOY_SECURITY_AUDIT_20_POINT.md`.
+
+
+## 2026-11-25 — Authentik OIDC integration
+
+Added Authentik OIDC relying-party integration (Authlib, OIDC discovery, authorization code + PKCE S256, state/nonce), strict pre-provisioned-user linking by verified issuer/subject/email, unique OIDC subject migration, AES-GCM encrypted OIDC transaction cookie, HttpOnly session cookie, double-submit CSRF + Origin checks, CSRF bootstrap/current-user/logout endpoints and frontend credentialed requests. Added `docs/AUTHENTIK_SETUP.md`. Validation: OIDC/CSRF focused tests 35 passed; full backend suite 320 passed / 4 PostgreSQL-only skipped; compileall passed; Alembic single head `r8a2c4e6f901`. Live Authentik configuration, Authentik MFA assurance policy (`acr`), browser topology and PostgreSQL RLS remain unverified. Production remains NO-GO.

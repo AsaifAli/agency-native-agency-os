@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import jwt
-from fastapi import Depends, Header, HTTPException
+from fastapi import Cookie, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 from app.config import settings
 from app.db import get_db
@@ -32,10 +32,15 @@ def _decode_token(token: str) -> str:
     except jwt.PyJWTError:
         raise HTTPException(401, "Invalid or expired bearer token")
 
-def get_principal(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> Principal:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(401, "Bearer token required")
-    email = _decode_token(authorization.removeprefix("Bearer ").strip())
+def get_principal(
+    authorization: str | None = Header(default=None),
+    session_cookie: str | None = Cookie(default=None, alias=settings.oidc_session_cookie_name),
+    db: Session = Depends(get_db),
+) -> Principal:
+    token = authorization.removeprefix("Bearer ").strip() if authorization and authorization.startswith("Bearer ") else session_cookie
+    if not token:
+        raise HTTPException(401, "Authenticated session required")
+    email = _decode_token(token)
     user = db.query(User).filter(User.email == email, User.active.is_(True)).first()
     if not user:
         raise HTTPException(401, "Unknown or inactive user")
@@ -52,11 +57,11 @@ def require_role(role: Role, allowed: set[Role]):
     if role not in allowed:
         raise HTTPException(403, "Insufficient organization role")
 
-def issue_access_token(email: str) -> str:
+def issue_access_token(email: str, ttl_seconds: int = 1800) -> str:
     now = datetime.now(timezone.utc)
     return jwt.encode(
         {"sub": email.lower(), "iss": settings.jwt_issuer, "aud": "agency-os-api",
-         "iat": now, "exp": now + timedelta(minutes=30)},
+         "iat": now, "exp": now + timedelta(seconds=ttl_seconds)},
         settings.jwt_secret, algorithm="HS256"
     )
 

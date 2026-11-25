@@ -19,6 +19,20 @@ class Settings(BaseSettings):
     rate_limit_expensive_per_minute: int = Field(default=10, ge=1, le=1000)
     rate_limit_auth_per_minute: int = Field(default=5, ge=1, le=100)
 
+    # Authentik is the external identity provider; Agency OS remains the
+    # authority for local membership, workspace access and founder grants.
+    oidc_issuer: str = ""
+    oidc_client_id: str = ""
+    oidc_client_secret: str | None = None
+    oidc_state_secret: str = ""
+    oidc_redirect_uri: str = ""
+    oidc_frontend_url: str = ""
+    oidc_required_acr: str = ""
+    oidc_session_cookie_name: str = "agency_os_session"
+    oidc_state_cookie_name: str = "agency_os_oidc_state"
+    oidc_csrf_cookie_name: str = "agency_os_csrf"
+    oidc_session_ttl_seconds: int = Field(default=1800, ge=300, le=43200)
+
     db_connect_timeout_seconds: int = Field(default=5, ge=1, le=60)
     db_pool_timeout_seconds: int = Field(default=5, ge=1, le=300)
     db_statement_timeout_ms: int = Field(default=15000, ge=1, le=300000)
@@ -86,6 +100,14 @@ class Settings(BaseSettings):
                 errors.append("CORS_ORIGINS must contain only explicit HTTPS origins in production")
             if not self.rate_limit_enabled:
                 errors.append("RATE_LIMIT_ENABLED must be true in production")
+            if not (self.oidc_issuer and self.oidc_client_id and self.oidc_client_secret and self.oidc_state_secret and self.oidc_redirect_uri and self.oidc_frontend_url and self.oidc_required_acr):
+                errors.append("OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, OIDC_STATE_SECRET, OIDC_REDIRECT_URI, OIDC_FRONTEND_URL and OIDC_REQUIRED_ACR are required in production")
+            if len(self.oidc_state_secret) < 64:
+                errors.append("OIDC_STATE_SECRET must be a secret-manager supplied value of at least 64 characters")
+            if self.oidc_redirect_uri and (urlparse(self.oidc_redirect_uri).scheme != "https" or not urlparse(self.oidc_redirect_uri).netloc or urlparse(self.oidc_redirect_uri).username or urlparse(self.oidc_redirect_uri).password):
+                errors.append("OIDC_REDIRECT_URI must use HTTPS in production")
+            if self.oidc_frontend_url and (urlparse(self.oidc_frontend_url).scheme != "https" or not urlparse(self.oidc_frontend_url).netloc or urlparse(self.oidc_frontend_url).username or urlparse(self.oidc_frontend_url).password):
+                errors.append("OIDC_FRONTEND_URL must use HTTPS in production")
             if self.claude_managed_agents_enabled:
                 provider_url = urlparse(self.anthropic_api_base_url)
                 if provider_url.scheme != "https" or provider_url.hostname != "api.anthropic.com" or provider_url.username or provider_url.password or provider_url.port not in (None, 443):

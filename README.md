@@ -101,3 +101,10 @@ This repository is a substantial development foundation, **not a production-read
 - [instructions/](instructions/FOUNDER_AUTHORITY.md) — founder authority, security/data and execution/approval instructions.
 - [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) — skill-source provenance and license notes.
 
+
+## Security and identity
+
+- [20-point pre-deploy security audit](docs/PRE_DEPLOY_SECURITY_AUDIT_20_POINT.md)
+- [Authentik OIDC setup and configuration](docs/AUTHENTIK_SETUP.md)
+- [External setup checklist](docs/EXTERNAL_SETUP_CHECKLIST.md)
+- [Production readiness checklist](docs/PRODUCTION_READINESS_CHECKLIST.md)
