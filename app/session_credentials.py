@@ -258,6 +258,9 @@ def authenticate_session_credential(
     hint = db.query(MachineSessionCredential).filter_by(id=credential_id).first()
     if hint is None:
         raise _unauthorized()
+    presented_hash = hashlib.sha256(secret.encode("utf-8")).hexdigest()
+    if not hmac.compare_digest(hint.token_hash, presented_hash):
+        raise _unauthorized()
 
     # Lock order is identity -> session -> credential, matching revocation.
     identity = _lock_identity(
@@ -289,7 +292,7 @@ def authenticate_session_credential(
         or _as_utc(credential.expires_at) <= now
         or not hmac.compare_digest(
             credential.token_hash,
-            hashlib.sha256(secret.encode("utf-8")).hexdigest(),
+            presented_hash,
         )
     ):
         raise _unauthorized()
@@ -407,24 +410,26 @@ def close_agent_session(
     )
     if session is None:
         raise HTTPException(status_code=404, detail="Agent session not found.")
-    if session.status == "active":
+    changed = session.status == "active"
+    if changed:
         session.status = status
         session.ended_at = now
     revoke_session_credentials_for_session(
         db, session, reason_code=reason_code, now=now
     )
-    record_event(
-        db,
-        identity.org_id,
-        None,
-        f"agent_session.{status}",
-        "agent_session",
-        session.id,
-        identity.workspace_id,
-        {
-            "machine_identity_id": identity.id,
-            "reason_code": reason_code[:80],
-        },
-    )
+    if changed:
+        record_event(
+            db,
+            identity.org_id,
+            None,
+            f"agent_session.{status}",
+            "agent_session",
+            session.id,
+            identity.workspace_id,
+            {
+                "machine_identity_id": identity.id,
+                "reason_code": reason_code[:80],
+            },
+        )
     db.commit()
     return session
