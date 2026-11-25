@@ -120,7 +120,7 @@ def test_run_worker_runs_startup_maintenance_and_waits_when_idle(
         session_factory=session_factory,
     )
     assert stop_event.waited_for == [0.5]
-    assert len(sessions) == 3
+    assert len(sessions) == 4
     assert all(session.committed for session in sessions)
 
 
@@ -136,6 +136,7 @@ def test_run_worker_propagates_processor_failure(monkeypatch):
         Mock(return_value=0),
     )
     monkeypatch.setattr(runner, "queue_ready_delegations", Mock(return_value=0))
+    monkeypatch.setattr(runner, "expire_due_agent_sessions", Mock(return_value=0))
     monkeypatch.setattr(
         runner,
         "reconcile_outbox_events",
@@ -225,3 +226,19 @@ def test_outbox_dispatch_runs_after_reconciliation_when_handlers_exist(
     assert sessions[0].committed
     dispatch.assert_called_once()
     assert dispatch.call_args.kwargs["handlers"] is handlers
+
+
+def test_session_maintenance_commits_expiry_batch(monkeypatch):
+    sessions = []
+    expired = Mock(return_value=4)
+
+    def session_factory():
+        session = FakeSession()
+        sessions.append(session)
+        return session
+
+    monkeypatch.setattr(runner, "expire_due_agent_sessions", expired)
+    assert runner._run_session_maintenance(session_factory, batch_size=25) == 4
+    assert len(sessions) == 1
+    assert sessions[0].committed and sessions[0].closed
+    expired.assert_called_once_with(sessions[0], limit=25)
