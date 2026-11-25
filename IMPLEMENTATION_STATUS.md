@@ -140,7 +140,7 @@ Merged work includes PR #17 (contact timeline), PR #19 (leads/opportunities), PR
 - PR #30 remains open. Its DPG boundary has been hardened for sanitized string-only metadata keys, post-redaction key collisions, finite numeric values and total serialized metadata size. Adversarial tests were added but not executed.
 - PR #30 PostgreSQL tenant-integrity migration and cross-tenant tests remain unverified. Do not apply the migration to a populated environment until isolated PostgreSQL 16 upgrade/downgrade and mismatch-preflight tests have been completed.
 - Next implementation priorities are complete tenant isolation, machine identities/session lifecycle, OS Tool Gateway, DPG coverage for files/RAG/tools, durable governed loops, and external integration/recovery evidence.
-- GitHub Actions reruns remain intentionally paused due account billing/runner allocation. No new test pass, deployment or production-readiness claim is made by this documentation update.
+- CI is supplementary; independent test execution is the intended validation path. No new test pass, deployment or production-readiness claim is made by this documentation update.
 
 
 ## Current PR consolidation — 2026-11-25
@@ -148,3 +148,12 @@ Merged work includes PR #17 (contact timeline), PR #19 (leads/opportunities), PR
 - PR #30 is closed as superseded, not merged. Its security changes were ported onto current main in PR #33 (`feature/tenant-dpg-hardening-rebased`), which is 10 commits ahead and 0 behind main at the latest comparison.
 - PR #33 contains tenant integrity constraints/migration, DPG input/output protection, metadata bounds and adversarial tests. It remains open and unverified; do not merge or apply its migration to populated data until isolated PostgreSQL 16 verification and focused/full backend tests are completed.
 - Evidence-backed progress percentages remain unchanged at 52% internal implementation, 49% overall, 20% production verification and 5% external configuration. Unmerged code and unexecuted tests are not counted as completed.
+
+
+## DPG follow-up — 2026-11-25
+- The execution input boundary now bounds the complete serialized request before regex processing, in addition to the metadata-specific bound.
+- Opaque org/workspace/task/agent IDs and provider run identifiers are checked for secrets/PII; identifiers are rejected rather than redacted to preserve correlation integrity.
+- The runtime's external-run-ID persistence callback is wrapped by the DPG, closing a path where a provider could otherwise persist an unfiltered identifier before returning its result.
+- Provider name and external run ID are checked before result persistence; detail text continues to receive PII redaction and secret blocking.
+- Regression tests added for oversized prompts, invalid metadata shape, callback sanitization and sensitive provider identifiers. These tests are authored, not yet executed.
+- Independent testing is not dependent on GitHub Actions. The PostgreSQL migration and full backend suite still need execution evidence.
