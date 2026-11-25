@@ -1,8 +1,8 @@
 # Agency OS Production Readiness Checklist
 
 **Last reviewed:** 2026-11-25  
-**Tracking branch:** `feature/os-tool-gateway`  
-**Current integration PR:** [#35](https://github.com/AsaifAli/agency-native-agency-os/pull/35)  
+**Tracking branch:** `main`  
+**Latest merged milestone:** [PR #35](https://github.com/AsaifAli/agency-native-agency-os/pull/35)  
 **Status:** Active development candidate — not a certification or release approval.
 
 ## Progress snapshot
@@ -227,7 +227,7 @@ A feature is **production-ready** only when implementation, authorization, tenan
 **Full-suite validation boundary:** A full `pytest -q tests` attempt in the isolated candidate timed out after reaching approximately 56% progress. Do not claim a full-suite pass. The focused test modules above completed in separate invocations and passed.
 
 
-## OS Tool Gateway update — 2026-11-25 (stacked PR #35 candidate)
+## OS Tool Gateway update — 2026-11-25 (PR #35 merged)
 
 - [x] Added a versioned, code-owned Tool Registry with typed input/output contracts, risk level, allowed data classes and approval metadata.
 - [x] Added a machine-authenticated Tool Gateway. It requires the exact active identity/session, workspace scope, data-class eligibility, `tools:invoke` and exact per-tool grant.
@@ -257,3 +257,16 @@ A feature is **production-ready** only when implementation, authorization, tenan
 - [x] Python compile check passed; Alembic reports one head `o5c3d9e1f742`.
 - [ ] Session retention/deletion, artifact cleanup, recovery of interrupted long-running tool sessions and PostgreSQL 16 row-lock/FK verification remain outstanding.
 - [ ] Full backend suite on exact remote PR #35 head remains unverified; a previous full-suite attempt in the isolated candidate timed out around 56%.
+
+
+## Main branch merge confirmation — 2026-11-25
+
+- [x] PR #34 merged to main with merge commit `0434b62d580db051b597863f9f14b53848d1752b`: founder-governed machine identities, one-time credentials, workspace-bound sessions, session purpose DPG and authorization primitives.
+- [x] PR #35 merged to main with squash commit `e1369ef928378c132391d4883d485c525849441d`: typed allowlisted Tool Registry, scoped idempotent Tool Gateway, durable invocation records, DPG input/output, success audit and worker-driven session expiry.
+- [x] Current main contains the new Alembic head `o5c3d9e1f742` (PR #34 revision `n4a7c2e91b60` followed by PR #35 revision `o5c3d9e1f742`).
+- [x] Independent focused validation on the isolated reconciled candidate: 136 tests passed across nine modules; compile check and SQLite migration upgrade/downgrade/re-upgrade passed. These are not tests on the exact remote main checkout.
+- [ ] PostgreSQL 16 migration and composite FK/row-lock verification remains outstanding. Do not apply these migrations to populated production databases until verified.
+- [ ] Full backend suite on exact main remains unverified; the isolated candidate full-suite attempt timed out around 56%. No full-suite pass is claimed.
+- [ ] Only `system.health.read` is executable in the Tool Registry. Revenue/Delivery business tools, approvals, budgets, sandboxed provider adapters and async external side effects remain unimplemented.
+- [ ] Session retention/deletion, artifact cleanup, backup/restore and operational recovery remain outstanding.
+- [ ] No production deployment or external provider configuration was performed by these merges.
