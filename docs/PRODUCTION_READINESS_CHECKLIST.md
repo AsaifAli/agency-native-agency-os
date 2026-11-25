@@ -3,7 +3,7 @@
 **Last reviewed:** 2026-11-26
 **Tracking branch:** `main` (PR #45 merged); `security/predeploy-20-point-audit` (PR #47 open draft)
 **Latest merged milestone:** [PR #45](https://github.com/AsaifAli/agency-native-agency-os/pull/45)
-**Status:** PR #45 is merged. PR #47 remains an open draft. The security branch now includes persistent session revocation/rotation/retention, frontend refresh, JWT key overlap, PostgreSQL RLS candidate with separate API/worker/migrator roles, route authorization guards, log redaction and OIDC URL validation. These changes remain unmerged; the original RLS test set has passed against a local isolated PostgreSQL 16 database; the new worker NOBYPASSRLS follow-up migration still requires its own live rerun. Not a certification or release approval.
+**Status:** PR #45 is merged. PR #47 remains an open draft. The security branch now includes persistent session revocation/rotation/retention, frontend refresh, JWT key overlap, PostgreSQL RLS candidate with separate API/worker/migrator roles, route authorization guards, log redaction and OIDC URL validation. These changes remain unmerged; the original RLS test set has passed against a local isolated PostgreSQL 16 database; the worker NOBYPASSRLS follow-up migration and configured PostgreSQL test suite have now passed in the user's isolated local Compose database (22 passed, 0 failed); this is not production validation. Not a certification or release approval.
 
 ## Progress snapshot
 
