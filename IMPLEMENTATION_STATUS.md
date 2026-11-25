@@ -157,3 +157,12 @@ Merged work includes PR #17 (contact timeline), PR #19 (leads/opportunities), PR
 - Provider name and external run ID are checked before result persistence; detail text continues to receive PII redaction and secret blocking.
 - Regression tests added for oversized prompts, invalid metadata shape, callback sanitization and sensitive provider identifiers. These tests are authored, not yet executed.
 - Independent testing is not dependent on GitHub Actions. The PostgreSQL migration and full backend suite still need execution evidence.
+
+
+## PR #33 independent validation update — 2026-11-25
+- PR #33 now includes CRM and outreach tenant composite constraints, preflight checks, DPG request/result/callback protection, a reusable decoded-payload boundary, and worker-level audit/fail-closed tests.
+- Isolated local validation copy: 81 DPG + worker-service tests passed; 5 API, 11 action-policy, 5 approval, 12 execution-service and 3 outreach API tests passed; Python compile check passed.
+- SQLite migration rehearsal from `l2e8a0b6d549` successfully upgraded, downgraded and re-upgraded to `m3f9c2a7e514`.
+- A cross-tenant contact/client mismatch caused preflight to abort while Alembic remained on the parent revision. All 16 deliberate cross-scope insert attempts were rejected by the migrated SQLite schema.
+- PostgreSQL 16 verification and full backend-suite execution on the exact remote PR head remain pending. The current local evidence does not replace those checks.
+- PR #33 remains open; no deployment or production-readiness claim is made.
