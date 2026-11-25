@@ -208,3 +208,20 @@ def test_protect_execution_request_requires_nonempty_scope_identifiers():
     with pytest.raises(DataProtectionBlocked) as error:
         protect_execution_request(_request(agent_id=None))
     assert error.value.code == "INVALID_RUNTIME_IDENTIFIER"
+
+
+def test_protect_execution_request_rejects_invalid_request_policy_types():
+    with pytest.raises(DataProtectionBlocked) as invalid_request:
+        protect_execution_request(None)
+    assert invalid_request.value.code == "INVALID_EXECUTION_REQUEST"
+
+    with pytest.raises(DataProtectionBlocked) as invalid_class:
+        protect_execution_request(_request(data_class="public"))
+    assert invalid_class.value.code == "INVALID_EXECUTION_POLICY"
+
+    with pytest.raises(DataProtectionBlocked) as invalid_authorization:
+        protect_execution_request(_request(
+            data_class=DataClass.commercial,
+            client_authorized="true",
+        ))
+    assert invalid_authorization.value.code == "INVALID_EXECUTION_POLICY"
