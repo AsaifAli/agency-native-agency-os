@@ -324,3 +324,19 @@ A feature is **production-ready** only when implementation, authorization, tenan
 - [ ] First pilot is limited to `system.health.read` and public-only `revenue.lead.research.capture`; no CRM promotion, contacts, outbound dispatch, payments or production actions.
 
 **Current verified boundary:** The main branch has a REST Tool Gateway, not an MCP server. The Managed Agents adapter intentionally rejects provider MCP/tools. This continuation adds the design only; no provider tools have been enabled and no runtime code or production configuration has changed.
+
+
+## 2026-11-25 — Managed Agents OS custom-tool execution
+
+- [x] Shared OS tool invocation service is implemented on `feature/managed-agent-os-tool-execution` and reused by the HTTP gateway and worker callback.
+- [x] Worker callback binds tool use to the current execution, worker attempt and unexpired lease.
+- [x] Provider Agent is revalidated on new and resumed attempts; only exact OS-registry custom-tool definitions are allowed.
+- [x] Tool calls use OS machine identity/session grants, DPG, schema validation, idempotency, persisted invocation results and audit.
+- [x] Custom tool call/result handling is bounded; native provider tools, MCP, skills and multiagent features remain disabled.
+- [ ] Run tests against the exact remote branch and complete the full backend suite.
+- [ ] Verify migration `q7f2b9d4c631` on PostgreSQL 16, including upgrade/downgrade and populated-schema checks.
+- [ ] Configure the exact custom-tool definitions on the pre-created Claude Managed Agent and provision an agent machine identity with least-privilege scopes.
+- [ ] Run synthetic end-to-end tests against the live Managed Agents provider; verify execution, tool authorization, persistence, replay, denial audit and recovery.
+- [ ] Complete provider session ambiguous-create reconciliation and production recovery before unattended rollout.
+
+**Evidence boundary:** 45 machine identity/Managed Agents tests and 6 selected worker processor tests passed in an isolated candidate copy; compileall passed. These are not exact-branch or PostgreSQL 16 results. Full suite and live provider compatibility are not verified.
