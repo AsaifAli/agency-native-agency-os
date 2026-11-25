@@ -5,7 +5,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.auth import get_principal, has_founder_authority, require_membership, require_role, require_founder_authority, Principal
+from app.auth import get_principal, has_founder_authority, require_membership, require_role, require_founder_authority, require_workspace_access_from_context, Principal
 from app.db import get_db
 from app.models import Role
 from app.audit import record_event
