@@ -31,9 +31,7 @@ def list_lead_research_drafts(
     principal: Principal = Depends(get_principal),
 ):
     require_founder_authority(db, org_id, principal.user.id)
-    workspace = db.query(Workspace).filter_by(id=workspace_id, org_id=org_id).first()
-    if workspace is None:
-        raise HTTPException(404, "Workspace not found")
+    require_workspace_access_from_context(org_id, workspace_id, db)
     rows = (
         db.query(LeadResearchDraft)
         .filter_by(org_id=org_id, workspace_id=workspace_id, status=status)
@@ -73,6 +71,7 @@ def review_lead_research_draft(
     principal: Principal = Depends(get_principal),
 ):
     require_founder_authority(db, org_id, principal.user.id)
+    require_workspace_access_from_context(org_id, workspace_id, db)
     draft = db.query(LeadResearchDraft).filter_by(
         id=draft_id, org_id=org_id, workspace_id=workspace_id
     ).with_for_update().first()
