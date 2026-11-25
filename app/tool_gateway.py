@@ -186,6 +186,7 @@ def invoke_registered_tool(
                 tool_key=spec.key, reason_code="IDEMPOTENCY_CONFLICT",
                 status_code=409, message="Tool invocation was denied by OS policy.",
             )
+        db.commit()
         return {
             "id": existing.id,
             "tool_key": existing.tool_key,
@@ -194,7 +195,6 @@ def invoke_registered_tool(
             "result": existing.result,
             "replayed": True,
         }
-        db.commit()
 
     try:
         raw_result = execute_tool(
