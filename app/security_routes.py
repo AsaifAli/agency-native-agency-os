@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 from app.auth import Principal, get_principal, require_founder_authority
 from app.audit import record_event
 from app.db import get_db
-from app.data_protection import DataProtectionBlocked, sanitize_text
 from app.machine_identity import (
     ALLOWED_DATA_CLASSES, ALLOWED_SUBJECT_TYPES, MachinePrincipal,
     create_agent_session, get_machine_principal, issue_machine_credential,
@@ -142,18 +141,9 @@ def create_machine_session(
     body: MachineSessionCreate, db: Session = Depends(get_db),
     principal: MachinePrincipal = Depends(get_machine_principal),
 ):
-    try:
-        safe_purpose, redaction_counts = sanitize_text(body.purpose.strip())
-    except DataProtectionBlocked as exc:
-        raise HTTPException(422, "Session purpose blocked by data-protection policy") from exc
-    session = create_agent_session(db, principal, purpose=safe_purpose,
-                                   data_class=body.data_class, ttl_seconds=body.ttl_seconds)
-    record_event(
-        db, session.org_id, None, "agent_session.created",
-        "agent_session", session.id, session.workspace_id,
-        {"machine_identity_id": session.machine_identity_id,
-         "data_class": session.data_class,
-         "purpose_redaction_counts": redaction_counts},
+    session = create_agent_session(
+        db, principal, purpose=body.purpose,
+        data_class=body.data_class, ttl_seconds=body.ttl_seconds,
     )
     db.commit()
     return {"id": session.id, "org_id": session.org_id, "workspace_id": session.workspace_id,
