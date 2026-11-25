@@ -53,7 +53,7 @@ def main() -> int:
                 grant.active = True
                 grant.grant_source = "cli_provisioning"
             db.commit()
-            print(f"Founder Authority granted: org={org.id} user={email}")
+            print(f"Founder Authority granted: org={org.id} user_id={user.id}")
             return 0
 
         if grant is None or not grant.active:
@@ -61,7 +61,7 @@ def main() -> int:
             return 0
         grant.active = False
         db.commit()
-        print(f"Founder Authority revoked: org={org.id} user={email}")
+        print(f"Founder Authority revoked: org={org.id} user_id={user.id}")
         return 0
     except Exception:
         db.rollback()

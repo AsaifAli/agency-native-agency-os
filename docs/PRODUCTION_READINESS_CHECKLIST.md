@@ -479,7 +479,7 @@ Additional review controls: identity/session locks follow revocation lock order;
 - [x] Logout revokes only the current session, records per-organization audit events in the same database transaction and remains idempotent; copied cookie and bearer-token replay are rejected.
 - [x] Added `POST /v1/auth/refresh` to atomically lock/revoke the old session, issue a replacement, record the replacement ID in audit and commit before returning the new HttpOnly cookie.
 - [x] TDD regression suite: **11 focused browser-session tests passed**, including API logout/replay, bearer replay, inactive user, persistent expiry, digest-only storage, repeated revocation and refresh rotation.
-- [x] Full backend suite on this worktree: **332 passed, 4 PostgreSQL-only skipped**.
+- [x] Full backend suite before the logging hardening update: **332 passed, 4 PostgreSQL-only skipped**.
 - [x] New Alembic revision `s9b5d7f1a204` is the single migration head; isolated upgrade from `r8a2c4e6f901` to the new revision passed on SQLite and verified table columns/indexes.
 - [ ] Full historical SQLite migration rehearsal still stops at pre-existing revision `eb75d47bfc63` (unsupported SQLite ALTER constraint operation); this does not verify the new migration on PostgreSQL. Run PostgreSQL 16 populated-schema upgrade/downgrade before merge.
 - [ ] Wire proactive refresh into the frontend client and verify it under the actual browser topology; PostgreSQL row-lock concurrency testing for simultaneous refresh remains outstanding.
@@ -495,3 +495,13 @@ Additional review controls: identity/session locks follow revocation lock order;
 - [ ] This structural guard does not prove resource-level authorization. Complete the semantic route-by-route organization/workspace/role matrix and negative cross-tenant tests before production.
 
 **Evidence boundary:** source was cloned from public branch `security/predeploy-20-point-audit` at `730b10fb00206afbd02f6f49e17ad3ba8e431a95`. Tests ran in Upstash Box `certain-whale-42014` on Python 3.13.18. Changes were published to the existing draft PR #47 branch; PR #47 remains open/draft and unmerged. No GitHub Actions workflow was triggered.
+
+
+## 2026-11-25 — Central log redaction hardening
+
+- [x] Added `app/log_sanitization.py` to sanitize rendered log messages/arguments, exception tracebacks, stack information and structured `extra` fields before handlers format records. Secret-bearing values replace the containing message/field; supported PII is redacted using the existing deterministic data-protection patterns.
+- [x] Installed the redaction boundary for API logs and worker process logs.
+- [x] Removed founder email addresses from bootstrap and Founder Authority CLI success output; commands now report opaque user IDs.
+- [x] Added 3 focused tests covering email/phone redaction, API-key and bearer-secret replacement, exception traceback scrubbing and structured-extra redaction.
+- [x] Full backend suite after the update: **335 passed, 4 PostgreSQL-only skipped**; compileall and `git diff --check` passed.
+- [ ] Verify deployed Uvicorn/worker logging configuration, third-party/provider/proxy logs, log retention and alerting. This code cannot sanitize logs emitted outside the configured Python process.

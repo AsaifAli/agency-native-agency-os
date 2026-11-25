@@ -7,6 +7,7 @@ import uuid
 
 from app.db import engine
 from app.worker.runner import run_worker
+from app.log_sanitization import configure_log_redaction
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,7 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    configure_log_redaction()
 
     stop_event = threading.Event()
 

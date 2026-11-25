@@ -22,7 +22,7 @@ def main():
         db.add(FounderAuthority(org_id=org.id, user_id=user.id, grant_source="bootstrap"))
         db.add(Workspace(org_id=org.id, name="Main Workspace"))
         db.commit()
-        print(f"Created org_id={org.id} user={email}")
+        print(f"Created org_id={org.id} user_id={user.id}")
     finally:
         db.close()
 

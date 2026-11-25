@@ -61,6 +61,9 @@ from app.browser_sessions import (
     issue_browser_session, authenticate_browser_session, revoke_browser_session,
     rotate_browser_session,
 )
+from app.log_sanitization import configure_log_redaction
+
+configure_log_redaction()
 from app.security_models import BrowserSession  # noqa: F401 — register browser session metadata
 from app.policy import assert_managed_agents_eligible
 from app.action_policy import MANDATORY_APPROVAL_ACTIONS
