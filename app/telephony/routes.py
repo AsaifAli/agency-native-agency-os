@@ -6,7 +6,7 @@ a provider adapter and approval/consent enforcement must be configured separatel
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from app.auth import get_principal, require_membership, require_role, Principal
+from app.auth import get_principal, require_membership, require_role, require_workspace_access_from_context, Principal
 from app.db import get_db
 from app.models import Role
 from app.domain_models import Lead, Contact
@@ -19,9 +19,7 @@ WRITERS = {Role.owner, Role.admin, Role.operator}
 
 
 def _scope(db: Session, org_id: str, workspace_id: str):
-    from app.models import Workspace
-    if not db.query(Workspace.id).filter_by(id=workspace_id, org_id=org_id).first():
-        raise HTTPException(404, "Workspace not found")
+    require_workspace_access_from_context(org_id, workspace_id, db)
 
 
 def _write(db: Session, org_id: str, workspace_id: str, principal: Principal):
