@@ -64,6 +64,7 @@ def invoke_registered_tool(
     payload: dict,
     idempotency_key: str,
     max_calls_per_session: int = 50,
+    allowed_tool_keys: set[str] | None = None,
 ) -> dict:
     """Authorize, protect, validate, execute and persist a registered tool call."""
     identity = principal.identity
@@ -82,6 +83,12 @@ def invoke_registered_tool(
             db, org_id=org_id, workspace_id=workspace_id, identity_id=identity_id,
             tool_key=tool_key, reason_code="TOOL_NOT_REGISTERED",
             status_code=404, message="Tool invocation was denied by OS policy.",
+        )
+    if allowed_tool_keys is not None and spec.key not in allowed_tool_keys:
+        _deny(
+            db, org_id=org_id, workspace_id=workspace_id, identity_id=identity_id,
+            tool_key=spec.key, reason_code="MCP_TOOL_NOT_ENABLED",
+            status_code=403, message="Tool invocation was denied by OS policy.",
         )
     if spec.requires_approval:
         _deny(
