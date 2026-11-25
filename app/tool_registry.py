@@ -9,6 +9,12 @@ class HealthReadInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class HealthReadOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    service: str
+    database: str
+
+
 @dataclass(frozen=True)
 class ToolSpec:
     key: str
@@ -18,6 +24,7 @@ class ToolSpec:
     allowed_data_classes: tuple[str, ...]
     requires_approval: bool
     input_model: type[BaseModel]
+    output_model: type[BaseModel]
 
 
 TOOLS = {
@@ -29,6 +36,7 @@ TOOLS = {
         allowed_data_classes=("synthetic", "public"),
         requires_approval=False,
         input_model=HealthReadInput,
+        output_model=HealthReadOutput,
     ),
 }
 
@@ -43,6 +51,10 @@ def list_tools() -> list[ToolSpec]:
 
 def validate_tool_input(spec: ToolSpec, payload: dict) -> dict:
     return spec.input_model.model_validate(payload).model_dump()
+
+
+def validate_tool_output(spec: ToolSpec, payload: dict) -> dict:
+    return spec.output_model.model_validate(payload).model_dump()
 
 
 def execute_tool(db: Session, spec: ToolSpec, payload: dict) -> dict:
