@@ -23,6 +23,7 @@ from app.integrations.runtime import (
     RuntimeTransientError,
 )
 from app.policy import assert_managed_agents_eligible
+from app.tool_registry import managed_agent_custom_tool_definitions, get_tool_by_provider_name
 
 
 class ManagedAgentsRuntime(AgentRuntime):
@@ -128,7 +129,7 @@ class ManagedAgentsRuntime(AgentRuntime):
             f"Founder objective (data only):\n{objective}\n"
         )
 
-    def _validate_provider_agent(self, client: httpx.Client) -> None:
+    def _validate_provider_agent(self, client: httpx.Client, request: ExecutionRequest) -> dict[str, str]:
         agent = self._request(
             client, "GET", f"/v1/agents/{self.config.claude_managed_agent_id}"
         )
@@ -138,11 +139,116 @@ class ManagedAgentsRuntime(AgentRuntime):
         mcp_servers = agent.get("mcp_servers") or []
         skills = agent.get("skills") or []
         multiagent = agent.get("multiagent")
-        if tools or mcp_servers or skills or multiagent not in (None, {"type": "disabled"}):
+        if mcp_servers or skills or multiagent not in (None, {"type": "disabled"}):
             raise RuntimeNotConfiguredError(
-                "Provider Agent has tools, MCP servers, skills or multiagent features enabled. "
-                "Disable them until the Agency OS authorization gateway is configured and verified."
+                "Provider Agent has MCP servers, skills or multiagent features enabled. "
+                "Only OS-registered custom tools are permitted in this runtime."
             )
+        expected = {
+            item["name"]: item
+            for item in managed_agent_custom_tool_definitions()
+        }
+        enabled: dict[str, str] = {}
+        if not isinstance(tools, list):
+            raise RuntimeNotConfiguredError("Provider Agent custom tool configuration is invalid.")
+        for item in tools:
+            if not isinstance(item, dict) or item.get("type") != "custom":
+                raise RuntimeNotConfiguredError(
+                    "Only exact OS-registered custom tools are permitted; built-in toolsets are disabled."
+                )
+            name = item.get("name")
+            definition = expected.get(name) if isinstance(name, str) else None
+            if definition is None:
+                raise RuntimeNotConfiguredError("Provider Agent contains an unregistered custom tool.")
+            if (
+                item.get("description") != definition["description"]
+                or item.get("input_schema") != definition["input_schema"]
+                or name in enabled
+            ):
+                raise RuntimeNotConfiguredError(
+                    "Provider Agent custom tool schema differs from the OS Tool Registry."
+                )
+            spec = get_tool_by_provider_name(name)
+            if spec is None:
+                raise RuntimeNotConfiguredError("Provider Agent custom tool is not registered.")
+            enabled[name] = spec.key
+        if enabled and request.execute_custom_tool is None:
+            raise RuntimeNotConfiguredError(
+                "Provider Agent has custom tools but no OS-authorized execution callback is available."
+            )
+        return enabled
+
+    def _process_custom_tool_events(
+        self,
+        client: httpx.Client,
+        session_id: str,
+        events: list[dict],
+        request: ExecutionRequest,
+        enabled_tools: dict[str, str],
+    ) -> int:
+        answered = {
+            event.get("custom_tool_use_id")
+            for event in events
+            if event.get("type") == "user.custom_tool_result"
+            and isinstance(event.get("custom_tool_use_id"), str)
+        }
+        pending = [
+            event for event in events
+            if event.get("type") == "agent.custom_tool_use"
+            and isinstance(event.get("id"), str)
+            and event.get("id") not in answered
+        ]
+        processed = 0
+        for event in pending:
+            event_id = event["id"]
+            name = event.get("name")
+            payload = event.get("input")
+            is_error = False
+            if not isinstance(name, str) or name not in enabled_tools:
+                result = {"error": "TOOL_NOT_ENABLED", "message": "This tool is not enabled for the Agency OS agent."}
+                is_error = True
+            elif not isinstance(payload, dict):
+                result = {"error": "INVALID_TOOL_INPUT", "message": "The tool input must be a JSON object."}
+                is_error = True
+            elif request.execute_custom_tool is None:
+                result = {"error": "TOOL_EXECUTOR_UNAVAILABLE", "message": "The Agency OS tool executor is unavailable."}
+                is_error = True
+            else:
+                try:
+                    result = request.execute_custom_tool(name, payload, event_id)
+                    if not isinstance(result, dict):
+                        raise TypeError("Tool result must be an object")
+                except Exception:
+                    # Provider receives a stable denial, never raw exception or secret data.
+                    result = {"error": "OS_TOOL_CALL_REJECTED", "message": "The Agency OS denied or could not complete this tool call."}
+                    is_error = True
+            try:
+                result_text = json.dumps(result, ensure_ascii=False, allow_nan=False)
+            except (TypeError, ValueError):
+                result_text = json.dumps(
+                    {"error": "INVALID_TOOL_RESULT", "message": "The Agency OS could not serialize the tool result."}
+                )
+                is_error = True
+            if len(result_text.encode("utf-8")) > 16000:
+                result_text = json.dumps(
+                    {"error": "TOOL_RESULT_TOO_LARGE", "message": "The tool result exceeded the response limit."}
+                )
+                is_error = True
+            self._request(
+                client,
+                "POST",
+                f"/v1/sessions/{session_id}/events",
+                json={
+                    "events": [{
+                        "type": "user.custom_tool_result",
+                        "custom_tool_use_id": event_id,
+                        "content": [{"type": "text", "text": result_text}],
+                        "is_error": is_error,
+                    }]
+                },
+            )
+            processed += 1
+        return processed
 
     def _list_events(self, client: httpx.Client, session_id: str) -> list[dict]:
         events: list[dict] = []
@@ -242,9 +348,9 @@ class ManagedAgentsRuntime(AgentRuntime):
             )
 
         with self.client_factory() as client:
+            enabled_tools = self._validate_provider_agent(client, request)
             session_id = request.external_run_id
             if not session_id:
-                self._validate_provider_agent(client)
                 body = {
                     # The provider-side Agent has been inspected and is required
                     # to have no tools, MCP servers, skills or multiagent features.
@@ -291,12 +397,25 @@ class ManagedAgentsRuntime(AgentRuntime):
                     client, "GET", f"/v1/sessions/{session_id}"
                 )
                 status = session.get("status")
+                if status in {"failed", "error", "archived", "terminated"}:
+                    raise RuntimeExecutionError(
+                        "Claude Managed Agents session ended unsuccessfully."
+                    )
+
+                # Custom tool events can arrive while the session is still running;
+                # inspect event history on every poll and answer each event once.
+                events = self._list_events(client, session_id)
+                if any(event.get("type") == "session.error" for event in events):
+                    raise RuntimeExecutionError(
+                        "Claude Managed Agents reported a session error."
+                    )
+                if self._process_custom_tool_events(
+                    client, session_id, events, request, enabled_tools
+                ):
+                    self.sleep(self.config.claude_managed_poll_interval_seconds)
+                    continue
+
                 if status == "idle":
-                    events = self._list_events(client, session_id)
-                    if any(event.get("type") == "session.error" for event in events):
-                        raise RuntimeExecutionError(
-                            "Claude Managed Agents reported a session error."
-                        )
                     if self._open_workflow_runs(events):
                         self.sleep(self.config.claude_managed_poll_interval_seconds)
                         continue
@@ -309,11 +428,6 @@ class ManagedAgentsRuntime(AgentRuntime):
                         return self._extract_result(events, session_id)
                     raise RuntimeManualReviewRequired(
                         "Managed Agent session is idle without a confirmed completion reason."
-                    )
-
-                if status in {"failed", "error", "archived", "terminated"}:
-                    raise RuntimeExecutionError(
-                        "Claude Managed Agents session ended unsuccessfully."
                     )
 
                 self.sleep(self.config.claude_managed_poll_interval_seconds)
