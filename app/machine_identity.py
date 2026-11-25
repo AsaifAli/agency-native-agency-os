@@ -2,6 +2,7 @@
 from __future__ import annotations
 import hashlib
 import hmac
+import re
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -37,10 +38,10 @@ def authenticate_machine_token(authorization: str | None, db: Session) -> Machin
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "Machine bearer token required")
     token = authorization.removeprefix("Bearer ").strip()
-    if not token.startswith(TOKEN_PREFIX) or "." not in token:
+    if len(token) > 512 or not token.startswith(TOKEN_PREFIX) or "." not in token:
         raise HTTPException(401, "Invalid machine credential")
     identity_id, secret = token[len(TOKEN_PREFIX):].split(".", 1)
-    if not identity_id or not secret or len(secret) > 256:
+    if not identity_id or len(identity_id) > 36 or not secret or len(secret) > 256:
         raise HTTPException(401, "Invalid machine credential")
     identity = db.query(MachineIdentity).filter(MachineIdentity.id == identity_id).first()
     if identity is None or identity.revoked_at is not None:
@@ -55,12 +56,22 @@ def authenticate_machine_token(authorization: str | None, db: Session) -> Machin
 def get_machine_principal(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> MachinePrincipal:
     return authenticate_machine_token(authorization, db)
 
-def create_agent_session(db: Session, principal: MachinePrincipal, *, purpose: str, data_class: str, ttl_seconds: int) -> AgentSession:
-    identity = principal.identity
-    now = _utcnow()
-    identity_expires_at = _as_utc(identity.expires_at)
-    if identity.revoked_at is not None or identity_expires_at <= now:
+def _lock_active_identity(db: Session, principal: MachinePrincipal) -> MachineIdentity:
+    identity = db.query(MachineIdentity).filter_by(
+        id=principal.identity.id,
+        org_id=principal.identity.org_id,
+        workspace_id=principal.identity.workspace_id,
+    ).with_for_update().first()
+    if identity is None or identity.revoked_at is not None or _as_utc(identity.expires_at) <= _utcnow():
         raise HTTPException(401, "Machine credential is no longer active")
+    return identity
+
+def create_agent_session(db: Session, principal: MachinePrincipal, *, purpose: str, data_class: str, ttl_seconds: int) -> AgentSession:
+    # Serialize with founder revocation so a session cannot be created concurrently
+    # after the identity has been revoked.
+    identity = _lock_active_identity(db, principal)
+    now = _utcnow()
+    identity_expiry = _as_utc(identity.expires_at)
     if "sessions:create" not in identity.scopes:
         raise HTTPException(403, "Machine identity cannot create sessions")
     if data_class not in ALLOWED_DATA_CLASSES:
@@ -71,10 +82,15 @@ def create_agent_session(db: Session, principal: MachinePrincipal, *, purpose: s
         raise HTTPException(422, "Session TTL must be between 60 and 86400 seconds")
     if not purpose or len(purpose.strip()) > 240:
         raise HTTPException(422, "A session purpose of at most 240 characters is required")
-    expires_at = min(now + timedelta(seconds=ttl_seconds), identity_expires_at)
+    expires_at = min(now + timedelta(seconds=ttl_seconds), identity_expiry)
     if expires_at <= now:
         raise HTTPException(401, "Machine credential is expired")
-    session = AgentSession(org_id=identity.org_id, workspace_id=identity.workspace_id, machine_identity_id=identity.id, purpose=purpose.strip(), data_class=data_class, status="active", created_at=now, last_seen_at=now, expires_at=expires_at)
+    session = AgentSession(
+        org_id=identity.org_id, workspace_id=identity.workspace_id,
+        machine_identity_id=identity.id, purpose=purpose.strip(),
+        data_class=data_class, status="active", created_at=now,
+        last_seen_at=now, expires_at=expires_at,
+    )
     db.add(session)
     db.flush()
     return session
@@ -85,22 +101,22 @@ def authorize_tool_session(db: Session, principal: MachinePrincipal, *, session_
     This does not execute tools. A gateway adapter must call it before dispatch
     and persist its invocation/result/audit lifecycle.
     """
-    identity = principal.identity
+    identity = _lock_active_identity(db, principal)
     now = _utcnow()
-    if identity.revoked_at is not None or _as_utc(identity.expires_at) <= now:
-        raise HTTPException(401, "Machine credential is no longer active")
-    session = db.query(AgentSession).filter_by(id=session_id, org_id=identity.org_id, workspace_id=identity.workspace_id, machine_identity_id=identity.id).with_for_update().first()
+    session = db.query(AgentSession).filter_by(
+        id=session_id, org_id=identity.org_id,
+        workspace_id=identity.workspace_id, machine_identity_id=identity.id,
+    ).with_for_update().first()
     if session is None:
         raise HTTPException(404, "Session not found")
     if session.status != "active" or _as_utc(session.expires_at) <= now:
-        if session.status == "active" and _as_utc(session.expires_at) <= now:
-            session.status = "expired"
-            session.ended_at = now
         raise HTTPException(409, "Session is not active")
     if data_class not in ALLOWED_DATA_CLASSES:
         raise HTTPException(422, "Unsupported data class")
     if data_class != session.data_class or data_class not in identity.allowed_data_classes:
         raise HTTPException(403, "Tool data class is outside the session grant")
+    if not isinstance(tool_key, str) or not re.fullmatch(r"[a-z0-9_.-]{1,100}", tool_key):
+        raise HTTPException(422, "Invalid tool key")
     if "tools:invoke" not in identity.scopes or f"tool:{tool_key}" not in identity.scopes:
         raise HTTPException(403, "Tool is not granted to this machine identity")
     session.last_seen_at = now
