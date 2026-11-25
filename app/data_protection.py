@@ -193,6 +193,10 @@ def protect_execution_request(
     request: ExecutionRequest,
 ) -> tuple[ExecutionRequest, DataProtectionReport]:
     """Return a sanitized copy; never mutate or persist raw provider payloads."""
+    if not isinstance(request, ExecutionRequest):
+        raise DataProtectionBlocked("INVALID_EXECUTION_REQUEST")
+    if not isinstance(request.data_class, DataClass) or not isinstance(request.client_authorized, bool):
+        raise DataProtectionBlocked("INVALID_EXECUTION_POLICY")
     if request.data_class in {DataClass.confidential, DataClass.regulated}:
         raise DataProtectionBlocked("DATA_CLASS_NOT_ELIGIBLE")
     if request.data_class == DataClass.commercial and not request.client_authorized:
