@@ -16,6 +16,48 @@ depends_on = None
 
 def _assert_no_orphaned_scope_relationships() -> None:
     checks = {
+        "clients.workspace": """
+            SELECT count(*) FROM clients c
+            WHERE NOT EXISTS (
+                SELECT 1 FROM workspaces w
+                WHERE w.org_id = c.org_id AND w.id = c.workspace_id
+            )
+        """,
+        "contacts.client": """
+            SELECT count(*) FROM contacts c
+            WHERE c.client_id IS NOT NULL AND NOT EXISTS (
+                SELECT 1 FROM clients cl
+                WHERE cl.org_id = c.org_id AND cl.workspace_id = c.workspace_id
+                  AND cl.id = c.client_id
+            )
+        """,
+        "leads.client": """
+            SELECT count(*) FROM leads l
+            WHERE l.client_id IS NOT NULL AND NOT EXISTS (
+                SELECT 1 FROM clients c
+                WHERE c.org_id = l.org_id AND c.workspace_id = l.workspace_id
+                  AND c.id = l.client_id
+            )
+        """,
+        "leads.contact": """
+            SELECT count(*) FROM leads l
+            WHERE l.contact_id IS NOT NULL AND NOT EXISTS (
+                SELECT 1 FROM contacts c
+                WHERE c.org_id = l.org_id AND c.workspace_id = l.workspace_id
+                  AND c.id = l.contact_id
+            )
+        """,
+        "contact_activities.scope": """
+            SELECT count(*) FROM contact_activities a
+            WHERE NOT EXISTS (
+                SELECT 1 FROM workspaces w
+                WHERE w.org_id = a.org_id AND w.id = a.workspace_id
+            ) OR NOT EXISTS (
+                SELECT 1 FROM contacts c
+                WHERE c.org_id = a.org_id AND c.workspace_id = a.workspace_id
+                  AND c.id = a.contact_id
+            )
+        """,
         "contacts.workspace": """
             SELECT count(*) FROM contacts c
             WHERE NOT EXISTS (
@@ -129,17 +171,48 @@ def upgrade() -> None:
 
     with op.batch_alter_table("workspaces") as batch:
         batch.create_unique_constraint("uq_workspaces_org_id", ["org_id", "id"])
+    with op.batch_alter_table("clients") as batch:
+        batch.create_unique_constraint("uq_clients_scope_id", ["org_id", "workspace_id", "id"])
+        batch.create_foreign_key(
+            "fk_clients_workspace_scope", "workspaces",
+            ["org_id", "workspace_id"], ["org_id", "id"], ondelete="CASCADE",
+        )
     with op.batch_alter_table("contacts") as batch:
         batch.create_unique_constraint("uq_contacts_scope_id", ["org_id", "workspace_id", "id"])
         batch.create_foreign_key(
             "fk_contacts_workspace_scope", "workspaces",
             ["org_id", "workspace_id"], ["org_id", "id"], ondelete="CASCADE",
         )
+        batch.create_foreign_key(
+            "fk_contacts_client_scope", "clients",
+            ["org_id", "workspace_id", "client_id"],
+            ["org_id", "workspace_id", "id"], ondelete="RESTRICT",
+        )
     with op.batch_alter_table("leads") as batch:
         batch.create_unique_constraint("uq_leads_scope_id", ["org_id", "workspace_id", "id"])
         batch.create_foreign_key(
             "fk_leads_workspace_scope", "workspaces",
             ["org_id", "workspace_id"], ["org_id", "id"], ondelete="CASCADE",
+        )
+        batch.create_foreign_key(
+            "fk_leads_client_scope", "clients",
+            ["org_id", "workspace_id", "client_id"],
+            ["org_id", "workspace_id", "id"], ondelete="RESTRICT",
+        )
+        batch.create_foreign_key(
+            "fk_leads_contact_scope", "contacts",
+            ["org_id", "workspace_id", "contact_id"],
+            ["org_id", "workspace_id", "id"], ondelete="RESTRICT",
+        )
+    with op.batch_alter_table("contact_activities") as batch:
+        batch.create_foreign_key(
+            "fk_contact_activities_workspace_scope", "workspaces",
+            ["org_id", "workspace_id"], ["org_id", "id"], ondelete="CASCADE",
+        )
+        batch.create_foreign_key(
+            "fk_contact_activities_contact_scope", "contacts",
+            ["org_id", "workspace_id", "contact_id"],
+            ["org_id", "workspace_id", "id"], ondelete="CASCADE",
         )
     with op.batch_alter_table("approvals") as batch:
         batch.create_unique_constraint("uq_approvals_scope_id", ["org_id", "workspace_id", "id"])
@@ -242,11 +315,20 @@ def downgrade() -> None:
     with op.batch_alter_table("approvals") as batch:
         batch.drop_constraint("fk_approvals_workspace_scope", type_="foreignkey")
         batch.drop_constraint("uq_approvals_scope_id", type_="unique")
+    with op.batch_alter_table("contact_activities") as batch:
+        batch.drop_constraint("fk_contact_activities_contact_scope", type_="foreignkey")
+        batch.drop_constraint("fk_contact_activities_workspace_scope", type_="foreignkey")
     with op.batch_alter_table("leads") as batch:
+        batch.drop_constraint("fk_leads_contact_scope", type_="foreignkey")
+        batch.drop_constraint("fk_leads_client_scope", type_="foreignkey")
         batch.drop_constraint("fk_leads_workspace_scope", type_="foreignkey")
         batch.drop_constraint("uq_leads_scope_id", type_="unique")
     with op.batch_alter_table("contacts") as batch:
+        batch.drop_constraint("fk_contacts_client_scope", type_="foreignkey")
         batch.drop_constraint("fk_contacts_workspace_scope", type_="foreignkey")
         batch.drop_constraint("uq_contacts_scope_id", type_="unique")
+    with op.batch_alter_table("clients") as batch:
+        batch.drop_constraint("fk_clients_workspace_scope", type_="foreignkey")
+        batch.drop_constraint("uq_clients_scope_id", type_="unique")
     with op.batch_alter_table("workspaces") as batch:
         batch.drop_constraint("uq_workspaces_org_id", type_="unique")
