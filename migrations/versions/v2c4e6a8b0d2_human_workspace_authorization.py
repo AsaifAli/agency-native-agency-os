@@ -463,6 +463,15 @@ def downgrade() -> None:
     op.execute("DROP POLICY IF EXISTS workspace_delete ON public.workspaces")
     op.execute("CREATE POLICY tenant_isolation ON public.workspaces USING (agency_os_private.user_has_org_access(org_id, nullif(current_setting('agency_os.user_id', true), '')) OR (org_id = nullif(current_setting('agency_os.machine_org_id', true), '') AND id = nullif(current_setting('agency_os.machine_workspace_id', true), '')) WITH CHECK (agency_os_private.user_has_org_access(org_id, nullif(current_setting('agency_os.user_id', true), '')) OR (org_id = nullif(current_setting('agency_os.machine_org_id', true), '') AND id = nullif(current_setting('agency_os.machine_workspace_id', true), '')))")
     for table in WORKSPACE_TABLES:
+        identity_lookup = (
+            " OR id = nullif(current_setting('agency_os.machine_identity_lookup_id', true), '')"
+            if table == "machine_identities" else ""
+        )
+        machine_workspace = (
+            "(workspace_id IS NULL OR workspace_id = nullif(current_setting('agency_os.machine_workspace_id', true), ''))"
+            if table == "outbox_events"
+            else "workspace_id = nullif(current_setting('agency_os.machine_workspace_id', true), '')"
+        )
         op.execute(f'DROP POLICY IF EXISTS tenant_isolation ON public."{table}"')
         op.execute(f'''
             CREATE POLICY tenant_isolation ON public."{table}"
@@ -472,7 +481,7 @@ def downgrade() -> None:
                 )
                 OR (
                     org_id = nullif(current_setting('agency_os.machine_org_id', true), '')
-                    AND workspace_id = nullif(current_setting('agency_os.machine_workspace_id', true), '')
+                    AND ({machine_workspace}{identity_lookup})
                 )
             )
             WITH CHECK (
@@ -481,10 +490,11 @@ def downgrade() -> None:
                 )
                 OR (
                     org_id = nullif(current_setting('agency_os.machine_org_id', true), '')
-                    AND workspace_id = nullif(current_setting('agency_os.machine_workspace_id', true), '')
+                    AND ({machine_workspace}{identity_lookup})
                 )
             )
         ''')
+
     op.execute("DROP POLICY IF EXISTS execution_attempt_tenant_isolation ON public.execution_attempts")
     op.execute("""
         CREATE POLICY execution_attempt_tenant_isolation ON public.execution_attempts
