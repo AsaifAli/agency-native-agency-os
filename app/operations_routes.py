@@ -35,6 +35,7 @@ def _workspace(db: Session, org_id: str, workspace_id: str) -> None:
 
 
 def _project(db: Session, org_id: str, workspace_id: str, project_id: str) -> Project:
+    _workspace(db, org_id, workspace_id)
     item = db.query(Project).filter_by(
         id=project_id, org_id=org_id, workspace_id=workspace_id
     ).first()
