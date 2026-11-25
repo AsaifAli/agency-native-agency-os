@@ -411,3 +411,79 @@ def test_managed_agents_requires_os_executor_when_custom_tools_are_enabled():
     )
     with pytest.raises(RuntimeNotConfiguredError):
         runtime.start(request())
+
+
+def test_managed_agents_returns_generic_error_for_explicit_os_policy_denial():
+    from app.integrations.runtime import RuntimeToolRejected
+    from app.tool_registry import managed_agent_custom_tool_definitions
+
+    tool = next(item for item in managed_agent_custom_tool_definitions() if item["name"] == "os_system_health_read")
+    posted = []
+
+    def handler(req):
+        if req.method == "GET" and req.url.path == "/v1/agents/agent_test":
+            return httpx.Response(200, json={"id":"agent_test","archived_at":None,"tools":[tool],"mcp_servers":[],"skills":[],"multiagent":None})
+        if req.method == "POST" and req.url.path == "/v1/sessions":
+            return httpx.Response(200, json={"id":"sesn_policy_denied"})
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_policy_denied":
+            return httpx.Response(200, json={"id":"sesn_policy_denied","status":"running" if not posted else "idle"})
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_policy_denied/events":
+            if not posted:
+                return httpx.Response(200, json={"data":[{"type":"agent.custom_tool_use","id":"sevt_policy_denied","name":"os_system_health_read","input":{}}]})
+            return httpx.Response(200, json={"data":[
+                {"type":"agent.custom_tool_use","id":"sevt_policy_denied","name":"os_system_health_read","input":{}},
+                {"type":"user.custom_tool_result","custom_tool_use_id":"sevt_policy_denied"},
+                {"type":"agent.message","content":[{"type":"text","text":"Tool was denied safely."}]},
+                {"type":"session.status_idle","stop_reason":{"type":"end_turn"}},
+            ]})
+        if req.method == "POST" and req.url.path == "/v1/sessions/sesn_policy_denied/events":
+            posted.extend(json.loads(req.content)["events"])
+            return httpx.Response(200, json={"data":[]})
+        return httpx.Response(404)
+
+    def denied(*_args):
+        raise RuntimeToolRejected("internal-secret-and-policy-details")
+
+    runtime = ManagedAgentsRuntime(
+        config(),
+        client_factory=lambda: httpx.Client(base_url="https://api.anthropic.com", transport=httpx.MockTransport(handler)),
+        sleep=lambda _seconds: None,
+    )
+    result = runtime.start(request(execute_custom_tool=denied))
+    assert result.detail == "Tool was denied safely."
+    assert posted[0]["is_error"] is True
+    assert "internal-secret" not in posted[0]["content"][0]["text"]
+    assert "OS_TOOL_CALL_REJECTED" in posted[0]["content"][0]["text"]
+
+
+def test_managed_agents_propagates_unexpected_os_tool_failures_for_worker_retry():
+    from app.tool_registry import managed_agent_custom_tool_definitions
+
+    tool = next(item for item in managed_agent_custom_tool_definitions() if item["name"] == "os_system_health_read")
+    posted = []
+
+    def handler(req):
+        if req.method == "GET" and req.url.path == "/v1/agents/agent_test":
+            return httpx.Response(200, json={"id":"agent_test","archived_at":None,"tools":[tool],"mcp_servers":[],"skills":[],"multiagent":None})
+        if req.method == "POST" and req.url.path == "/v1/sessions":
+            return httpx.Response(200, json={"id":"sesn_os_failure"})
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_os_failure":
+            return httpx.Response(200, json={"id":"sesn_os_failure","status":"running"})
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_os_failure/events":
+            return httpx.Response(200, json={"data":[{"type":"agent.custom_tool_use","id":"sevt_os_failure","name":"os_system_health_read","input":{}}]})
+        if req.method == "POST" and req.url.path == "/v1/sessions/sesn_os_failure/events":
+            posted.extend(json.loads(req.content)["events"])
+            return httpx.Response(200, json={"data":[]})
+        return httpx.Response(404)
+
+    def unavailable(*_args):
+        raise RuntimeError("database connection unavailable")
+
+    runtime = ManagedAgentsRuntime(
+        config(),
+        client_factory=lambda: httpx.Client(base_url="https://api.anthropic.com", transport=httpx.MockTransport(handler)),
+        sleep=lambda _seconds: None,
+    )
+    with pytest.raises(RuntimeTransientError):
+        runtime.start(request(execute_custom_tool=unavailable))
+    assert posted == []
