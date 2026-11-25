@@ -50,6 +50,7 @@ Do not reset/delete the volume. Back up first.
 - A restricted `SECURITY DEFINER` membership predicate is owned by `agency_os_migrator`; execute is revoked from PUBLIC and granted to API and worker roles. For `session_user = 'agency_os_worker'`, it always returns false so the worker cannot use it as a membership oracle.
 - Worker scope enumeration returns only org/workspace identifiers. All worker data queries use a workspace-scoped session factory. Execution attempts inherit their parent execution's RLS scope.
 - Browser-session retention is a bounded, audited SECURITY DEFINER operation; the worker has no direct browser-session table privileges.
+- Default privileges no longer automatically grant future public tables or sequences to the worker; new worker dependencies require explicit reviewed grants.
 
 Custom PostgreSQL GUCs are defense-in-depth against missing tenant predicates, not protection against arbitrary SQL execution under the API or worker credential. The worker remains a cross-workspace operational principal because it must process all agency workspaces; a compromised worker credential could set another workspace's GUC. Stronger isolation against a compromised worker requires per-tenant worker credentials or moving tenant data operations behind narrowly scoped database functions. Parameterized queries and SQL-injection prevention remain mandatory.
 
