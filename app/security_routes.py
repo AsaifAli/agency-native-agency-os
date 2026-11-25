@@ -14,6 +14,8 @@ from app.machine_identity import (
 )
 from app.models import Agent, Workspace
 from app.security_models import AgentSession, MachineIdentity
+from app.config import settings
+from app.session_credentials import close_agent_session, issue_session_credential, revoke_session_credentials_for_session
 
 router = APIRouter(tags=["machine-security"])
 
@@ -124,17 +126,52 @@ def revoke_machine_identity(
     identity = db.query(MachineIdentity).filter_by(id=identity_id, org_id=org_id).with_for_update().first()
     if identity is None:
         raise HTTPException(404, "Machine identity not found")
-    if identity.revoked_at is None:
-        now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
+    newly_revoked = identity.revoked_at is None
+    if newly_revoked:
         identity.revoked_at = now
-        db.query(AgentSession).filter_by(machine_identity_id=identity.id, status="active").update(
-            {"status": "cancelled", "ended_at": now}, synchronize_session=False
+    sessions = (
+        db.query(AgentSession)
+        .filter_by(
+            org_id=identity.org_id,
+            workspace_id=identity.workspace_id,
+            machine_identity_id=identity.id,
         )
-        record_event(db, org_id, principal.user.id, "machine_identity.revoked",
-                     "machine_identity", identity.id, identity.workspace_id,
-                     {"active_sessions_cancelled": True})
-        db.commit()
-    return {"id": identity.id, "revoked": True}
+        .order_by(AgentSession.id.asc())
+        .with_for_update()
+        .all()
+    )
+    cancelled = 0
+    credentials_revoked = 0
+    for session in sessions:
+        if session.status == "active":
+            session.status = "cancelled"
+            session.ended_at = now
+            cancelled += 1
+            record_event(
+                db, org_id, principal.user.id, "agent_session.cancelled",
+                "agent_session", session.id, identity.workspace_id,
+                {"machine_identity_id": identity.id, "reason_code": "MACHINE_IDENTITY_REVOKED"},
+            )
+        credentials_revoked += revoke_session_credentials_for_session(
+            db,
+            session,
+            reason_code="MACHINE_IDENTITY_REVOKED",
+            now=now,
+        )
+    if newly_revoked:
+        record_event(
+            db, org_id, principal.user.id, "machine_identity.revoked",
+            "machine_identity", identity.id, identity.workspace_id,
+            {"active_sessions_cancelled": cancelled, "session_credentials_revoked": credentials_revoked},
+        )
+    db.commit()
+    return {
+        "id": identity.id,
+        "revoked": True,
+        "active_sessions_cancelled": cancelled,
+        "session_credentials_revoked": credentials_revoked,
+    }
 
 
 @router.post("/v1/machine/sessions", status_code=201)
@@ -155,7 +192,26 @@ def create_machine_session(
          "data_class": session.data_class,
          "purpose_redaction_counts": redaction_counts},
     )
-    db.commit()
-    return {"id": session.id, "org_id": session.org_id, "workspace_id": session.workspace_id,
-            "machine_identity_id": session.machine_identity_id, "purpose": session.purpose,
-            "data_class": session.data_class, "status": session.status, "expires_at": session.expires_at}
+    issued = None
+    if settings.mcp_gateway_enabled:
+        issued = issue_session_credential(
+            db,
+            principal,
+            session_id=session.id,
+            ttl_seconds=settings.mcp_session_token_ttl_seconds,
+        )
+    else:
+        db.commit()
+    response = {
+        "id": session.id, "org_id": session.org_id, "workspace_id": session.workspace_id,
+        "machine_identity_id": session.machine_identity_id, "purpose": session.purpose,
+        "data_class": session.data_class, "status": session.status, "expires_at": session.expires_at,
+    }
+    if issued is not None:
+        response.update({
+            "mcp_token": issued.token,
+            "mcp_token_expires_at": issued.expires_at,
+            "mcp_server_url": settings.mcp_public_url,
+            "mcp_token_warning": "Shown once. Store in the approved secret vault; never place in prompts or logs.",
+        })
+    return response
