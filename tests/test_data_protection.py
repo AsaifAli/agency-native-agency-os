@@ -266,3 +266,19 @@ def test_provider_run_identifier_that_looks_like_phone_is_blocked():
     with pytest.raises(DataProtectionBlocked) as error:
         protect_execution_result(result)
     assert error.value.code == "SENSITIVE_RUNTIME_IDENTIFIER"
+
+
+def test_untrusted_payload_preserves_only_explicitly_trusted_internal_id_fields():
+    from app.data_protection import protect_untrusted_payload, DataProtectionBlocked
+    untrusted, _ = protect_untrusted_payload({"draft_id": "1234567890"})
+    assert untrusted["draft_id"] == "[REDACTED_PHONE]"
+    trusted, _ = protect_untrusted_payload(
+        {"draft_id": "1234567890"},
+        trusted_internal_id_keys={"draft_id"},
+    )
+    assert trusted["draft_id"] == "1234567890"
+    with pytest.raises(DataProtectionBlocked):
+        protect_untrusted_payload(
+            {"draft_id": "owner@example.test"},
+            trusted_internal_id_keys={"draft_id"},
+        )
