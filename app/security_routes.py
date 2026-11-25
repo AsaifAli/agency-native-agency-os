@@ -122,6 +122,7 @@ def revoke_machine_identity(
     identity = db.query(MachineIdentity).filter_by(id=identity_id, org_id=org_id).with_for_update().first()
     if identity is None:
         raise HTTPException(404, "Machine identity not found")
+    require_workspace_access_from_context(org_id, identity.workspace_id, db)
     if identity.revoked_at is None:
         now = datetime.now(timezone.utc)
         identity.revoked_at = now
