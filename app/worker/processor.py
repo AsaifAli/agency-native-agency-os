@@ -19,6 +19,7 @@ from app.integrations.runtime import (
     RuntimeTransientError,
 )
 from app.worker.runtime_factory import get_runtime
+from app.worker.tool_executor import build_machine_tool_executor
 from app.worker_service import (
     LeaseExpired,
     claim_next_execution,
@@ -279,6 +280,13 @@ def process_one_execution(
     data_protection_block_code: str | None = None
     try:
         runtime = get_runtime(runtime_name)
+        if runtime_name == "claude_managed_agents":
+            request.execute_custom_tool = build_machine_tool_executor(
+                session_factory=session_factory,
+                request=request,
+                execution_id=execution_id,
+                session_ttl_seconds=settings.claude_managed_timeout_seconds,
+            )
         runtime_result = runtime.start(request)
         runtime_result, output_protection = protect_execution_result(runtime_result)
         if output_protection.total_redactions:
