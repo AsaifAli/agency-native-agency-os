@@ -45,3 +45,29 @@ The orchestration authorization hardening is merged to OS `main` as commit `387d
 
 
 The Claude Chief of Staff planning-draft workflow is now integrated as a proposal-only layer: the founder queues a synthetic/public-data objective, a tool-free Managed Agents execution returns bounded JSON, and the OS persists the result for founder review. The founder must select and approve every direct-manager assignment before plan/task/delegation records are materialized in one transaction. Invalid output cannot be approved. This does not provision machine identities, MCP tools, recursive supervisor sessions or live client-data access; those remain separate security milestones.
+
+## Agentic revenue, retainer and delivery operating patterns
+
+The agency is AI-native: Claude-backed agents are intended to perform research, reasoning, drafting, qualification, analysis, planning, coordination and execution of allowlisted internal work. The Agency OS remains the authority plane and durable system of record. A provider session never grants permissions by itself.
+
+### Revenue agents
+- Market Research / Intelligence agents discover target accounts, research public company context, capture source references and timestamps, identify fit signals and uncertainty, and recommend prospects. They must not invent contacts, facts, consent or provenance.
+- Business Development agents qualify leads, maintain CRM records, propose deduplication/merge candidates for review, map buying committees, identify service fit and recommend next actions.
+- Outreach agents draft and personalize email/social/call scripts, propose cadence and follow-up timing, and summarize replies. Dispatch is a separate OS action subject to sender identity, consent/source policy, suppression, rate limits, idempotency and stop-on-reply/opt-out/bounce. Scraped contact data is not consent. Outbound dialing remains manual review until jurisdictional/provider controls are proven.
+- Sales/solutions agents prepare discovery briefs, estimates, proposal drafts, assumptions, exclusions and risk notes. Pricing, proposals sent to a client, SOWs and contracts remain approval-gated.
+
+### One-time and retainer engagements
+- One-time projects have a fixed scoped deliverable, agreed milestones, acceptance criteria, change-control path, budget and completion/handover state.
+- Retainers have a defined billing cadence, initial term, included service hours/allowance per period, rollover policy, response target, renewal terms and explicit service boundaries. They also need period-by-period usage, capacity, SLA/response tracking, overage/change approval, invoice reconciliation, renewal/termination notice and final handover/knowledge export.
+- Auto-renewal is a proposed contract term only; it must never execute automatically without an explicit authorized policy and legal review. Retainer overages, unused-hour rollover, service credits, scope changes and renewal pricing are not inferred by an agent.
+- Proposal records now distinguish one-time vs retainer terms and contract creation snapshots those terms. The current PR adds a founder-governed service-period ledger, billable usage aggregation, rollover snapshots and overage visibility. Period closeout does not authorize extra charges. Automated recurring invoice drafts, overage approval, renewal notices, termination workflow and SLA measurement remain subsequent implementation work.
+
+### Delivery and client success agents
+- Discovery agents turn conversations and documents into traceable requirements, decisions, assumptions and acceptance criteria.
+- PMO agents coordinate milestones, dependencies, risks, status reports and client update drafts.
+- Engineering agents implement only assigned work in isolated sandboxes; AI code requires review.
+- QA/Security agents independently evaluate requirements, regression, data protection and release readiness. They can block a release recommendation but cannot approve production deployment.
+- Client Success agents monitor project/retainer health, feedback, unresolved risks, usage, upcoming renewals and support requests; sensitive client communications and commercial concessions remain gated.
+
+### Current action classifications
+Research, lead qualification, outreach drafting/personalization, internal account-health assessment, retainer usage analysis, delivery QA preparation and project status summaries are eligible for autonomous internal execution after endpoint-level grants and data/budget checks. Sending outreach, outbound calls, auto-renewal, pricing, contracts, payments, production release, permission changes and destructive actions remain manual-review or founder-approval actions. The classification registry is not a tool gateway; no provider tool may bypass the OS authorization layer.
