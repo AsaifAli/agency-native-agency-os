@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import (
     Principal, get_principal, has_founder_authority, require_founder_authority,
-    require_membership, require_role,
+    require_membership, require_role, require_workspace_access_from_context,
 )
 from app.db import get_db
 from app.models import Role, Workspace, Approval, ApprovalStatus, Execution, ExecutionStatus, Task, Agent
