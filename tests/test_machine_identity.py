@@ -13,6 +13,7 @@ from app.models import FounderAuthority, Membership, Organization, Role, User, W
 from app.security_models import AgentSession, MachineIdentity, ToolInvocation
 from app.security_routes import router
 from app.tool_gateway_routes import router as tool_gateway_router
+from app.revenue_research_routes import router as revenue_research_router
 
 
 @pytest.fixture()
@@ -38,6 +39,7 @@ def security_client():
     app = FastAPI()
     app.include_router(router)
     app.include_router(tool_gateway_router)
+    app.include_router(revenue_research_router)
     def override_db():
         session = factory()
         try: yield session
@@ -418,3 +420,156 @@ def test_worker_session_expiry_sweep_marks_and_audits_due_sessions(security_clie
         assert event.payload["reason_code"] == "SESSION_TTL_EXPIRED"
     finally:
         db.close()
+
+
+def _issue_research_session(client):
+    issued = _create_identity(
+        client,
+        scopes=[
+            "sessions:create",
+            "tools:invoke",
+            "tool:revenue.lead.research.capture",
+        ],
+        classes=["public"],
+    )
+    headers = {"Authorization": "Bearer " + issued["token"]}
+    session = client.post(
+        "/v1/machine/sessions",
+        headers=headers,
+        json={"purpose": "Capture public company research", "data_class": "public", "ttl_seconds": 600},
+    )
+    assert session.status_code == 201, session.text
+    return issued, session.json()["id"], headers
+
+
+def _research_payload():
+    return {
+        "company_name": "Acme Robotics",
+        "summary": "Builds autonomous industrial inspection systems and is expanding its engineering operations.",
+        "source_references": ["https://example.com/news/robotics-expansion"],
+        "fit_score": 82,
+        "confidence_score": 91,
+        "buying_signals": ["Hiring machine learning engineers", "Announced a new facility"],
+        "risks": ["No public budget evidence"],
+    }
+
+
+def test_revenue_research_tool_creates_public_draft_without_creating_crm_contact(security_client):
+    from app.domain_models import Lead, LeadResearchDraft
+    issued, session_id, headers = _issue_research_session(security_client)
+    response = security_client.post(
+        "/v1/machine/tools/revenue.lead.research.capture/invoke",
+        headers={**headers, "Idempotency-Key": "revenue-research-0001"},
+        json={"session_id": session_id, "input": _research_payload()},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "succeeded"
+    draft_id = response.json()["result"]["draft_id"]
+    db = security_client.factory()
+    try:
+        draft = db.get(LeadResearchDraft, draft_id)
+        assert draft.machine_identity_id == issued["id"]
+        assert draft.status == "pending_review"
+        assert draft.source_references == ["https://example.com/news/robotics-expansion"]
+        assert db.query(Lead).filter_by(org_id=security_client.org_id, workspace_id=security_client.workspace_id).count() == 0
+    finally:
+        db.close()
+
+
+def test_founder_approves_and_promotes_research_draft_to_crm(security_client):
+    from app.domain_models import Lead, LeadResearchDraft, LeadResearchRecord
+    issued, session_id, headers = _issue_research_session(security_client)
+    captured = security_client.post(
+        "/v1/machine/tools/revenue.lead.research.capture/invoke",
+        headers={**headers, "Idempotency-Key": "revenue-research-0002"},
+        json={"session_id": session_id, "input": _research_payload()},
+    )
+    assert captured.status_code == 200, captured.text
+    draft_id = captured.json()["result"]["draft_id"]
+    base = f"/v1/orgs/{security_client.org_id}/workspaces/{security_client.workspace_id}/lead-research-drafts"
+    listing = security_client.get(base)
+    assert listing.status_code == 200 and listing.json()["items"][0]["id"] == draft_id
+    reviewed = security_client.post(
+        f"{base}/{draft_id}/review",
+        json={"decision": "approve", "review_note": "Evidence is sufficient for CRM entry."},
+    )
+    assert reviewed.status_code == 200 and reviewed.json()["status"] == "approved"
+    promoted = security_client.post(f"{base}/{draft_id}/promote")
+    assert promoted.status_code == 200, promoted.text
+    assert promoted.json()["status"] == "promoted"
+    replay = security_client.post(f"{base}/{draft_id}/promote")
+    assert replay.status_code == 200 and replay.json()["replayed"] is True
+    db = security_client.factory()
+    try:
+        draft = db.get(LeadResearchDraft, draft_id)
+        lead = db.get(Lead, promoted.json()["lead_id"])
+        research = db.query(LeadResearchRecord).filter_by(lead_id=lead.id).one()
+        assert draft.status == "promoted" and draft.promoted_lead_id == lead.id
+        assert lead.company_name == "Acme Robotics" and lead.source == "agent_research"
+        assert research.fit_score == 82 and research.confidence_score == 91
+    finally:
+        db.close()
+
+
+def test_revenue_research_tool_rejects_private_or_non_https_sources(security_client):
+    issued, session_id, headers = _issue_research_session(security_client)
+    payload = _research_payload()
+    payload["source_references"] = ["http://127.0.0.1/private"]
+    response = security_client.post(
+        "/v1/machine/tools/revenue.lead.research.capture/invoke",
+        headers={**headers, "Idempotency-Key": "revenue-research-private"},
+        json={"session_id": session_id, "input": payload},
+    )
+    assert response.status_code == 422
+
+
+def test_revenue_research_tool_rejects_contact_fields_and_redacts_pii(security_client):
+    issued, session_id, headers = _issue_research_session(security_client)
+    payload = _research_payload()
+    payload["contact_email"] = "owner@example.test"
+    invalid = security_client.post(
+        "/v1/machine/tools/revenue.lead.research.capture/invoke",
+        headers={**headers, "Idempotency-Key": "revenue-research-contact"},
+        json={"session_id": session_id, "input": payload},
+    )
+    assert invalid.status_code == 422
+
+    payload = _research_payload()
+    payload["summary"] += " Contact details listed as owner@example.test."
+    response = security_client.post(
+        "/v1/machine/tools/revenue.lead.research.capture/invoke",
+        headers={**headers, "Idempotency-Key": "revenue-research-pii"},
+        json={"session_id": session_id, "input": payload},
+    )
+    assert response.status_code == 200, response.text
+    from app.domain_models import LeadResearchDraft
+    db = security_client.factory()
+    try:
+        draft = db.get(LeadResearchDraft, response.json()["result"]["draft_id"])
+        assert "owner@example.test" not in draft.summary
+        assert "[REDACTED_EMAIL]" in draft.summary
+    finally:
+        db.close()
+
+
+def test_nonfounder_cannot_review_agent_research_draft(security_client):
+    from app.models import Membership, Role, User
+    from app.auth import get_principal, Principal
+    issued, session_id, headers = _issue_research_session(security_client)
+    captured = security_client.post(
+        "/v1/machine/tools/revenue.lead.research.capture/invoke",
+        headers={**headers, "Idempotency-Key": "revenue-research-review-auth"},
+        json={"session_id": session_id, "input": _research_payload()},
+    )
+    draft_id = captured.json()["result"]["draft_id"]
+    operator = User(email="research-operator@example.test")
+    db = security_client.factory()
+    try:
+        db.add(operator); db.flush()
+        db.add(Membership(org_id=security_client.org_id, user_id=operator.id, role=Role.operator)); db.commit()
+    finally:
+        db.close()
+    security_client.app.dependency_overrides[get_principal] = lambda: Principal(user=operator)
+    base = f"/v1/orgs/{security_client.org_id}/workspaces/{security_client.workspace_id}/lead-research-drafts"
+    denied = security_client.post(f"{base}/{draft_id}/review", json={"decision": "approve"})
+    assert denied.status_code == 403
