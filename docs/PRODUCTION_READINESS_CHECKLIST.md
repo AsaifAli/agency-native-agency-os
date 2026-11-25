@@ -3,7 +3,7 @@
 **Last reviewed:** 2026-11-25
 **Tracking branch:** `main` (PR #45 merged); `security/predeploy-20-point-audit` (PR #47 open draft)
 **Latest merged milestone:** [PR #45](https://github.com/AsaifAli/agency-native-agency-os/pull/45)
-**Status:** PR #45 is merged. PR #47 remains an open draft. The persistent browser-session revocation implementation is published on PR #47 head `f8d1921804b21cafdcb1d33c0e779175f7f768ae` but remains unmerged and unverified on PostgreSQL 16. PostgreSQL RLS, live identity/MFA verification and other release gates remain. Not a certification or release approval.
+**Status:** PR #45 is merged. PR #47 remains an open draft. Persistent browser-session revocation and atomic rotation are published on the PR #47 branch but remain unmerged and unverified on PostgreSQL 16. PostgreSQL RLS, live identity/MFA verification and other release gates remain. Not a certification or release approval.
 
 ## Progress snapshot
 
@@ -477,10 +477,12 @@ Additional review controls: identity/session locks follow revocation lock order;
 - [x] OIDC callback creates the browser session record and creation audit events before returning the HttpOnly cookie.
 - [x] Cookie and signed bearer presentations of browser JWTs now require a live persistent session record, active user and matching subject; dev-only `dev:` bearer tokens retain their existing non-production path.
 - [x] Logout revokes only the current session, records per-organization audit events in the same database transaction and remains idempotent; copied cookie and bearer-token replay are rejected.
-- [x] TDD regression suite: **9 focused browser-session tests passed**, including API logout/replay, inactive user, persistent expiry, digest-only storage and repeated revocation.
-- [x] Full backend suite on this worktree: **329 passed, 4 PostgreSQL-only skipped**.
+- [x] Added `POST /v1/auth/refresh` to atomically lock/revoke the old session, issue a replacement, record the replacement ID in audit and commit before returning the new HttpOnly cookie.
+- [x] TDD regression suite: **11 focused browser-session tests passed**, including API logout/replay, bearer replay, inactive user, persistent expiry, digest-only storage, repeated revocation and refresh rotation.
+- [x] Full backend suite on this worktree: **331 passed, 4 PostgreSQL-only skipped**.
 - [x] New Alembic revision `s9b5d7f1a204` is the single migration head; isolated upgrade from `r8a2c4e6f901` to the new revision passed on SQLite and verified table columns/indexes.
 - [ ] Full historical SQLite migration rehearsal still stops at pre-existing revision `eb75d47bfc63` (unsupported SQLite ALTER constraint operation); this does not verify the new migration on PostgreSQL. Run PostgreSQL 16 populated-schema upgrade/downgrade before merge.
-- [ ] Session rotation, scheduled retention/deletion, artifact cleanup, Safari same-site cookie verification, Authentik live MFA/ACR verification and PostgreSQL 16 RLS remain outstanding.
+- [ ] Wire proactive refresh into the frontend client and verify it under the actual browser topology; PostgreSQL row-lock concurrency testing for simultaneous refresh remains outstanding.
+- [ ] Scheduled retention/deletion, artifact cleanup, Safari same-site cookie verification, Authentik live MFA/ACR verification and PostgreSQL 16 RLS remain outstanding.
 
-**Evidence boundary:** source was cloned from public branch `security/predeploy-20-point-audit` at `730b10fb00206afbd02f6f49e17ad3ba8e431a95`. Tests ran in Upstash Box `certain-whale-42014` on Python 3.13.18. Changes were published to the existing draft PR #47 as commit `f8d1921804b21cafdcb1d33c0e779175f7f768ae`; PR #47 remains open/draft and unmerged. No GitHub Actions workflow was triggered.
+**Evidence boundary:** source was cloned from public branch `security/predeploy-20-point-audit` at `730b10fb00206afbd02f6f49e17ad3ba8e431a95`. Tests ran in Upstash Box `certain-whale-42014` on Python 3.13.18. Changes were published to the existing draft PR #47 branch; PR #47 remains open/draft and unmerged. No GitHub Actions workflow was triggered.
