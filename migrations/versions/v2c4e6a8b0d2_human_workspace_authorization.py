@@ -137,6 +137,7 @@ def upgrade() -> None:
             grant_id text;
             is_creator boolean;
             is_founder boolean;
+            inserted boolean := false;
         BEGIN
             IF actor_user_id IS NULL OR actor_user_id <>
                nullif(current_setting('agency_os.user_id', true), '') THEN
@@ -174,22 +175,27 @@ def upgrade() -> None:
                 RAISE EXCEPTION 'active organization membership required' USING ERRCODE = '42501';
             END IF;
 
-            IF EXISTS (
-                SELECT 1 FROM public.workspace_grants AS g
-                WHERE g.org_id = target_org_id
-                  AND g.workspace_id = target_workspace_id
-                  AND g.user_id = target_user_id
-                  AND g.revoked_at IS NULL
-            ) THEN
-                RETURN NULL;
-            END IF;
-
             grant_id := gen_random_uuid()::text;
             INSERT INTO public.workspace_grants
                 (id, org_id, workspace_id, user_id, granted_by, created_at)
             VALUES
                 (grant_id, target_org_id, target_workspace_id, target_user_id,
-                 actor_user_id, now());
+                 actor_user_id, now())
+            ON CONFLICT (org_id, workspace_id, user_id)
+                WHERE revoked_at IS NULL
+            DO NOTHING
+            RETURNING id INTO grant_id;
+
+            inserted := grant_id IS NOT NULL;
+            IF NOT inserted THEN
+                SELECT g.id INTO grant_id
+                FROM public.workspace_grants AS g
+                WHERE g.org_id = target_org_id
+                  AND g.workspace_id = target_workspace_id
+                  AND g.user_id = target_user_id
+                  AND g.revoked_at IS NULL;
+                RETURN grant_id;
+            END IF;
 
             INSERT INTO public.audit_events
                 (id, org_id, workspace_id, actor_user_id, event_type,
