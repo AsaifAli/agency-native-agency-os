@@ -155,8 +155,8 @@ Merged work includes PR #17 (contact timeline), PR #19 (leads/opportunities), PR
 - Opaque org/workspace/task/agent IDs and provider run identifiers are checked for secrets/PII; identifiers are rejected rather than redacted to preserve correlation integrity.
 - The runtime's external-run-ID persistence callback is wrapped by the DPG, closing a path where a provider could otherwise persist an unfiltered identifier before returning its result.
 - Provider name and external run ID are checked before result persistence; detail text continues to receive PII redaction and secret blocking.
-- Regression tests added for oversized prompts, invalid metadata shape, callback sanitization and sensitive provider identifiers. These tests are authored, not yet executed.
-- Independent testing is not dependent on GitHub Actions. The PostgreSQL migration and full backend suite still need execution evidence.
+- Regression tests cover oversized prompts, invalid metadata shape, callback sanitization, sensitive provider identifiers, and worker-level fail-closed audit behavior. In an isolated validation copy, 81 DPG/worker tests passed.
+- Independent testing is not dependent on GitHub Actions. SQLite migration upgrade/downgrade/re-upgrade, preflight-abort and all 16 cross-scope rejection cases passed in an isolated validation copy; PostgreSQL 16 verification and the full backend suite on the exact main head remain pending.
 
 
 ## PR #33 independent validation update — 2026-11-25
@@ -165,4 +165,4 @@ Merged work includes PR #17 (contact timeline), PR #19 (leads/opportunities), PR
 - SQLite migration rehearsal from `l2e8a0b6d549` successfully upgraded, downgraded and re-upgraded to `m3f9c2a7e514`.
 - A cross-tenant contact/client mismatch caused preflight to abort while Alembic remained on the parent revision. All 16 deliberate cross-scope insert attempts were rejected by the migrated SQLite schema.
 - PostgreSQL 16 verification and full backend-suite execution on the exact remote PR head remain pending. The current local evidence does not replace those checks.
-- PR #33 remains open; no deployment or production-readiness claim is made.
+- PR #33 was merged to main as `09d23d90b258c55331367f94096bc6906cdce249`. The migration must not be applied to populated production data until PostgreSQL 16 verification passes; no deployment or production-readiness claim is made.
