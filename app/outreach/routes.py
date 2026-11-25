@@ -27,8 +27,7 @@ WRITERS = {Role.owner, Role.admin, Role.operator}
 
 
 def _scope(db: Session, org_id: str, workspace_id: str) -> None:
-    if not db.query(Workspace.id).filter_by(id=workspace_id, org_id=org_id).first():
-        raise HTTPException(404, "Workspace not found")
+    require_workspace_access_from_context(org_id, workspace_id, db)
 
 
 def _read(org_id: str, workspace_id: str, p: Principal, db: Session) -> None:
