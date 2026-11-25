@@ -75,7 +75,12 @@ def test_postgres_outreach_relations_enforce_org_workspace_integrity():
             display_name="Sender B", email_address=f"sender-b-{suffix}@example.test",
             created_by=user.id,
         )
-        db.add_all([contact_b, sender_a, sender_b])
+        contact_a = Contact(
+            org_id=org_a.id, workspace_id=workspace_a.id,
+            first_name="Contact", last_name="A", email=f"contact-a-{suffix}@example.test",
+            created_by=user.id,
+        )
+        db.add_all([contact_b, contact_a, sender_a, sender_b])
         db.flush()
 
         message_b = OutboundMessage(
@@ -89,7 +94,18 @@ def test_postgres_outreach_relations_enforce_org_workspace_integrity():
             client_id=client_b.id, contact_id=contact_b.id,
             company_name=f"Lead B {suffix}", created_by=user.id,
         )
-        db.add_all([message_b, lead_b])
+        consent_b = CommunicationConsent(
+            org_id=org_b.id, workspace_id=workspace_b.id, contact_id=contact_b.id,
+            channel="email", status="granted", legal_basis="consent",
+            source="test", evidence_reference=f"evidence-b-{suffix}", recorded_by=user.id,
+        )
+        approval_b = Approval(
+            org_id=org_b.id, workspace_id=workspace_b.id,
+            action_type="external_communication.sensitive",
+            idempotency_key=f"approval-b-{suffix}", resource_id=str(uuid.uuid4()),
+            requested_by=user.id,
+        )
+        db.add_all([message_b, lead_b, consent_b, approval_b])
         db.flush()
 
         rejected(Client(
@@ -144,6 +160,24 @@ def test_postgres_outreach_relations_enforce_org_workspace_integrity():
             org_id=org_a.id, workspace_id=workspace_a.id,
             sender_id=sender_a.id, contact_id=contact_b.id,
             recipient=contact_b.email, subject="Cross-tenant", body="Must be rejected",
+            created_by=user.id,
+        ))
+        rejected(OutboundMessage(
+            org_id=org_a.id, workspace_id=workspace_a.id,
+            sender_id=sender_a.id, contact_id=contact_a.id, lead_id=lead_b.id,
+            recipient=contact_a.email, subject="Cross-tenant lead", body="Must be rejected",
+            created_by=user.id,
+        ))
+        rejected(OutboundMessage(
+            org_id=org_a.id, workspace_id=workspace_a.id,
+            sender_id=sender_a.id, contact_id=contact_a.id, consent_id=consent_b.id,
+            recipient=contact_a.email, subject="Cross-tenant consent", body="Must be rejected",
+            created_by=user.id,
+        ))
+        rejected(OutboundMessage(
+            org_id=org_a.id, workspace_id=workspace_a.id,
+            sender_id=sender_a.id, contact_id=contact_a.id, approval_id=approval_b.id,
+            recipient=contact_a.email, subject="Cross-tenant approval", body="Must be rejected",
             created_by=user.id,
         ))
         rejected(OutboundMessageEvent(
