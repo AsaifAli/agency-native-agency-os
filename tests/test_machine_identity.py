@@ -932,3 +932,42 @@ def test_mcp_credential_schema_has_composite_session_identity_foreign_key():
     assert [element.column.name for element in execution_fk.elements] == [
         "org_id", "workspace_id", "id",
     ]
+
+
+def test_mcp_gateway_configuration_requires_https_and_explicit_host():
+    from pydantic import ValidationError
+    from app.config import Settings
+
+    valid = Settings(
+        mcp_gateway_enabled=True,
+        mcp_public_url="https://api.example.test/mcp/agency-os",
+        mcp_allowed_hosts="api.example.test",
+        mcp_allowed_origins="",
+        mcp_enabled_tool_keys="system.health.read",
+    )
+    assert valid.mcp_allowed_hosts_list == ["api.example.test"]
+    with pytest.raises(ValidationError):
+        Settings(
+            mcp_gateway_enabled=True,
+            mcp_public_url="http://api.example.test/mcp/agency-os",
+            mcp_allowed_hosts="api.example.test",
+        )
+    with pytest.raises(ValidationError):
+        Settings(
+            mcp_gateway_enabled=True,
+            mcp_public_url="https://api.example.test/mcp/agency-os",
+            mcp_allowed_hosts="*",
+        )
+
+
+def test_mcp_sdk_server_builds_when_official_dependency_is_installed(monkeypatch):
+    pytest.importorskip("mcp")
+    from app.config import settings
+    from app.mcp_server import create_mcp_gateway
+
+    monkeypatch.setattr(settings, "mcp_allowed_hosts", "api.example.test")
+    monkeypatch.setattr(settings, "mcp_allowed_origins", "")
+    monkeypatch.setattr(settings, "mcp_enabled_tool_keys", "system.health.read")
+    mcp_app, authenticated_app = create_mcp_gateway()
+    assert mcp_app.router is not None
+    assert callable(authenticated_app)
