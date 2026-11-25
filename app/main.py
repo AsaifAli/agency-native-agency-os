@@ -20,6 +20,7 @@ from app.workforce_service import initialize_workforce
 from app.auth import (
     get_principal,
     require_membership,
+    require_workspace_access_from_context,
     require_role,
     require_founder_authority,
     has_founder_authority,
@@ -314,15 +315,7 @@ def health(db: Session = Depends(get_db)):
 
 
 def workspace_in_org(db: Session, org_id: str, workspace_id: str):
-    workspace = db.query(Workspace).filter_by(
-        id=workspace_id,
-        org_id=org_id,
-    ).first()
-
-    if not workspace:
-        raise HTTPException(404, "Workspace not found")
-
-    return workspace
+    return require_workspace_access_from_context(org_id, workspace_id, db)
 
 
 # ---------------------------------------------------------------------------
