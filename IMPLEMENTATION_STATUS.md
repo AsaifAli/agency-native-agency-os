@@ -141,3 +141,10 @@ Merged work includes PR #17 (contact timeline), PR #19 (leads/opportunities), PR
 - PR #30 PostgreSQL tenant-integrity migration and cross-tenant tests remain unverified. Do not apply the migration to a populated environment until isolated PostgreSQL 16 upgrade/downgrade and mismatch-preflight tests have been completed.
 - Next implementation priorities are complete tenant isolation, machine identities/session lifecycle, OS Tool Gateway, DPG coverage for files/RAG/tools, durable governed loops, and external integration/recovery evidence.
 - GitHub Actions reruns remain intentionally paused due account billing/runner allocation. No new test pass, deployment or production-readiness claim is made by this documentation update.
+
+
+## Current PR consolidation — 2026-11-25
+- PR #31 is merged to main (`f8fc318cfece0dafb64a846d93fe7d78e64c5593`): operating-loop design and four curated skills are present, but disabled and without tool grants.
+- PR #30 is closed as superseded, not merged. Its security changes were ported onto current main in PR #32 (`feature/tenant-dpg-hardening-rebased`), which is 8 commits ahead and 0 behind main.
+- PR #32 contains tenant integrity constraints/migration, DPG input/output protection, metadata bounds and adversarial tests. It remains open and unverified; do not merge or apply its migration to populated data until isolated PostgreSQL 16 verification and focused/full backend tests are completed.
+- Evidence-backed progress percentages remain unchanged at 52% internal implementation, 49% overall, 20% production verification and 5% external configuration. Unmerged code and unexecuted tests are not counted as completed.
