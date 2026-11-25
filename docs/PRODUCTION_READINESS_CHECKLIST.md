@@ -184,3 +184,20 @@ A feature is **production-ready** only when implementation, authorization, tenan
 - Run focused unit tests and backend suites in an available development environment; run database migration and tenant-isolation tests against disposable PostgreSQL before merge.
 - Record exact commands, environment and results. Never mark tests complete from authored test files alone.
 - PR #33 adds a second hardening pass: provider output identifiers and prior external run IDs are rejected if they contain PII/secrets; the provider run-ID persistence callback is wrapped so raw IDs cannot bypass the DPG; complete execution payload size is bounded before regex sanitization.
+
+
+## PR #33 independent validation update — 2026-11-25
+- [x] DPG and worker-service focused tests: 81 passed in an isolated local validation copy with PR #33 DPG/worker code and tests applied.
+- [x] Execution API regression tests: 5 passed.
+- [x] Action-policy tests: 11 passed.
+- [x] Approval tests: 5 passed.
+- [x] Execution-service tests: 12 passed.
+- [x] Outreach API tests: 3 passed.
+- [x] Python compile check: `python -m compileall -q app tests` passed.
+- [x] SQLite migration rehearsal from `l2e8a0b6d549`: upgrade, downgrade, and re-upgrade to `m3f9c2a7e514` passed.
+- [x] Preflight-abort fixture: existing cross-tenant contact/client mismatch stopped the migration before revision advancement.
+- [x] All 16 deliberate cross-scope insert attempts were rejected by the migration-applied SQLite schema.
+- [ ] PostgreSQL 16 migration and tenant-insert suite remains pending; SQLite is useful evidence but does not replace PostgreSQL validation.
+- [ ] Full backend suite on the exact remote PR head remains pending.
+
+**Validation note:** the local validation copy used the PR's current DPG, worker processor, focused regression tests and migration against the reconciled candidate base. Results are not claimed as CI results or as a full exact-head test run. PR #33 is 15 commits ahead / 0 behind and mergeable at the latest GitHub comparison. CI is supplementary, not a development blocker.
