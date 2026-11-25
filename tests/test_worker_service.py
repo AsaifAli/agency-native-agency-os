@@ -1947,3 +1947,56 @@ def test_invalid_plan_draft_output_is_never_reviewable(worker_context):
     assert saved.error_code == "PLAN_DRAFT_OUTPUT_INVALID"
     assert task.status == "failed"
 
+
+
+def test_processor_injects_attempt_scoped_os_tool_executor_for_managed_agents(worker_context, monkeypatch):
+    ctx = worker_context
+    agent = ctx["db"].get(Agent, ctx["agent_id"])
+    agent.runtime = "claude_managed_agents"
+    ctx["db"].commit()
+
+    import app.execution_service as execution_service_module
+    monkeypatch.setattr(execution_service_module, "is_runtime_available", lambda _name: True)
+    execution = create_worker_execution(ctx)
+    session_factory = sessionmaker(
+        bind=ctx["db"].get_bind(),
+        autoflush=False,
+        autocommit=False,
+    )
+    captured = {}
+
+    def fake_builder(**kwargs):
+        captured.update(kwargs)
+        return lambda name, payload, event_id: {
+            "tool": name,
+            "payload": payload,
+            "event_id": event_id,
+        }
+
+    class FakeManagedRuntime:
+        def start(self, request):
+            assert request.execute_custom_tool is not None
+            result = request.execute_custom_tool(
+                "os_system_health_read", {}, "sevt_processor_wire"
+            )
+            assert result["event_id"] == "sevt_processor_wire"
+            return ExecutionResult(
+                "claude_managed_agents", "sesn_processor_wire", "succeeded", "done"
+            )
+
+    monkeypatch.setattr(processor_module, "build_machine_tool_executor", fake_builder)
+    monkeypatch.setattr(processor_module, "get_runtime", lambda _runtime_name: FakeManagedRuntime())
+    monkeypatch.setattr(settings, "claude_managed_timeout_seconds", 600)
+
+    processed_id = process_one_execution(
+        worker_id="processor-tool-wire",
+        session_factory=session_factory,
+    )
+    assert processed_id == execution.id
+    assert captured["execution_id"] == execution.id
+    assert captured["attempt_id"]
+    assert captured["worker_id"] == "processor-tool-wire"
+    assert captured["session_ttl_seconds"] == 600
+
+    ctx["db"].expire_all()
+    assert ctx["db"].get(Execution, execution.id).status == ExecutionStatus.succeeded
