@@ -1,7 +1,7 @@
 # Machine Identity and Session Security
 
 ## Scope
-This increment establishes scoped machine credentials and durable execution sessions. It is not yet the complete OS Tool Gateway and does not enable any external tool adapter or provider-side MCP access.
+This increment establishes scoped machine credentials, durable execution sessions and the initial OS Tool Gateway. It now supports two code-registered tools through the Claude Managed Agents custom-tool event bridge; it does not enable provider-side MCP, built-in toolsets, client-data access or external side effects.
 
 ## Identity contract
 - A machine identity belongs to exactly one organization and workspace.
