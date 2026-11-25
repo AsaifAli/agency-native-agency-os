@@ -54,7 +54,7 @@
 
 ## Known gaps / not validated
 - No production outbox handlers are registered; the website lead event is persisted but does not trigger notifications or automation. External side effects remain disabled.
-- Outbox handler heartbeat and actual worker crash/restart recovery need further validation.
+- PostgreSQL integration now exercises concurrent worker claims and persisted execution-lease expiry recovery (abandoned attempt, retry schedule and audit). Actual worker-process termination/restart, outbox handler heartbeat under sustained load and multi-replica operational behavior still need deployment-level validation.
 - AI-driven Chief of Staff planning, autonomous recursive decomposition, delegated machine identities, and dynamic replanning/escalation are not implemented. The orchestration plan API and worker queue are execution foundations; the Founder Console now exposes plan creation, dependency monitoring, founder review and blocked-work recovery. The production build now passes, but live provider sessions and runtime behavior remain unverified.
 - Managed Agents live provisioning, provider API compatibility against the actual account, Environment sandbox/egress configuration, webhook/reconciliation for ambiguous session creation and production runtime eligibility are not verified.
 - The pre-created Managed Agent owns its tools/MCP/skills. The adapter now queries the provider Agent and rejects non-empty tools/MCP/skills or enabled multiagent configuration; actual account configuration and environment sandbox/egress still require live verification.
@@ -299,3 +299,11 @@ Added production fail-closed configuration checks, Redis-backed request throttli
 
 Added Authentik OIDC relying-party integration (Authlib, OIDC discovery, authorization code + PKCE S256, state/nonce), strict pre-provisioned-user linking by verified issuer/subject/email, unique OIDC subject migration, AES-GCM encrypted OIDC transaction cookie, HttpOnly session cookie, double-submit CSRF + Origin checks, CSRF bootstrap/current-user/logout endpoints and frontend credentialed requests. Added `docs/AUTHENTIK_SETUP.md`. Validation: OIDC/CSRF focused tests 35 passed; full backend suite 320 passed / 4 PostgreSQL-only skipped; compileall passed; Alembic single head `r8a2c4e6f901`. Live Authentik configuration, Authentik MFA assurance policy (`acr`), browser topology and PostgreSQL RLS remain unverified. Production remains NO-GO.
 
+
+
+## PostgreSQL worker reliability follow-up — 2026-11-26
+
+- Added a PostgreSQL-backed worker recovery assertion: after a committed claim, the test expires the persisted lease to simulate a disappeared worker. The recovery sweep must abandon the attempt, schedule a retry, clear the lease and persist an audit event carrying the original worker identity.
+- Fixed test cleanup to remove attempt-scoped audit events for the synthetic test organization as well as execution-scoped events.
+- Isolated PostgreSQL 17 validation: fresh test cluster, all Alembic migrations applied through the RLS migration, and all four PostgreSQL worker/tenant-integrity tests passed. Full backend suite with PostgreSQL integration enabled: **368 passed, 1 skipped** (the separate NOBYPASSRLS RLS test was not run because its app-role grant stage was unavailable in this environment). Python compilation and `git diff --check` passed.
+- PostgreSQL 16 remains the CI/release target and was not available in this environment. This follow-up does not establish live RLS isolation, actual process restart, load behavior, deployment readiness or compliance.
