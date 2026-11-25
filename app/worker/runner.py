@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db import SessionLocal
 from app.worker.processor import process_one_execution
+from app.machine_identity import expire_due_agent_sessions
 from app.outbox_handlers import OUTBOX_HANDLERS
 from app.outbox_service import dispatch_outbox_batch, reconcile_outbox_events
 from app.worker_service import (
@@ -157,6 +158,13 @@ def run_worker(
                     recovered,
                     queued_delegations,
                 )
+
+            expired_sessions = _run_session_maintenance(
+                session_factory=session_factory,
+                batch_size=maintenance_batch_size,
+            )
+            if expired_sessions:
+                logger.info("Expired agent sessions: count=%s", expired_sessions)
 
             published, retried, dead_lettered, requeued = _run_outbox_maintenance(
                 session_factory=session_factory,
