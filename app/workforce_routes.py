@@ -447,6 +447,7 @@ def create_delegation(org_id: str, body: DelegationCreate, db: Session = Depends
                       p: Principal = Depends(get_principal)):
     role = require_membership(org_id, p, db)
     require_role(role, WRITERS)
+    _workspace(db, org_id, body.workspace_id)
     if body.depends_on_ordinal is not None:
         raise HTTPException(422, "depends_on_ordinal is only valid inside an orchestration plan")
     row = _create_delegation(db, org_id, body, p.user.id)
@@ -551,6 +552,7 @@ def create_orchestration_plan(org_id: str, body: OrchestrationPlanCreate,
     """Persist a founder-authorized, structured work plan."""
     require_membership(org_id, p, db)
     require_founder_authority(db, org_id, p.user.id)
+    _workspace(db, org_id, body.workspace_id)
     try:
         summary, plan, root = _persist_orchestration_plan(
             db, org_id=org_id, body=body, actor_user_id=p.user.id
