@@ -4,6 +4,7 @@ import uuid
 
 import pytest
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import sessionmaker
 
 from app.db import set_rls_context, verify_postgres_role
@@ -62,7 +63,9 @@ def test_worker_is_nobypassrls_and_scoped_to_one_workspace():
 
         with Worker() as db:
             assert db.query(Task).count() == 0
-            db.commit()
+            with pytest.raises(DBAPIError):
+                db.execute(text("SELECT id FROM public.browser_sessions LIMIT 1"))
+            db.rollback()
     finally:
         with Admin() as db:
             db.query(Task).filter(Task.org_id.in_([org_a.id, org_b.id])).delete(synchronize_session=False)
