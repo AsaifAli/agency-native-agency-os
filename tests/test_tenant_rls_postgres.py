@@ -3,11 +3,11 @@ import os
 import uuid
 from datetime import datetime, timedelta, timezone
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import DBAPIError
 from app.db import set_rls_context, verify_postgres_role
-from app.models import Membership, Organization, Role, Task, User, Workspace, WorkspaceGrant
+from app.models import AuditEvent, FounderAuthority, Membership, Organization, Role, Task, User, Workspace, WorkspaceGrant
 from app.security_models import BrowserSession
 
 ADMIN_URL = os.getenv("AGENCY_OS_TEST_RLS_ADMIN_DATABASE_URL")
@@ -101,3 +101,102 @@ def test_postgres_rls_blocks_cross_org_reads_writes_and_pool_context_leaks():
             db.query(User).filter(User.id.in_([user_a.id, user_b.id])).delete(synchronize_session=False)
             db.commit()
         app_engine.dispose(); admin_engine.dispose()
+
+
+
+def test_postgres_workspace_grant_functions_require_authority_and_audit_changes():
+    admin_engine = create_engine(ADMIN_URL, pool_pre_ping=True)
+    app_engine = create_engine(APP_URL, pool_size=1, max_overflow=0, pool_pre_ping=True)
+    Admin = sessionmaker(bind=admin_engine, expire_on_commit=False)
+    App = sessionmaker(bind=app_engine, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    org = Organization(name=f"Grant function org {suffix}")
+    founder = User(email=f"grant-founder-{suffix}@example.test")
+    member = User(email=f"grant-member-{suffix}@example.test")
+    outsider = User(email=f"grant-outsider-{suffix}@example.test")
+    try:
+        with Admin() as db:
+            db.add_all([org, founder, member, outsider])
+            db.flush()
+            workspace = Workspace(org_id=org.id, name="Grant lifecycle", created_by=founder.id)
+            db.add(workspace)
+            db.flush()
+            db.add_all([
+                Membership(org_id=org.id, user_id=founder.id, role=Role.owner),
+                Membership(org_id=org.id, user_id=member.id, role=Role.viewer),
+                Membership(org_id=org.id, user_id=outsider.id, role=Role.owner),
+                FounderAuthority(org_id=org.id, user_id=founder.id, active=True),
+                Task(org_id=org.id, workspace_id=workspace.id,
+                     title="Grant lifecycle task", created_by=founder.id),
+            ])
+            db.commit()
+
+        with App() as db:
+            set_rls_context(db, user_id=founder.id)
+            creator_grant_id = db.execute(
+                text("SELECT agency_os_private.grant_workspace_access(:org, :workspace, :target, :actor)"),
+                {"org": org.id, "workspace": workspace.id,
+                 "target": founder.id, "actor": founder.id},
+            ).scalar_one()
+            member_grant_id = db.execute(
+                text("SELECT agency_os_private.grant_workspace_access(:org, :workspace, :target, :actor)"),
+                {"org": org.id, "workspace": workspace.id,
+                 "target": member.id, "actor": founder.id},
+            ).scalar_one()
+            assert creator_grant_id and member_grant_id
+            db.commit()
+
+        with App() as db:
+            set_rls_context(db, user_id=outsider.id)
+            with pytest.raises(DBAPIError):
+                db.execute(
+                    text("SELECT agency_os_private.grant_workspace_access(:org, :workspace, :target, :actor)"),
+                    {"org": org.id, "workspace": workspace.id,
+                     "target": outsider.id, "actor": outsider.id},
+                )
+            db.rollback()
+
+        with App() as db:
+            set_rls_context(db, user_id=member.id)
+            assert db.query(Task).filter_by(org_id=org.id, workspace_id=workspace.id).count() == 1
+            db.commit()
+
+        with App() as db:
+            set_rls_context(db, user_id=founder.id)
+            assert db.execute(
+                text("SELECT agency_os_private.revoke_workspace_access(:org, :workspace, :target, :actor)"),
+                {"org": org.id, "workspace": workspace.id,
+                 "target": member.id, "actor": founder.id},
+            ).scalar_one() is True
+            db.commit()
+
+        with App() as db:
+            set_rls_context(db, user_id=member.id)
+            assert db.query(Task).filter_by(org_id=org.id, workspace_id=workspace.id).count() == 0
+            db.commit()
+
+        with Admin() as db:
+            events = db.query(AuditEvent).filter(
+                AuditEvent.org_id == org.id,
+                AuditEvent.event_type.in_([
+                    "workspace.access_granted", "workspace.access_revoked",
+                ]),
+            ).all()
+            assert len(events) == 3
+            assert {event.event_type for event in events} == {
+                "workspace.access_granted", "workspace.access_revoked",
+            }
+    finally:
+        with Admin() as db:
+            if org.id:
+                db.query(AuditEvent).filter_by(org_id=org.id).delete(synchronize_session=False)
+                db.query(WorkspaceGrant).filter_by(org_id=org.id).delete(synchronize_session=False)
+                db.query(Task).filter_by(org_id=org.id).delete(synchronize_session=False)
+                db.query(FounderAuthority).filter_by(org_id=org.id).delete(synchronize_session=False)
+                db.query(Membership).filter_by(org_id=org.id).delete(synchronize_session=False)
+                db.query(Workspace).filter_by(org_id=org.id).delete(synchronize_session=False)
+                db.query(Organization).filter_by(id=org.id).delete(synchronize_session=False)
+                db.query(User).filter(User.id.in_([founder.id, member.id, outsider.id])).delete(synchronize_session=False)
+                db.commit()
+        app_engine.dispose()
+        admin_engine.dispose()
