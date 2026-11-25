@@ -180,7 +180,9 @@ class ManagedAgentsRuntime(AgentRuntime):
         return enabled
 
     @staticmethod
-    def _waiting_for_custom_tool_resume(events: list[dict]) -> bool:
+    def _waiting_for_custom_tool_resume(events: list[dict], enabled_tools: dict[str, str]) -> bool:
+        if not enabled_tools:
+            return False
         idle_events = [event for event in events if event.get("type") == "session.status_idle"]
         if not idle_events:
             return False
@@ -456,7 +458,7 @@ class ManagedAgentsRuntime(AgentRuntime):
                     stop_type = stop_reason.get("type") if isinstance(stop_reason, dict) else None
                     if stop_type == "end_turn":
                         return self._extract_result(events, session_id)
-                    if stop_type == "requires_action" and self._waiting_for_custom_tool_resume(events):
+                    if stop_type == "requires_action" and self._waiting_for_custom_tool_resume(events, enabled_tools):
                         self.sleep(self.config.claude_managed_poll_interval_seconds)
                         continue
                     if stop_type in {"requires_action", "budget_reached", "refusal", "retries_exhausted"}:
