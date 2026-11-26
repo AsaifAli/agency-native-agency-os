@@ -149,3 +149,17 @@ def test_pause_rejects_execution_outside_requested_workspace(pause_context):
             ctx["db"], execution_id=ctx["execution_id"], org_id=ctx["org_id"],
             workspace_id="other-workspace", actor_user_id=ctx["user_id"],
         )
+
+
+
+def test_pause_rejects_active_runtime_without_safe_interrupt_support(pause_context):
+    ctx = pause_context
+    execution = ctx["db"].get(Execution, ctx["execution_id"])
+    execution.runtime = "mock"
+    execution.status = ExecutionStatus.running
+    ctx["db"].commit()
+    with pytest.raises(InvalidExecutionState, match="cannot safely pause"):
+        request_execution_pause(
+            ctx["db"], execution_id=execution.id, org_id=ctx["org_id"],
+            workspace_id=ctx["workspace_id"], actor_user_id=ctx["user_id"],
+        )
