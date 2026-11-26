@@ -18,6 +18,7 @@ from app.execution_controls import (
     ExecutionNotFound,
     InvalidExecutionState,
     request_execution_pause,
+    request_execution_cancel,
     resume_execution,
     acknowledge_execution_pause,
     persist_execution_control_event,
@@ -213,3 +214,34 @@ def test_worker_persists_pause_only_after_runtime_acknowledgement(pause_context,
         assert verify_db.query(AuditEvent).filter_by(
             resource_id=ctx["execution_id"], event_type="execution.paused"
         ).count() == 1
+
+
+
+def test_stop_supersedes_pause_without_losing_provider_interrupt_reference(pause_context):
+    ctx = pause_context
+    execution = ctx["db"].get(Execution, ctx["execution_id"])
+    execution.status = ExecutionStatus.running
+    attempt = ExecutionAttempt(
+        execution_id=execution.id, attempt_number=1, worker_id="pause-worker",
+        runtime=execution.runtime, status=ExecutionAttemptStatus.running,
+        lease_expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+    )
+    ctx["db"].add(attempt)
+    ctx["db"].commit()
+    request_execution_pause(
+        ctx["db"], execution_id=execution.id, org_id=ctx["org_id"],
+        workspace_id=ctx["workspace_id"], actor_user_id=ctx["user_id"],
+    )
+    ctx["db"].commit()
+    persist_execution_control_event(
+        ctx["db"], execution_id=execution.id, attempt_id=attempt.id,
+        worker_id="pause-worker", action="pause", provider_event_id="evt_pause_keep",
+    )
+    ctx["db"].commit()
+    stopped = request_execution_cancel(
+        ctx["db"], execution_id=execution.id, org_id=ctx["org_id"],
+        workspace_id=ctx["workspace_id"], actor_user_id=ctx["user_id"],
+    )
+    ctx["db"].commit()
+    assert stopped.request_metadata["control_request"]["action"] == "cancel"
+    assert stopped.request_metadata["control_request"]["interrupt_event_id"] == "evt_pause_keep"
