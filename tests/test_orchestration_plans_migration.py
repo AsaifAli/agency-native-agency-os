@@ -66,6 +66,7 @@ def test_orchestration_migration_adds_check_constraint_and_catalogue_on_sqlite()
     _base_schema(engine)
 
     _run_upgrade(engine)
+    _run_upgrade(engine)
 
     inspector = sa.inspect(engine)
     assert inspector.has_table("orchestration_plans")
