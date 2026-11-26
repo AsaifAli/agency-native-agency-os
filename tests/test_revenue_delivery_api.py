@@ -6,9 +6,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.auth import Principal, get_principal
-from app.db import Base, get_db
+from app.db import Base, get_db, set_rls_context
 from app.domain_routes import router
-from app.models import FounderAuthority, Membership, Organization, Role, User, Workspace
+from app.models import FounderAuthority, Membership, Organization, Role, User, Workspace, WorkspaceGrant
 from app.domain_models import Client
 import app.domain_models  # noqa: F401
 
@@ -33,6 +33,9 @@ def client():
     db.add_all([ws, other_ws])
     db.add(Membership(org_id=org.id, user_id=user.id, role=Role.owner))
     db.flush()
+    db.add(WorkspaceGrant(
+        org_id=org.id, workspace_id=ws.id, user_id=user.id, granted_by=user.id,
+    ))
     foreign_client = Client(
         org_id=other_org.id, workspace_id=other_ws.id,
         name="Foreign client", created_by=user.id,
@@ -46,6 +49,7 @@ def client():
     def override_db():
         session = TestingSession()
         try:
+            set_rls_context(session, user_id=user.id)
             yield session
         finally:
             session.close()
