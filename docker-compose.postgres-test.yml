@@ -60,6 +60,8 @@ services:
       - "-c"
       - "GRANT EXECUTE ON FUNCTION agency_os_private.user_has_workspace_access(text, text, text) TO agency_os_test_app"
       - "-c"
+      - "GRANT EXECUTE ON FUNCTION agency_os_private.worker_has_execution_context(text, text, text) TO agency_os_test_app"
+      - "-c"
       - "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO agency_os_test_app"
       - "-c"
       - "GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO agency_os_test_app"
@@ -78,7 +80,7 @@ services:
       - "-c"
       - "GRANT EXECUTE ON FUNCTION agency_os_private.user_has_workspace_access(text, text, text) TO agency_os_worker"
       - "-c"
-      - "GRANT EXECUTE ON FUNCTION agency_os_private.worker_workspace_scopes() TO agency_os_worker"
+      - "REVOKE EXECUTE ON FUNCTION agency_os_private.worker_workspace_scopes() FROM PUBLIC, agency_os_worker"
       - "-c"
       - "GRANT EXECUTE ON FUNCTION agency_os_private.prune_expired_browser_sessions(integer, integer) TO agency_os_worker"
     depends_on:
