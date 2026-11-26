@@ -28,7 +28,7 @@ def _run(engine: sa.Engine, operation: str) -> None:
             MIGRATION.op = original_op
 
 
-def _database() -> sa.Engine:
+def _database(*, existing_created_by: bool = False) -> sa.Engine:
     engine = sa.create_engine("sqlite://")
     metadata = sa.MetaData()
     organizations = sa.Table(
@@ -45,6 +45,10 @@ def _database() -> sa.Engine:
         metadata,
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("org_id", sa.String(36), sa.ForeignKey("organizations.id"), nullable=False),
+        *(
+            [sa.Column("created_by", sa.String(36), nullable=True)]
+            if existing_created_by else []
+        ),
         sa.UniqueConstraint("org_id", "id", name="uq_workspaces_org_id"),
     )
     memberships = sa.Table(
@@ -111,3 +115,19 @@ def test_workspace_authorization_migration_downgrade_removes_only_added_sqlite_s
         column["name"] for column in inspector.get_columns("workspaces")
     }
     assert len(inspector.get_foreign_keys("workspaces")) == 1
+
+
+def test_workspace_authorization_migration_resumes_when_created_by_column_already_exists():
+    engine = _database(existing_created_by=True)
+
+    _run(engine, "upgrade")
+
+    inspector = sa.inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("workspaces")}
+    foreign_keys = {
+        foreign_key.get("name")
+        for foreign_key in inspector.get_foreign_keys("workspaces")
+    }
+    assert "created_by" in columns
+    assert "fk_workspaces_created_by_users" in foreign_keys
+    assert "workspace_grants" in inspector.get_table_names()
