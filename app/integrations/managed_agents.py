@@ -503,6 +503,9 @@ class ManagedAgentsRuntime(AgentRuntime):
                     if request.control_check is not None
                     else None
                 )
+                if interrupt_sent and control_action == "cancel":
+                    # Cancellation supersedes an in-flight pause request.
+                    interrupt_action = "cancel"
                 if control_action in {"cancel", "pause"} and not interrupt_sent:
                     interrupt_action = control_action
                     # Managed Agents acknowledges interruption asynchronously.
@@ -533,9 +536,9 @@ class ManagedAgentsRuntime(AgentRuntime):
                 status = session.get("status")
                 if status in {"failed", "error", "archived", "terminated"}:
                     if interrupt_sent and status == "terminated":
-                        raise RuntimeCancelled(
-                            "Claude Managed Agents session terminated after cancellation."
-                        )
+                        if interrupt_action == "pause":
+                            raise RuntimeManualReviewRequired("Provider terminated the session during a pause request; resume is not safe.")
+                        raise RuntimeCancelled("Claude Managed Agents session terminated after cancellation.")
                     raise RuntimeExecutionError(
                         "Claude Managed Agents session ended unsuccessfully."
                     )
