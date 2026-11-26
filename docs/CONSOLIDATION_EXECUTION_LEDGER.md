@@ -220,3 +220,25 @@ The current GUC trust issue is a security-boundary defect, not a missing predica
 - Do not claim resistance to a fully compromised API process: the API is the human identity assertion issuer and remains a trusted application boundary. The database must, however, reject forged claims from stolen app/worker database credentials alone.
 
 **Status:** design and threat boundary documented; implementation not yet started or verified. PR remains draft until both human and worker paths are complete and negative PostgreSQL tests pass.
+
+
+### Follow-up source audit: worker role contract and scope establishment (2026-11-26)
+
+A second source pass inspected `app/db.py`, `app/auth.py`, `app/config.py`, `app/worker/runner.py`, `app/worker/processor.py`, `app/worker_service.py`, the PostgreSQL RLS migrations, the Compose test harness and the live role tests.
+
+Additional findings:
+
+- `app/worker/runner.py` calls `list_worker_scopes()`, loops over every returned org/workspace pair, and creates a `scoped_worker_session_factory(org_id, workspace_id, ...)`. This is a direct application-level arbitrary-scope selection path, not merely an internal queue scheduling detail.
+- `app/worker/processor.py` performs the initial claim, start, heartbeat and subsequent execution mutations through that caller-selected session factory. `claim_next_execution()` in `app/worker_service.py` is an ORM transaction, not yet a database-owned claim-and-bind operation. The follow-up hardening must therefore change both the worker polling contract and the lease lifecycle boundary; changing only RLS predicates or deleting the inventory function would break the worker.
+- `migrations/versions/t0a1b2c3d4e5_postgresql_tenant_row_level_security.py` builds RLS predicates directly from caller-settable `current_setting(...)` values. `u1b2c3d4e5f6_worker_nobypassrls_scope.py` narrows worker table privileges and adds bounded maintenance functions, but its `worker_workspace_scopes()` function returns all workspace IDs and does not bind a scope to a lease.
+- The worker role is intentionally `NOBYPASSRLS` in `docker/postgres/test-init.sql`, and the Compose grant step explicitly runs `ALTER ROLE agency_os_worker NOBYPASSRLS`. However, `app/config.py` production validation currently rejects `agency_os_app` as the worker URL user with an error saying the worker must use a dedicated **BYPASSRLS** worker role. That contradicts the migration, test role setup and stated security contract. This validation text/condition must be corrected as part of the worker-role hardening, with a configuration regression test; do not change the database role to BYPASSRLS to satisfy the incorrect check.
+- `set_rls_context()` stores raw identity and scope values in `Session.info` and writes them with `set_config(..., true)`. It also reapplies them after transaction begin. The API path currently sets the human user ID after bearer/browser-session authentication; the worker path sets org/workspace directly. Browser-session bootstrap uses a separate token-hash GUC. All three paths need an explicit trusted replacement, not a partial conversion.
+
+#### Implementation guardrails added by this review
+
+- Preserve the current NOBYPASSRLS app and worker roles; do not “fix” the config mismatch by granting BYPASSRLS.
+- Do not add a generic SECURITY DEFINER function that accepts org/workspace arguments from the worker. The claim function must derive scope from the selected eligible execution under lock and bind the claim to the worker/attempt tuple.
+- Keep global retention, outbox dispatch/reconciliation, machine-session expiry, retry promotion and expired-lease recovery as separate reviewed operations. Each needs a bounded contract and must not depend on arbitrary workspace scope selection.
+- Treat the existing 61-pass PostgreSQL result as historical evidence for the previous code only. No signed-scope implementation or new PostgreSQL verification has been performed in this follow-up.
+
+**Status update:** source audit refined; implementation remains not started. Tenant-isolation acceptance remains blocked. No runtime tests were run in this environment, and no production configuration or database role was changed.
