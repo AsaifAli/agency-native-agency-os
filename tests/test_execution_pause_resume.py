@@ -107,9 +107,14 @@ def test_resume_paused_execution_queues_same_provider_session_and_rotates_token(
     execution = ctx["db"].get(Execution, ctx["execution_id"])
     execution.status = ExecutionStatus.paused
     execution.request_metadata = {
-        "provider_session_id": "sesn_existing",
         "control_request": {"action": "pause", "requested_by": ctx["user_id"]},
     }
+    attempt = ExecutionAttempt(
+        execution_id=execution.id, attempt_number=1, worker_id="old-worker",
+        runtime=execution.runtime, status=ExecutionAttemptStatus.paused,
+        external_run_id="sesn_existing",
+    )
+    ctx["db"].add(attempt)
     ctx["db"].commit()
 
     resumed = resume_execution(
@@ -122,7 +127,8 @@ def test_resume_paused_execution_queues_same_provider_session_and_rotates_token(
     assert control["action"] == "resume"
     assert control["resume_token"]
     assert control["resume_event_id"] is None
-    assert resumed.request_metadata["provider_session_id"] == "sesn_existing"
+    saved_attempt = ctx["db"].query(ExecutionAttempt).filter_by(execution_id=execution.id).one()
+    assert saved_attempt.external_run_id == "sesn_existing"
 
 
 def test_resume_rejects_non_paused_execution(pause_context):
