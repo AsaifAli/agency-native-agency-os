@@ -407,6 +407,12 @@ def test_worker_claim_rpc_issues_a_live_workspace_bound_capability():
     finally:
         with Admin() as db:
             db.execute(text("DELETE FROM public.audit_events WHERE org_id = :org"), {"org": org.id})
+            db.execute(text("""
+                DELETE FROM public.execution_attempts
+                WHERE execution_id IN (
+                    SELECT id FROM public.executions WHERE org_id = :org
+                )
+            """), {"org": org.id})
             db.execute(text("DELETE FROM public.executions WHERE org_id = :org"), {"org": org.id})
             db.execute(text("DELETE FROM public.machine_identities WHERE org_id = :org"), {"org": org.id})
             db.execute(text("DELETE FROM public.tasks WHERE org_id = :org"), {"org": org.id})
@@ -485,6 +491,12 @@ def test_worker_processor_completes_execution_end_to_end_with_capability(monkeyp
     finally:
         with Admin() as db:
             db.execute(text("DELETE FROM public.audit_events WHERE org_id = :org"), {"org": org.id})
+            db.execute(text("""
+                DELETE FROM public.execution_attempts
+                WHERE execution_id IN (
+                    SELECT id FROM public.executions WHERE org_id = :org
+                )
+            """), {"org": org.id})
             db.execute(text("DELETE FROM public.executions WHERE org_id = :org"), {"org": org.id})
             db.execute(text("DELETE FROM public.tasks WHERE org_id = :org"), {"org": org.id})
             db.execute(text("DELETE FROM public.agents WHERE org_id = :org"), {"org": org.id})
