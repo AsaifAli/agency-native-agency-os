@@ -234,6 +234,8 @@ def request_execution_pause(
     existing = metadata.get("control_request")
     if isinstance(existing, dict) and existing.get("action") == "pause":
         return execution
+    if isinstance(existing, dict) and existing.get("action") == "cancel":
+        raise InvalidExecutionState("Cancellation is already requested and cannot be downgraded to pause")
     if execution.status == ExecutionStatus.paused:
         return execution
     if execution.runtime != "claude_managed_agents" and not (
