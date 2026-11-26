@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 from app.integrations.managed_agents import ManagedAgentsRuntime
-from app.integrations.runtime import ExecutionRequest, RuntimeManualReviewRequired, RuntimeTransientError, RuntimeNotConfiguredError
+from app.integrations.runtime import ExecutionRequest, RuntimeManualReviewRequired, RuntimeTransientError, RuntimeNotConfiguredError, RuntimeCancelled
 from app.models import DataClass
 
 
@@ -493,3 +493,44 @@ def test_managed_agents_propagates_unexpected_os_tool_failures_for_worker_retry(
     with pytest.raises(RuntimeTransientError):
         runtime.start(request(execute_custom_tool=unavailable))
     assert posted == []
+
+
+def test_managed_agents_interrupts_and_drains_session_on_os_cancellation():
+    state = {"control_checks": 0, "interrupts": 0}
+
+    def control_check():
+        state["control_checks"] += 1
+        return "cancel" if state["control_checks"] >= 2 else None
+
+    def handler(req):
+        if req.method == "GET" and req.url.path == "/v1/agents/agent_test":
+            return httpx.Response(200, json={
+                "id": "agent_test", "archived_at": None,
+                "tools": [], "mcp_servers": [], "skills": [], "multiagent": None,
+            })
+        if req.method == "POST" and req.url.path == "/v1/sessions":
+            return httpx.Response(200, json={"id": "sesn_cancel"})
+        if req.method == "POST" and req.url.path == "/v1/sessions/sesn_cancel/events":
+            payload = json.loads(req.content)
+            assert payload["events"] == [{"type": "user.interrupt"}]
+            state["interrupts"] += 1
+            return httpx.Response(200, json={"data": []})
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_cancel":
+            return httpx.Response(200, json={"id": "sesn_cancel", "status": "idle"})
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_cancel/events":
+            return httpx.Response(200, json={"data": []})
+        return httpx.Response(404)
+
+    runtime = ManagedAgentsRuntime(
+        config(),
+        client_factory=lambda: httpx.Client(
+            base_url="https://api.anthropic.com",
+            transport=httpx.MockTransport(handler),
+        ),
+        sleep=lambda _seconds: None,
+    )
+    with pytest.raises(RuntimeCancelled):
+        runtime.start(request(control_check=control_check))
+
+    assert state["interrupts"] == 1
+    assert state["control_checks"] >= 2
