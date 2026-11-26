@@ -7,6 +7,7 @@ observed it or the execution was still safely queued.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import uuid
 
 from sqlalchemy.orm import Session
 
@@ -82,7 +83,7 @@ def request_execution_cancel(
     execution.request_metadata = metadata
     execution.updated_at = now
 
-    if execution.status in {ExecutionStatus.queued, ExecutionStatus.retry_wait} and execution.attempt_count == 0:
+    if (execution.status in {ExecutionStatus.queued, ExecutionStatus.retry_wait} and execution.attempt_count == 0) or execution.status == ExecutionStatus.paused:
         execution.status = ExecutionStatus.cancelled
         execution.finished_at = now
         execution.error_code = "EXECUTION_CANCELLED"
@@ -210,3 +211,174 @@ def acknowledge_execution_cancel(
     )
     db.flush()
     return execution, attempt
+
+
+
+def request_execution_pause(
+    db: Session, *, execution_id: str, org_id: str, workspace_id: str,
+    actor_user_id: str,
+) -> Execution:
+    """Persist a pause request; active work is paused only after provider acknowledgement."""
+    if not actor_user_id:
+        raise ValueError("actor_user_id is required")
+    execution = (
+        db.query(Execution)
+        .filter_by(id=execution_id, org_id=org_id, workspace_id=workspace_id)
+        .with_for_update().one_or_none()
+    )
+    if execution is None:
+        raise ExecutionNotFound("Execution not found")
+    if execution.status in {ExecutionStatus.succeeded, ExecutionStatus.failed, ExecutionStatus.cancelled}:
+        raise InvalidExecutionState("A terminal execution cannot be paused")
+    metadata = dict(execution.request_metadata or {})
+    existing = metadata.get("control_request")
+    if isinstance(existing, dict) and existing.get("action") == "pause":
+        return execution
+    if execution.status == ExecutionStatus.paused:
+        return execution
+
+    now = datetime.now(timezone.utc)
+    previous_status = execution.status.value
+    metadata["control_request"] = {
+        "action": "pause", "requested_at": now.isoformat(),
+        "requested_by": actor_user_id,
+    }
+    execution.request_metadata = metadata
+    execution.updated_at = now
+
+    if execution.status == ExecutionStatus.queued and execution.attempt_count == 0:
+        execution.status = ExecutionStatus.paused
+        _sync_task_delegation(db, execution, "paused")
+        _sync_plan_draft_execution(db, execution, "paused")
+        record_event(db, org_id, actor_user_id, "execution.paused",
+                     "execution", execution.id, workspace_id,
+                     {"previous_status": previous_status, "control": "pause",
+                      "provider_interruption_acknowledged": False,
+                      "reason": "not_started"})
+    else:
+        if execution.status in {ExecutionStatus.queued, ExecutionStatus.retry_wait}:
+            if execution.attempt_count >= execution.max_attempts:
+                execution.status = ExecutionStatus.failed
+                execution.finished_at = now
+                execution.error_code = "PAUSE_REQUIRES_MANUAL_REVIEW"
+                execution.error_message = "Pause requested after retry exhaustion; provider state requires manual reconciliation."
+                _sync_task_delegation(db, execution, "failed", execution.error_code)
+                _sync_plan_draft_execution(db, execution, "failed", execution.error_code)
+                record_event(db, org_id, actor_user_id, "execution.pause_reconciliation_required",
+                             "execution", execution.id, workspace_id,
+                             {"previous_status": previous_status, "control": "pause"})
+                db.flush()
+                return execution
+            execution.status = ExecutionStatus.queued
+            execution.next_retry_at = None
+            execution.queued_at = now
+        record_event(db, org_id, actor_user_id, "execution.pause_requested",
+                     "execution", execution.id, workspace_id,
+                     {"previous_status": previous_status, "control": "pause"})
+    db.flush()
+    return execution
+
+
+def acknowledge_execution_pause(
+    db: Session, *, execution_id: str, attempt_id: str, worker_id: str,
+) -> tuple[Execution, object]:
+    """Acknowledge pause only after the provider adapter confirms idle/drained state."""
+    execution, attempt = _get_owned_execution_attempt(
+        db, execution_id=execution_id, attempt_id=attempt_id, worker_id=worker_id,
+    )
+    request = (execution.request_metadata or {}).get("control_request")
+    if not isinstance(request, dict) or request.get("action") != "pause":
+        raise InvalidExecutionState("No durable pause request exists")
+    if execution.status not in {ExecutionStatus.claimed, ExecutionStatus.running}:
+        raise InvalidExecutionState("Execution is not in an active pausable state")
+    if attempt.status not in {ExecutionAttemptStatus.claimed, ExecutionAttemptStatus.running}:
+        raise InvalidExecutionState("Attempt is not active")
+    now = datetime.now(timezone.utc)
+    execution.status = ExecutionStatus.paused
+    execution.finished_at = None
+    execution.error_code = None
+    execution.error_message = None
+    attempt.status = ExecutionAttemptStatus.paused
+    attempt.finished_at = now
+    attempt.lease_expires_at = None
+    attempt.heartbeat_at = now
+    attempt.error_code = None
+    attempt.error_message = None
+    _sync_task_delegation(db, execution, "paused")
+    _sync_plan_draft_execution(db, execution, "paused")
+    record_event(
+        db, execution.org_id, request.get("requested_by"), "execution.paused",
+        "execution", execution.id, execution.workspace_id,
+        {"attempt_id": attempt.id, "attempt_number": attempt.attempt_number,
+         "worker_id": worker_id, "provider_interruption_acknowledged": True},
+    )
+    db.flush()
+    return execution, attempt
+
+
+def resume_execution(
+    db: Session, *, execution_id: str, org_id: str, workspace_id: str,
+    actor_user_id: str,
+) -> Execution:
+    """Queue a paused execution to continue its existing provider session."""
+    if not actor_user_id:
+        raise ValueError("actor_user_id is required")
+    execution = (
+        db.query(Execution)
+        .filter_by(id=execution_id, org_id=org_id, workspace_id=workspace_id)
+        .with_for_update().one_or_none()
+    )
+    if execution is None:
+        raise ExecutionNotFound("Execution not found")
+    if execution.status != ExecutionStatus.paused:
+        raise InvalidExecutionState("Only a paused execution can be resumed")
+    if execution.attempt_count >= execution.max_attempts:
+        raise InvalidExecutionState("Execution retry budget is exhausted; manual review is required")
+    now = datetime.now(timezone.utc)
+    metadata = dict(execution.request_metadata or {})
+    metadata["control_request"] = {
+        "action": "resume", "requested_at": now.isoformat(),
+        "requested_by": actor_user_id, "resume_token": uuid.uuid4().hex,
+        "resume_event_id": None,
+    }
+    execution.request_metadata = metadata
+    execution.status = ExecutionStatus.queued
+    execution.next_retry_at = None
+    execution.queued_at = now
+    execution.finished_at = None
+    execution.error_code = None
+    execution.error_message = None
+    execution.updated_at = now
+    _sync_task_delegation(db, execution, "queued")
+    _sync_plan_draft_execution(db, execution, "queued")
+    record_event(
+        db, org_id, actor_user_id, "execution.resume_requested",
+        "execution", execution.id, workspace_id,
+        {"resume_token": metadata["control_request"]["resume_token"],
+         "provider_session_reuse_required": True},
+    )
+    db.flush()
+    return execution
+
+
+def persist_execution_resume_event(
+    db: Session, *, execution_id: str, attempt_id: str, worker_id: str,
+    resume_token: str, provider_event_id: str,
+) -> None:
+    """Persist the provider resume event under the current worker lease."""
+    if not isinstance(provider_event_id, str) or not provider_event_id.strip():
+        raise ValueError("provider_event_id is required")
+    execution, _attempt = _get_owned_execution_attempt(
+        db, execution_id=execution_id, attempt_id=attempt_id, worker_id=worker_id,
+    )
+    metadata = dict(execution.request_metadata or {})
+    request = dict(metadata.get("control_request") or {})
+    if request.get("action") != "resume" or request.get("resume_token") != resume_token:
+        raise InvalidExecutionState("Resume token no longer matches the active request")
+    existing = request.get("resume_event_id")
+    if existing and existing != provider_event_id:
+        raise InvalidExecutionState("A different provider resume event is already persisted")
+    request["resume_event_id"] = provider_event_id
+    metadata["control_request"] = request
+    execution.request_metadata = metadata
+    db.flush()
