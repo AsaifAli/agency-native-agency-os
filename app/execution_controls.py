@@ -402,3 +402,30 @@ def persist_execution_resume_event(
     metadata["control_request"] = request
     execution.request_metadata = metadata
     db.flush()
+
+
+
+def persist_execution_control_event(
+    db: Session, *, execution_id: str, attempt_id: str, worker_id: str,
+    action: str, provider_event_id: str,
+) -> None:
+    """Persist the provider interrupt ID while the worker still owns its lease."""
+    if action not in {"pause", "cancel"}:
+        raise ValueError("action must be pause or cancel")
+    if not isinstance(provider_event_id, str) or not provider_event_id.strip():
+        raise ValueError("provider_event_id is required")
+    execution, _attempt = _get_owned_execution_attempt(
+        db, execution_id=execution_id, attempt_id=attempt_id, worker_id=worker_id,
+    )
+    metadata = dict(execution.request_metadata or {})
+    request = dict(metadata.get("control_request") or {})
+    if request.get("action") not in {"pause", "cancel"}:
+        raise InvalidExecutionState("No active provider interruption request exists")
+    existing = request.get("interrupt_event_id")
+    if existing and existing != provider_event_id:
+        raise InvalidExecutionState("A different provider interrupt event is already persisted")
+    request["interrupt_event_id"] = provider_event_id
+    request["interrupt_action"] = action
+    metadata["control_request"] = request
+    execution.request_metadata = metadata
+    db.flush()
