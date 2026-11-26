@@ -39,21 +39,21 @@ def app_client():
         WorkspaceGrant(org_id=org.id, workspace_id=workspace.id, user_id=operator.id, granted_by=founder.id),
     ])
     db.commit()
-    identity={"user":founder, "org":org, "workspace":workspace, "operator":operator}
+    identity={"user":founder, "principal":founder, "org":org, "workspace":workspace, "operator":operator}
     from app.main import app
     app.dependency_overrides.clear()
     def override_db():
         session=factory()
         try:
-            set_rls_context(session, user_id=identity["user"].id)
+            set_rls_context(session, user_id=identity["principal"].id)
             yield session
         finally:
             session.close()
     app.dependency_overrides[get_db]=override_db
-    app.dependency_overrides[get_principal]=lambda:Principal(user=identity["user"])
+    app.dependency_overrides[get_principal]=lambda:Principal(user=identity["principal"])
     client=TestClient(app)
     client.identity=identity
-    client.set_principal = lambda selected_user: identity.update(user=selected_user)
+    client.set_principal = lambda selected_user: identity.update(principal=selected_user)
     client.factory=factory
     yield client
     db.close(); Base.metadata.drop_all(engine); engine.dispose()
