@@ -12,6 +12,7 @@ from app.models import (
     Workspace,
     Role,
     FounderAuthority,
+    WorkspaceGrant,
 )
 
 client = TestClient(app)
@@ -86,6 +87,20 @@ def setup_module():
                     name="Approval Workspace",
                 )
             )
+            db.flush()
+
+        workspace = db.query(Workspace).filter_by(id=WORKSPACE_ID).one()
+        grantor = db.query(User).filter_by(email=OWNER_EMAIL).one()
+        for email, _, _ in users_and_roles:
+            user = db.query(User).filter_by(email=email).one()
+            grant = db.query(WorkspaceGrant).filter_by(
+                org_id=org.id, workspace_id=workspace.id, user_id=user.id,
+            ).filter(WorkspaceGrant.revoked_at.is_(None)).first()
+            if grant is None:
+                db.add(WorkspaceGrant(
+                    org_id=org.id, workspace_id=workspace.id,
+                    user_id=user.id, granted_by=grantor.id,
+                ))
 
         db.commit()
     finally:
