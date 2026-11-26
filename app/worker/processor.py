@@ -16,6 +16,7 @@ from app.integrations.runtime import (
     RuntimeExecutionError,
     RuntimeManualReviewRequired,
     RuntimeCancelled,
+    RuntimePaused,
     RuntimeNotConfiguredError,
     RuntimeTransientError,
 )
@@ -238,6 +239,16 @@ def process_one_execution(
             request_metadata=execution.request_metadata or {},
         )
 
+        def persist_resume_event(resume_token: str, provider_event_id: str) -> None:
+            from app.execution_controls import persist_execution_resume_event
+            with session_factory() as callback_db:
+                persist_execution_resume_event(
+                    callback_db, execution_id=execution_id, attempt_id=attempt_id,
+                    worker_id=worker_id, resume_token=resume_token,
+                    provider_event_id=provider_event_id,
+                )
+                callback_db.commit()
+
         def check_execution_control() -> str | None:
             with session_factory() as control_db:
                 return get_execution_control_request(
@@ -248,6 +259,7 @@ def process_one_execution(
                 )
 
         request.control_check = check_execution_control
+        request.persist_resume_event = persist_resume_event
         runtime_name = execution.runtime
         execution_org_id = execution.org_id
         execution_workspace_id = execution.workspace_id
@@ -296,6 +308,7 @@ def process_one_execution(
     runtime_error: tuple[str, str, bool] | None = None
     serialized_result: dict | None = None
     cancellation_requested = False
+    pause_requested = False
     data_protection_block_code: str | None = None
     try:
         runtime = get_runtime(runtime_name)
@@ -352,6 +365,8 @@ def process_one_execution(
         )
     except RuntimeCancelled:
         cancellation_requested = True
+    except RuntimePaused:
+        pause_requested = True
     except RuntimeTransientError:
         runtime_error = (
             "RUNTIME_TRANSIENT_ERROR",
@@ -380,6 +395,16 @@ def process_one_execution(
         return execution_id
 
     heartbeat.assert_healthy()
+    if pause_requested:
+        from app.execution_controls import acknowledge_execution_pause
+        with session_factory() as pause_db:
+            acknowledge_execution_pause(
+                pause_db, execution_id=execution_id, attempt_id=attempt_id,
+                worker_id=worker_id,
+            )
+            pause_db.commit()
+        return execution_id
+
     if cancellation_requested:
         with session_factory() as cancel_db:
             acknowledge_execution_cancel(
