@@ -10,6 +10,9 @@ from app.models import (
     Agent, AuditEvent, DataClass, Execution, ExecutionAttempt, ExecutionAttemptStatus,
     ExecutionStatus, Organization, Task, User, Workspace,
 )
+from app.integrations.runtime import RuntimePaused
+from app.worker import processor as processor_module
+from app.worker.processor import process_one_execution
 from app.execution_controls import (
     ExecutionNotFound,
     InvalidExecutionState,
@@ -163,3 +166,35 @@ def test_pause_rejects_active_runtime_without_safe_interrupt_support(pause_conte
             ctx["db"], execution_id=execution.id, org_id=ctx["org_id"],
             workspace_id=ctx["workspace_id"], actor_user_id=ctx["user_id"],
         )
+
+
+
+def test_worker_persists_pause_only_after_runtime_acknowledgement(pause_context, monkeypatch):
+    ctx = pause_context
+    class PauseAwareRuntime:
+        def start(self, request):
+            with ctx["session_factory"]() as control_db:
+                request_execution_pause(
+                    control_db, execution_id=ctx["execution_id"],
+                    org_id=ctx["org_id"], workspace_id=ctx["workspace_id"],
+                    actor_user_id=ctx["user_id"],
+                )
+                control_db.commit()
+            raise RuntimePaused("Provider session is interrupted and idle.")
+
+    monkeypatch.setattr(processor_module, "get_runtime", lambda _name: PauseAwareRuntime())
+    processed = process_one_execution(
+        worker_id="pause-worker", session_factory=ctx["session_factory"],
+    )
+    assert processed == ctx["execution_id"]
+    with ctx["session_factory"]() as verify_db:
+        saved = verify_db.get(Execution, ctx["execution_id"])
+        attempt = verify_db.query(ExecutionAttempt).filter_by(
+            execution_id=ctx["execution_id"]
+        ).one()
+        assert saved.status == ExecutionStatus.paused
+        assert attempt.status == ExecutionAttemptStatus.paused
+        assert attempt.lease_expires_at is None
+        assert verify_db.query(AuditEvent).filter_by(
+            resource_id=ctx["execution_id"], event_type="execution.paused"
+        ).count() == 1
