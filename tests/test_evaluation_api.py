@@ -5,7 +5,7 @@ os.environ["DEV_AUTH_ENABLED"] = "true"
 from fastapi.testclient import TestClient
 from app.main import app
 from app.db import Base, engine, SessionLocal
-from app.models import User, Organization, Membership, Workspace, Role
+from app.models import User, Organization, Membership, Workspace, Role, WorkspaceGrant
 
 
 def setup_module():
@@ -17,7 +17,13 @@ def setup_module():
     db.add_all([user, org])
     db.flush()
     db.add(Membership(org_id=org.id, user_id=user.id, role=Role.owner))
-    db.add(Workspace(id="ws-eval-test", org_id=org.id, name="Evaluation Workspace"))
+    workspace = Workspace(id="ws-eval-test", org_id=org.id, name="Evaluation Workspace")
+    db.add(workspace)
+    db.flush()
+    db.add(WorkspaceGrant(
+        org_id=org.id, workspace_id=workspace.id,
+        user_id=user.id, granted_by=user.id,
+    ))
     db.commit()
     db.close()
 
