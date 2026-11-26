@@ -426,6 +426,7 @@ class ManagedAgentsRuntime(AgentRuntime):
             # Validate the provider Agent on every attempt, including recovery of a
             # persisted session. Provider-side configuration can change between retries.
             enabled_tools = self._validate_provider_agent(client, request)
+            resuming_existing_session = bool(request.external_run_id)
             session_id = request.external_run_id
             if not session_id:
                 body = {
@@ -468,7 +469,7 @@ class ManagedAgentsRuntime(AgentRuntime):
                 request.persist_external_run_id(session_id)
 
             resume_request = (request.request_metadata or {}).get("control_request") or {}
-            if resume_request.get("action") == "resume":
+            if resume_request.get("action") == "resume" and resuming_existing_session:
                 resume_token = resume_request.get("resume_token")
                 if not isinstance(resume_token, str) or not resume_token:
                     raise RuntimeManualReviewRequired("Resume request has no durable idempotency token.")
