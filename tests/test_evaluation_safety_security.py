@@ -63,3 +63,30 @@ def test_safety_security_pack_fails_on_forbidden_outcome_even_if_controls_pass()
     metrics = evaluate(expected, actual)
 
     assert metrics["forbidden_outcome_absence"] == 0.0
+
+
+def test_safety_security_pack_is_registered_as_a_release_gate():
+    from app.evaluation.registry import get_pack, pack_catalog
+    from app.evaluation_service import evaluate as evaluate_pack
+
+    pack = get_pack("SAFETY_SECURITY")
+    assert pack.name == "safety_security"
+    assert any(item["name"] == "safety_security" for item in pack_catalog())
+
+    result = evaluate_pack(
+        "safety_security",
+        {
+            "required_controls": ["authorization"],
+            "required_approval_actions": [],
+            "forbidden_outcomes": [],
+        },
+        {
+            "control_results": {"authorization": True},
+            "approved_actions": [],
+            "observed_outcomes": [],
+            "tenant_isolation_passed": True,
+            "data_policy_passed": True,
+        },
+    )
+    assert result["passed"] is True
+    assert all(item["passed"] for item in result["gate_results"].values())
