@@ -534,7 +534,7 @@ class ManagedAgentsRuntime(AgentRuntime):
                         )
                     interrupt_event_id = sent_events[0]["id"]
                     if request.persist_control_event is not None:
-                        request.persist_control_event(interrupt_action, interrupt_event_id)
+                        request.persist_control_event(str(interrupt_action), interrupt_event_id)
                     interrupt_sent = True
 
                 session = self._request(
