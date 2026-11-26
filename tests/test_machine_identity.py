@@ -55,6 +55,18 @@ def security_client():
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_principal] = lambda: Principal(user=principal["user"])
     client = TestClient(app)
+    original_request = client.request
+
+    def workspace_scoped_request(method, url, **kwargs):
+        url_text = str(url)
+        params = kwargs.get("params")
+        if "/v1/orgs/" in url_text and "workspace_id=" not in url_text:
+            scoped_params = dict(params or {})
+            scoped_params.setdefault("workspace_id", workspace.id)
+            kwargs["params"] = scoped_params
+        return original_request(method, url, **kwargs)
+
+    client.request = workspace_scoped_request
     client.org_id, client.workspace_id, client.founder = org.id, workspace.id, founder
     client.factory = factory
     client.set_principal = lambda selected_user: principal.update(user=selected_user)
