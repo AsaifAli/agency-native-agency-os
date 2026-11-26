@@ -175,3 +175,44 @@ def test_worker_acknowledges_cancel_requested_during_runtime(control_context, mo
             resource_id=ctx["execution_id"],
             event_type="execution.cancelled",
         ).count() == 1
+
+
+def test_cancel_retry_wait_requeues_for_provider_reconciliation(control_context):
+    ctx = control_context
+    execution = ctx["db"].get(Execution, ctx["execution_id"])
+    execution.status = ExecutionStatus.retry_wait
+    execution.attempt_count = 1
+    execution.max_attempts = 3
+    ctx["db"].commit()
+
+    execution = request_execution_cancel(
+        ctx["db"], execution_id=ctx["execution_id"], org_id=ctx["org_id"],
+        workspace_id=ctx["workspace_id"], actor_user_id=ctx["user_id"],
+    )
+    ctx["db"].commit()
+
+    assert execution.status == ExecutionStatus.queued
+    assert execution.next_retry_at is None
+    assert execution.request_metadata["control_request"]["action"] == "cancel"
+
+
+def test_cancel_after_retry_exhaustion_does_not_claim_successful_stop(control_context):
+    ctx = control_context
+    execution = ctx["db"].get(Execution, ctx["execution_id"])
+    execution.status = ExecutionStatus.retry_wait
+    execution.attempt_count = 3
+    execution.max_attempts = 3
+    ctx["db"].commit()
+
+    execution = request_execution_cancel(
+        ctx["db"], execution_id=ctx["execution_id"], org_id=ctx["org_id"],
+        workspace_id=ctx["workspace_id"], actor_user_id=ctx["user_id"],
+    )
+    ctx["db"].commit()
+
+    assert execution.status == ExecutionStatus.failed
+    assert execution.error_code == "CANCEL_REQUIRES_MANUAL_REVIEW"
+    assert ctx["db"].query(AuditEvent).filter_by(
+        resource_id=ctx["execution_id"],
+        event_type="execution.cancel_reconciliation_required",
+    ).count() == 1
