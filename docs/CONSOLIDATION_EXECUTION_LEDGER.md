@@ -405,3 +405,19 @@ The worker source review confirms that `run_worker()` enumerates `worker_workspa
 A partial change that merely removes the inventory function and adds a no-argument SQL claim function would be misleading: current RLS policies still trust worker-settable `agency_os.machine_org_id` and `agency_os.machine_workspace_id` settings, and the worker has direct table privileges for the existing service operations. A genuine boundary requires migrating all execution/attempt reads and writes, heartbeat/provider-run attachment, cancellation, retry/recovery, delegation synchronization, and workspace-bound outbox work to narrowly scoped database contracts, then revoking direct worker access where appropriate. It must also prevent the worker role from minting a workspace scope through custom GUCs. This is a coordinated schema + service + runner migration, not a safe one-file patch.
 
 **Decision:** do not introduce a partial claim function or remove the existing inventory yet. Preserve the known-working worker path while designing the full contract inventory and PostgreSQL tests first. The raw GUC trust weakness remains a critical, explicitly open security finding; current worker NOBYPASSRLS and scope tests protect against accidental unscoped access and pool leakage, not malicious SQL under a compromised worker credential.
+
+
+### Evaluation evidence trust boundary (2026-11-26)
+
+The ordinary workspace evaluation API accepts caller-supplied `expected` and `actual` payloads. Those values can be useful for exploratory scoring, but they are not proof that a trusted test runner executed the controls. A caller could otherwise submit a passing `safety_security` or `regression` result and have it appear indistinguishable from verified release evidence.
+
+The integration branch now persists `evaluation_runs.evidence_trust` with a migration default of `self_reported`. The normal API explicitly writes `self_reported`; `EvaluationOut` exposes that trust label and reports `release_eligible=false`. The API does not accept a client-supplied trust flag. Existing rows are backfilled by the migration default as self-reported.
+
+Verification at integration head `56137e1ce8f642f18fed6f66c4f3026a57e3895c`:
+- Evaluation API focused tests: **2 passed**, including create and list responses for a passing self-submitted safety/security payload.
+- Full suite: **453 passed, 10 skipped, 2 deprecation warnings**.
+- `python -m compileall -q app tests`: passed.
+- `python -m alembic heads`: single head `x4c8d1e6f902`.
+- Full SQLite Alembic upgrade through `x4c8d1e6f902`: passed.
+
+**Limitations:** there is still no trusted runner attestation issuer/verifier, immutable run manifest, signed artifact digest, or non-bypassable release integration. Therefore all API-created evaluations remain ineligible for release gating. This is a fail-safe classification improvement, not completion of the Evaluation Harness release gate. PostgreSQL migration and RLS verification remain pending.
