@@ -191,3 +191,32 @@ The PostgreSQL Compose harness includes `tests/test_tenant_rls_postgres.py`, `te
 **Required hardening decision before production or merge as a complete tenant-isolation control:** introduce a database-verifiable, non-forgeable scope assertion (for example, short-lived signed scope claims validated by narrowly granted SECURITY DEFINER functions, with signing authority kept outside the worker and verification material inaccessible to app/worker SQL roles), or use genuinely workspace-scoped database identities/credentials. The implementation must cover human and machine context, grant/revoke functions, execution attempts, and connection-pool reuse. Add negative PostgreSQL tests that attempt to forge a wider scope directly from the app and worker roles and prove the database rejects it. Do not weaken current RLS checks while this is unresolved.
 
 **Current classification:** RLS schema/policy coverage and representative live isolation tests are implemented and owner-tested; protection against forged custom-GUC context is a known security gap requiring design and PostgreSQL proof. Full tenant-isolation acceptance remains **blocked**.
+
+### Signed tenant-scope hardening plan (2026-11-26)
+
+The current GUC trust issue is a security-boundary defect, not a missing predicate. Do not attempt to fix it by signing a workspace ID in the worker process: the worker currently enumerates all workspace scopes, so a worker-held signing key would let a compromised worker mint a valid token for any workspace.
+
+#### Required target contract
+
+1. RLS policies must consult only database-validated, transaction-local identity/scope values. Raw caller-settable `agency_os.user_id`, `machine_org_id`, `machine_workspace_id`, `machine_identity_lookup_id` and browser-session digest settings must never be sufficient authorization inputs.
+2. Human scope assertions must be signed by the API trust boundary. The signing secret must be available to the API issuer and a narrowly scoped database verifier, but not readable by `agency_os_app` SQL or any worker process. The database verifier must validate signature, key ID, expiry, issuer/audience, scope kind and canonical claim encoding before setting trusted transaction-local values. Revocation and workspace grants must still be checked by RLS predicates at query time; a valid signature is not a substitute for live authorization.
+3. Worker scope must be bound to an actual execution/attempt lease. The worker must not be able to request a signed assertion for an arbitrary org/workspace. The intended boundary is a database-owned atomic claim operation that validates the worker role, claims one eligible execution under the existing lease/idempotency rules, and establishes the exact parent execution workspace for that transaction. Follow-on heartbeat, control, completion and failure operations must prove the same execution/attempt/worker tuple. Maintenance operations need separate bounded SECURITY DEFINER contracts rather than a general workspace-scope minting endpoint.
+4. All trusted values must be transaction-local and cleared/replaced on every transaction. Pool reuse, nested sessions, rollback, commit, and thread heartbeat sessions must not inherit another scope.
+5. API and worker roles remain non-owner and NOBYPASSRLS. No SECURITY DEFINER function may expose signing material, arbitrary scope selection, generic SQL, or an unrestricted table-wide bypass.
+
+#### Delivery sequence
+
+- **A. Threat-model tests first:** add PostgreSQL tests demonstrating direct GUC forgery for the API and worker roles, then convert them into denial assertions once the trusted path exists. Include role privilege/catalog assertions, signature tampering/expiry/audience/key-rotation cases, revoked-grant checks, cross-workspace and cross-org attempts, and pool reuse.
+- **B. Human assertion path:** add an explicit API-only signing configuration and provisioning/rotation procedure for a verifier key held in a private database schema. Add a SECURITY DEFINER verifier with a fixed search_path and strict claim schema; update authentication middleware and RLS policies to use only verifier-set trusted context. Keep browser-session bootstrap narrowly scoped and prevent arbitrary token-hash impersonation.
+- **C. Worker claim path:** move lease claim and exact workspace context establishment into an atomic database-owned operation (or an equally strong separate claim broker). Do not expose an API that signs arbitrary worker-supplied scope. Bind every worker mutation to the leased execution and attempt. Review global maintenance and outbox paths separately.
+- **D. Rollout:** support a controlled dual-read migration only during a bounded migration window; then remove raw-GUC policy references and reject legacy context calls. Test migrations from the current revision and downgrade/restore strategy on a disposable PostgreSQL instance.
+- **E. Acceptance:** PostgreSQL tests must prove that direct raw GUC writes cannot widen access, API/worker roles cannot read signing material, forged/expired/replayed/wrong-audience assertions fail, revoked grants take effect, and a worker cannot access a workspace without a valid leased execution. Run the complete existing SQLite and PostgreSQL suites, plus role/catalog inventory checks.
+
+#### Explicit non-goals
+
+- Do not use a signing key shared with the worker.
+- Do not make the worker a superuser, table owner or BYPASSRLS role.
+- Do not treat the current `worker_workspace_scopes()` inventory as authorization evidence.
+- Do not claim resistance to a fully compromised API process: the API is the human identity assertion issuer and remains a trusted application boundary. The database must, however, reject forged claims from stolen app/worker database credentials alone.
+
+**Status:** design and threat boundary documented; implementation not yet started or verified. PR remains draft until both human and worker paths are complete and negative PostgreSQL tests pass.
