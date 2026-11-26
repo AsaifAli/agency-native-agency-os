@@ -6,8 +6,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.auth import Principal, get_principal
-from app.db import Base, get_db
-from app.models import Membership, Organization, Role, User, Workspace, FounderAuthority
+from app.db import Base, get_db, set_rls_context
+from app.models import Membership, Organization, Role, User, Workspace, FounderAuthority, WorkspaceGrant
 from app.workforce_routes import router
 from app.workforce_service import initialize_workforce
 import app.domain_models  # noqa: F401 — register Revenue/Delivery tables before metadata.create_all
@@ -32,14 +32,23 @@ def app_client():
         FounderAuthority(org_id=org.id, user_id=founder.id, active=True),
     ])
     workspace = Workspace(id="wf-test", org_id=org.id, name="Agency Workspace")
-    db.add(workspace); db.commit()
+    db.add(workspace)
+    db.flush()
+    db.add_all([
+        WorkspaceGrant(org_id=org.id, workspace_id=workspace.id, user_id=founder.id, granted_by=founder.id),
+        WorkspaceGrant(org_id=org.id, workspace_id=workspace.id, user_id=operator.id, granted_by=founder.id),
+    ])
+    db.commit()
     identity={"user":founder, "org":org, "workspace":workspace, "operator":operator}
     from app.main import app
     app.dependency_overrides.clear()
     def override_db():
         session=factory()
-        try: yield session
-        finally: session.close()
+        try:
+            set_rls_context(session, user_id=identity["user"].id)
+            yield session
+        finally:
+            session.close()
     app.dependency_overrides[get_db]=override_db
     app.dependency_overrides[get_principal]=lambda:Principal(user=identity["user"])
     client=TestClient(app)
