@@ -319,3 +319,24 @@ Commits:
 - `9f67d9646c1c04cd3d10a7bae207115eec8b0c95` — verifier argument validation test.
 
 **Verification status:** source changes committed; tests not yet executed in this environment. The verifier still needs live PostgreSQL tests for actual role mismatch, and this does not resolve the caller-settable RLS GUC issue.
+
+
+### Verification run and complete call-site correction (2026-11-26)
+
+A clean ephemeral Python sandbox cloned the integration branch and installed `requirements-dev.txt`. This enabled real repository tests without modifying the user's local environment.
+
+**Executed successfully on the sandbox (Python 3.13.18):**
+- `env -u MIGRATION_DATABASE_URL DATABASE_URL=sqlite:////tmp/agency-os-api-tests.db python -m pytest -q --tb=short` — **452 passed, 10 skipped, 2 deprecation warnings** (31.47s).
+- `python -m compileall -q app tests` — passed.
+- `python -m alembic heads` — one head: `w3d5f7a9b1c3`.
+- Focused RLS context and worker startup suite — **21 passed**.
+- Repository-wide call-site search identified two additional exact-role verifier callers missed in the first pass. Updated standalone worker entrypoint and both live PostgreSQL RLS test suites to pass the exact expected role.
+
+**Not executed:** PostgreSQL Docker harness and live PostgreSQL RLS tests. The sandbox has no Docker daemon and no configured PostgreSQL test credentials. Ten skips are the PostgreSQL-only tests requiring those services/URLs. This run does not prove database role mismatch rejection against a live server, nor fix caller-settable GUC trust.
+
+Commits after the prior ledger entry:
+- `166cfc577b2188b3100e330c7a4cff7fe302f96e` — exact app role in live RLS test.
+- `85bbd213d6238550d8ee726bd1923b5087cb5834` — exact worker role in live RLS test.
+- `40dd96777f82856a52a8bc1b18e7c321de57e18c` — exact worker role in standalone process entrypoint.
+
+Tested branch head: `40dd96777f82856a52a8bc1b18e7c321de57e18c`.
