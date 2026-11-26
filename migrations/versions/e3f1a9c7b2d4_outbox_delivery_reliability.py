@@ -77,11 +77,18 @@ def upgrade() -> None:
                     f"Unexpected length for outbox_events.{name}"
                 )
 
-        if isinstance(expected_type, sa.DateTime):
-            if actual_type.timezone != expected_type.timezone:
-                raise RuntimeError(
-                    f"Unexpected timezone for outbox_events.{name}"
-                )
+        # SQLite has no native timezone-aware DATETIME type. Its SQLAlchemy
+        # inspector therefore reports timezone=False even when the schema
+        # was declared with DateTime(timezone=True). Keep this check on
+        # dialects that can represent the distinction (e.g. PostgreSQL).
+        if (
+            isinstance(expected_type, sa.DateTime)
+            and bind.dialect.name != "sqlite"
+            and actual_type.timezone != expected_type.timezone
+        ):
+            raise RuntimeError(
+                f"Unexpected timezone for outbox_events.{name}"
+            )
 
     inspector = sa.inspect(bind)
 
