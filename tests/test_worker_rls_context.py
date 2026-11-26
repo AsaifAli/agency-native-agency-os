@@ -2,7 +2,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.db import scoped_worker_session_factory
+from app.db import (
+    scoped_worker_capability_session_factory,
+    scoped_worker_workspace_session_factory,
+)
 
 
 class FakeSession:
@@ -10,10 +13,10 @@ class FakeSession:
         self.info = {}
 
     def get_bind(self):
-        return SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
+        return SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
 
 
-def test_scoped_worker_factory_sets_exact_org_and_workspace_context():
+def test_execution_capability_factory_sets_only_private_capability_context():
     sessions = []
 
     def factory():
@@ -21,20 +24,40 @@ def test_scoped_worker_factory_sets_exact_org_and_workspace_context():
         sessions.append(session)
         return session
 
-    scoped = scoped_worker_session_factory("org-123", "workspace-456", factory)
-    session = scoped()
+    capability = SimpleNamespace(
+        token=b"x" * 32, execution_id="exec-1", attempt_id="attempt-1",
+        worker_id="worker-1", lease_generation=1,
+    )
+    session = scoped_worker_capability_session_factory(capability, factory)()
 
     assert session is sessions[0]
-    assert session.info["agency_os_rls_context"] == {
-        "user_id": "",
-        "machine_org_id": "org-123",
-        "machine_workspace_id": "workspace-456",
-        "machine_identity_lookup_id": "",
-        "browser_session_token_hash": "",
-    }
+    assert session.info["agency_os_worker_capability"] is capability
+    assert "agency_os_rls_context" not in session.info
 
 
-@pytest.mark.parametrize(("org_id", "workspace_id"), [("", "w"), ("o", ""), ("", "")])
-def test_scoped_worker_factory_rejects_incomplete_scope(org_id, workspace_id):
-    with pytest.raises(ValueError, match="scope"):
-        scoped_worker_session_factory(org_id, workspace_id, lambda: FakeSession())
+def test_workspace_capability_factory_sets_only_private_capability_context():
+    sessions = []
+
+    def factory():
+        session = FakeSession()
+        sessions.append(session)
+        return session
+
+    capability = SimpleNamespace(
+        token=b"x" * 32, org_id="org-1", workspace_id="workspace-1",
+        worker_id="worker-1",
+    )
+    session = scoped_worker_workspace_session_factory(capability, factory)()
+
+    assert session is sessions[0]
+    assert session.info["agency_os_worker_workspace_capability"] is capability
+    assert "agency_os_rls_context" not in session.info
+
+
+@pytest.mark.parametrize("factory", [
+    scoped_worker_capability_session_factory,
+    scoped_worker_workspace_session_factory,
+])
+def test_capability_factories_reject_incomplete_capabilities(factory):
+    with pytest.raises(ValueError, match="capability"):
+        factory(SimpleNamespace(), lambda: FakeSession())
