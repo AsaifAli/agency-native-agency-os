@@ -37,6 +37,11 @@ ORG_TABLES = {
 
 
 def upgrade() -> None:
+    # This revision is PostgreSQL-specific. SQLite is used for local development
+    # and migration smoke tests; it must not execute PostgreSQL DDL there.
+    if op.get_bind().dialect.name != "postgresql":
+        return
+
     op.execute("CREATE SCHEMA IF NOT EXISTS agency_os_private")
     op.execute("""
         CREATE OR REPLACE FUNCTION agency_os_private.user_has_org_access(
@@ -139,6 +144,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if op.get_bind().dialect.name != "postgresql":
+        return
+
     op.execute("DROP POLICY IF EXISTS browser_session_isolation ON public.browser_sessions")
     op.execute("ALTER TABLE public.browser_sessions NO FORCE ROW LEVEL SECURITY")
     op.execute("ALTER TABLE public.browser_sessions DISABLE ROW LEVEL SECURITY")
