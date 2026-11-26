@@ -342,7 +342,7 @@ def test_founder_authority_viewer_can_link_opportunity_to_client(client):
         session.add(founder_viewer)
         session.flush()
         session.add(Membership(org_id=org, user_id=founder_viewer.id, role=Role.viewer))
-        session.add(FounderAuthority(org_id=org, user_id=founder_viewer.id, grant_source="test"))
+        session.add(FounderAuthority(org_id=org, user_id=founder_viewer.id, active=True, grant_source="test"))
         session.add(WorkspaceGrant(
             org_id=org, workspace_id=ws, user_id=founder_viewer.id, granted_by=client_user_id(client),
         ))
