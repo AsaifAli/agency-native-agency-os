@@ -803,7 +803,7 @@ def test_only_founder_can_waive_required_onboarding_checklist_item(client):
         db.add(Membership(org_id=client.org_id, user_id=operator.id, role=Role.operator))
         db.add(WorkspaceGrant(org_id=client.org_id, workspace_id=client.ws_id, user_id=operator.id, granted_by=client.user_id))
         db.commit()
-        client.app.dependency_overrides[get_principal] = lambda: Principal(user=operator)
+        client.set_principal(operator)
     finally:
         db.close()
     denied = client.patch(
@@ -811,7 +811,7 @@ def test_only_founder_can_waive_required_onboarding_checklist_item(client):
         headers=headers(), json={"status": "waived", "note": "Not applicable for this engagement"},
     )
     assert denied.status_code == 403
-    client.app.dependency_overrides[get_principal] = lambda: Principal(user=founder)
+    client.set_principal(founder)
     waived = client.patch(
         "/v1/orgs/" + client.org_id + "/operations/onboardings/" + created.json()["id"] + "/checklist/" + item["id"],
         headers=headers(), json={"status": "waived", "note": "Founder accepted this documented exception"},
