@@ -9,6 +9,7 @@ import uuid
 
 import pytest
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Agent, DataClass, Organization, Task, User, Workspace
@@ -88,13 +89,27 @@ def test_forged_workspace_gucs_do_not_authorize_worker_reads():
 
 def test_worker_cannot_read_private_lease_capability_storage():
     """Lease hashes and transaction context must never be readable by workers."""
+    admin_engine = create_engine(ADMIN_URL, pool_pre_ping=True)
     worker_engine = create_engine(WORKER_URL, pool_pre_ping=True)
     try:
+        with admin_engine.connect() as connection:
+            exists = connection.execute(
+                text("SELECT to_regclass('agency_os_private.worker_lease_capabilities')")
+            ).scalar_one()
+            assert exists is not None, "Capability storage must exist before privilege testing"
+
         with worker_engine.connect() as connection:
-            with pytest.raises(Exception):
+            has_select = connection.execute(
+                text(
+                    "SELECT has_table_privilege(current_user, "
+                    "'agency_os_private.worker_lease_capabilities', 'SELECT')"
+                )
+            ).scalar_one()
+            assert has_select is False
+            with pytest.raises(DBAPIError):
                 connection.execute(
                     text("SELECT * FROM agency_os_private.worker_lease_capabilities LIMIT 1")
                 ).all()
-                connection.rollback()
     finally:
         worker_engine.dispose()
+        admin_engine.dispose()
