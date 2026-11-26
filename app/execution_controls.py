@@ -87,13 +87,17 @@ def request_execution_cancel(
         execution.status = ExecutionStatus.cancelled
         execution.finished_at = now
         execution.error_code = "EXECUTION_CANCELLED"
-        execution.error_message = "Execution cancelled before worker start."
+        execution.error_message = (
+            "Execution cancelled from paused state."
+            if execution.status == ExecutionStatus.paused
+            else "Execution cancelled before worker start."
+        )
         _sync_task_delegation(db, execution, "cancelled", "EXECUTION_CANCELLED")
         _sync_plan_draft_execution(db, execution, "cancelled", "EXECUTION_CANCELLED")
         record_event(
             db, org_id, actor_user_id, "execution.cancelled",
             "execution", execution.id, workspace_id,
-            {"previous_status": "queued_or_retry_wait", "control": "cancel"},
+            {"previous_status": "paused" if execution.status == ExecutionStatus.cancelled and execution.attempt_count > 0 else "queued_or_retry_wait", "control": "cancel"},
         )
     else:
         previous_status = execution.status.value
