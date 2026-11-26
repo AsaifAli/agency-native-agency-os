@@ -89,7 +89,7 @@ def test_founder_initializes_full_chart_idempotently(app_client):
 
 def test_organization_owner_without_founder_grant_cannot_initialize(app_client):
     i=app_client.identity
-    app_client.app.dependency_overrides[get_principal]=lambda:Principal(user=i["operator"])
+    app_client.set_principal(i["operator"])
     # Operator membership is also insufficient; founder grant is separately checked.
     r=app_client.post(f"/v1/orgs/{i['org'].id}/workforce/bootstrap",params={"workspace_id":i["workspace"].id})
     assert r.status_code==403
