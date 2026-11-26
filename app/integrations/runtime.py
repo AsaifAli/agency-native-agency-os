@@ -21,6 +21,7 @@ class ExecutionRequest:
     external_run_id: str | None = None
     persist_external_run_id: Callable[[str], None] | None = None
     execute_custom_tool: Callable[[str, dict, str], dict] | None = None
+    control_check: Callable[[], str | None] | None = None
     request_metadata: dict = field(default_factory=dict)
 
 
@@ -46,6 +47,10 @@ class RuntimeTransientError(RuntimeExecutionError):
 
 class RuntimeManualReviewRequired(RuntimeExecutionError):
     """The provider paused for a tool approval or other human decision."""
+
+
+class RuntimeCancelled(RuntimeExecutionError):
+    """The provider acknowledged a durable OS cancellation request."""
 
 
 class RuntimeToolRejected(Exception):
