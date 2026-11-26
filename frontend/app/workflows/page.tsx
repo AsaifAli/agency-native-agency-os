@@ -74,6 +74,8 @@ export default function Workflows() {
   const [trace, setTrace] = useState<AuditEvent[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [stoppingExecutionId, setStoppingExecutionId] = useState("");
+  const [stopRequested, setStopRequested] = useState<Record<string, boolean>>({});
 
   const [workforce, setWorkforce] = useState<Workforce>({ members: [], capabilities: [] });
   const [plans, setPlans] = useState<PlanSummary[]>([]);
@@ -384,6 +386,37 @@ export default function Workflows() {
     } catch (e) { setError((e as Error).message); }
   }
 
+  async function stopExecution(item: Execution) {
+    if (!window.confirm("Request stop for this execution? Provider work already in progress must reach a safe interruption boundary; unresolved provider outcomes may require manual review.")) return;
+    setStoppingExecutionId(item.id);
+    setError("");
+    try {
+      const result = await api<{
+        execution_id: string; status: string;
+        error_code: string | null; error_message: string | null;
+      }>(
+        `/v1/orgs/${orgId()}/executions/${item.id}/cancel?workspace_id=${encodeURIComponent(workspace)}`,
+        { method: "POST" },
+      );
+      setExecutions((current) => current.map((row) =>
+        row.id === item.id
+          ? { ...row, status: result.status, error_code: result.error_code, error_message: result.error_message }
+          : row
+      ));
+      setSelected((current) => current?.id === item.id
+        ? { ...current, status: result.status, error_code: result.error_code, error_message: result.error_message }
+        : current
+      );
+      if (["queued", "claimed", "running", "retry_wait"].includes(result.status)) {
+        setStopRequested((current) => ({ ...current, [item.id]: true }));
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setStoppingExecutionId("");
+    }
+  }
+
   async function showTrace(item: Execution) {
     setSelected(item);
     setTrace([]);
@@ -660,7 +693,7 @@ export default function Workflows() {
         </div>
         {error && <div className="error">{error}</div>}
         <div className="table-wrap"><table className="data-table"><thead><tr><th>Execution</th><th>Runtime</th><th>Status</th><th>Attempts</th><th>Queued</th><th>Details</th></tr></thead>
-          <tbody>{executions.map((item) => <tr key={item.id}><td><code>{item.id.slice(0, 12)}</code><div className="activity-meta">Task {item.task_id.slice(0, 10)}</div></td><td>{item.runtime}</td><td><span className={`status ${statusClass(item.status)}`}>{item.status}</span></td><td>{item.attempt_count}/{item.max_attempts}</td><td>{new Date(item.queued_at).toLocaleString()}</td><td><button className="button secondary" onClick={() => showTrace(item)}>View trace</button></td></tr>)}</tbody>
+          <tbody>{executions.map((item) => <tr key={item.id}><td><code>{item.id.slice(0, 12)}</code><div className="activity-meta">Task {item.task_id.slice(0, 10)}</div></td><td>{item.runtime}</td><td><span className={`status ${statusClass(item.status)}`}>{item.status}</span></td><td>{item.attempt_count}/{item.max_attempts}</td><td>{new Date(item.queued_at).toLocaleString()}</td><td style={{display:"flex",gap:6,flexWrap:"wrap"}}><button className="button secondary" onClick={() => showTrace(item)}>View trace</button>{["queued", "claimed", "running", "retry_wait"].includes(item.status) && <button className="button secondary" disabled={stoppingExecutionId === item.id || Boolean(stopRequested[item.id])} onClick={() => stopExecution(item)}>{stoppingExecutionId === item.id ? "Stopping…" : stopRequested[item.id] ? "Stop requested" : "Stop"}</button>}</td></tr>)}</tbody>
         </table></div>
         {!executions.length && !loading && <div className="empty">No execution records in this workspace yet. Queue a task through an enabled runtime to see its lifecycle here.</div>}
       </section>
