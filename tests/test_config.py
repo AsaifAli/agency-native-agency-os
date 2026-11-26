@@ -58,3 +58,19 @@ def test_production_worker_rejects_api_database_role_with_correct_security_contr
         _production_worker_settings(
             "postgresql+psycopg://agency_os_app:" + "p" * 40 + "@db.example.com/agency"
         )
+
+
+def test_production_worker_rejects_non_dedicated_database_role():
+    with pytest.raises(ValidationError, match="agency_os_worker"):
+        _production_worker_settings(
+            "postgresql+psycopg://postgres:" + "p" * 40 + "@db.example.com/agency"
+        )
+
+
+def test_production_api_rejects_worker_database_role():
+    values = _production_worker_settings(
+        "postgresql+psycopg://agency_os_worker:" + "p" * 40 + "@db.example.com/agency"
+    ).model_dump()
+    values.update(process_role="api")
+    with pytest.raises(ValidationError, match="NOBYPASSRLS"):
+        Settings(_env_file=None, **values)
