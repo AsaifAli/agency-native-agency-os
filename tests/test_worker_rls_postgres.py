@@ -31,7 +31,7 @@ def test_worker_is_nobypassrls_and_scoped_to_one_workspace():
     org_b = Organization(name=f"Worker RLS B {suffix}")
     old_session = None
     try:
-        verify_postgres_role(worker_engine, expected_bypassrls=False, require_rls=True)
+        verify_postgres_role(worker_engine, expected_bypassrls=False, require_rls=True, expected_role="agency_os_worker")
         with Admin() as db:
             db.add_all([user, org_a, org_b])
             db.flush()
