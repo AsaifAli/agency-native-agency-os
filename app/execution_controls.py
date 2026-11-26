@@ -75,11 +75,14 @@ def request_execution_cancel(
         return execution
 
     now = datetime.now(timezone.utc)
-    metadata["control_request"] = {
+    control_request = {
         "action": "cancel",
         "requested_at": now.isoformat(),
         "requested_by": actor_user_id,
     }
+    if isinstance(existing, dict) and existing.get("interrupt_event_id"):
+        control_request["interrupt_event_id"] = existing["interrupt_event_id"]
+    metadata["control_request"] = control_request
     execution.request_metadata = metadata
     execution.updated_at = now
 
