@@ -48,6 +48,8 @@ def cancel_execution_endpoint(
         return {
             "execution_id": execution.id,
             "status": execution.status.value,
+            "error_code": execution.error_code,
+            "error_message": execution.error_message,
             "control_request": (execution.request_metadata or {}).get("control_request"),
         }
     except ExecutionNotFound as exc:
