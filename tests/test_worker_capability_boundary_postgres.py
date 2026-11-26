@@ -321,7 +321,7 @@ def test_worker_claim_rpc_issues_a_live_workspace_bound_capability():
             with pytest.raises(DBAPIError):
                 db.execute(text("""
                     UPDATE public.machine_identities
-                    SET scopes = ARRAY['*']::text[]
+                    SET scopes = '["*"]'::json
                     WHERE id = :identity_id
                 """), {"identity_id": identity_a_id})
             db.rollback()
