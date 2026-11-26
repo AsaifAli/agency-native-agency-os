@@ -113,3 +113,21 @@ A follow-on increment adds a deterministic `regression` pack, registered with th
 ### CI evidence checkpoint
 
 GitHub workflow run **45844644766** (run #1404) tested the PR merge ref at the then-current PR head `aab8ba149ee5e6d9ce2173fc2f7db7791209cdc0`, not the later regression-pack commits. Frontend TypeScript check and production build passed. Backend Alembic graph validation passed, but PostgreSQL migration application stopped at `t0a1b2c3d4e5_postgresql_tenant_row_level_security.py` because the workflow's PostgreSQL service did not initialize role `agency_os_migrator`. Python compilation and backend/PostgreSQL tests were skipped. This confirms the known harness mismatch; it does not validate the backend. The newly added regression pack commits occurred after this run and have no recorded workflow run yet.
+
+
+## Outbox observability increment (2026-11-26)
+
+A founder-only, workspace-scoped read endpoint has been added at
+`GET /v1/orgs/{org_id}/workspaces/{workspace_id}/outbox/summary`.
+It requires active organization membership, an exact active workspace grant,
+and explicit Founder Authority (organization owner role alone is insufficient).
+The response contains only counts by delivery state, oldest pending age,
+expired lease count, exhausted pending count and an as-of timestamp. It does
+not expose event payloads, idempotency keys, worker IDs or provider error text.
+
+The aggregate service has focused SQLite tests for workspace scoping,
+payload non-disclosure, expired leases and exhausted pending work. These tests
+were added but have **not been executed** in this environment. PostgreSQL RLS,
+HTTP authorization and browser/dashboard integration remain awaiting local
+verification. The endpoint is an API foundation; no Founder Console widget
+has been claimed.
