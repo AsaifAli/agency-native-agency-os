@@ -62,6 +62,8 @@ services:
       - "-c"
       - "GRANT EXECUTE ON FUNCTION agency_os_private.worker_has_execution_context(text, text, text) TO agency_os_test_app"
       - "-c"
+      - "GRANT EXECUTE ON FUNCTION agency_os_private.worker_has_workspace_context(text, text) TO agency_os_test_app"
+      - "-c"
       - "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO agency_os_test_app"
       - "-c"
       - "GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO agency_os_test_app"
