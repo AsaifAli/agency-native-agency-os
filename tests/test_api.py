@@ -129,7 +129,13 @@ def test_execution_api_accepts_explicit_development_mock(monkeypatch):
     db = SessionLocal()
     try:
         saved = db.get(Execution, execution_id)
-        assert saved.status == ExecutionStatus.succeeded
+        assert saved.status == ExecutionStatus.succeeded, (
+            "Mock execution did not succeed: "
+            f"status={saved.status!r}, runtime={saved.runtime!r}, "
+            f"error_code={saved.error_code!r}, "
+            f"error_message={saved.error_message!r}, "
+            f"attempt_count={saved.attempt_count!r}"
+        )
         assert saved.result["provider"] == "mock"
         assert saved.result["status"] == "succeeded"
 
