@@ -276,3 +276,18 @@ Commits:
 - `ff9d51ca17c1a886397af30ff14b738c33f7de7a` — exact role allowlist
 
 **Verification:** not executed here. The new regression tests must be run in the repository environment. This narrows production configuration acceptance but does not remove caller-forgeable RLS GUCs or the worker's arbitrary workspace-scope inventory path. Tenant-isolation acceptance remains blocked.
+
+
+### Production worker startup role verification (2026-11-26)
+
+Added a fail-closed production startup check in `app/worker/runner.py`:
+- A production worker must run with `PROCESS_ROLE=worker`.
+- Its actual worker engine connection is checked with `verify_postgres_role(... expected_bypassrls=False, require_rls=True)`.
+- The check therefore validates PostgreSQL role attributes and the complete required FORCE-RLS/policy inventory before the polling loop starts.
+- Non-production test/development runs skip this production-only check.
+
+Regression tests were committed before implementation:
+- `4f4ac0c10430ae5eac7aa535bb0f151c038f345c` — tests for valid production worker, wrong process role, and non-production behavior.
+- `ab8e475701083db86e61ea0a99aa69f6e710a61d` — startup enforcement.
+
+**Verification:** not run in this environment. This is defense-in-depth around role misconfiguration; it does not solve raw caller-settable RLS GUCs or replace the planned database-owned worker claim/lease authorization. Tenant-isolation acceptance remains blocked.
