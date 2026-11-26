@@ -52,7 +52,7 @@ def control_context(tmp_path):
     db.add(execution)
     db.commit()
     context = {
-        "db": db, "org_id": org.id, "workspace_id": workspace.id,
+        "db": db, "session_factory": Session, "org_id": org.id, "workspace_id": workspace.id,
         "user_id": user.id, "execution_id": execution.id,
     }
     try:
@@ -123,3 +123,52 @@ def test_cancel_rejects_successful_execution(control_context):
             ctx["db"], execution_id=ctx["execution_id"], org_id=ctx["org_id"],
             workspace_id=ctx["workspace_id"], actor_user_id=ctx["user_id"],
         )
+
+
+def test_worker_acknowledges_cancel_requested_during_runtime(control_context, monkeypatch):
+    ctx = control_context
+
+    class RuntimeCancelledAfterRequest:
+        def start(self, request):
+            with ctx["session_factory"]() as control_db:
+                request_execution_cancel(
+                    control_db,
+                    execution_id=ctx["execution_id"],
+                    org_id=ctx["org_id"],
+                    workspace_id=ctx["workspace_id"],
+                    actor_user_id=ctx["user_id"],
+                )
+                control_db.commit()
+            return ExecutionResult(
+                provider="mock",
+                external_run_id="mock-cancel-test",
+                status="succeeded",
+                detail="Provider returned after cancellation was requested.",
+            )
+
+    monkeypatch.setattr(
+        processor_module,
+        "get_runtime",
+        lambda _runtime_name: RuntimeCancelledAfterRequest(),
+    )
+
+    processed = process_one_execution(
+        worker_id="cancel-control-test",
+        session_factory=ctx["session_factory"],
+    )
+    assert processed == ctx["execution_id"]
+
+    with ctx["session_factory"]() as verify_db:
+        saved = verify_db.get(Execution, ctx["execution_id"])
+        attempt = verify_db.query(
+            __import__("app.models", fromlist=["ExecutionAttempt"]).ExecutionAttempt
+        ).filter_by(execution_id=ctx["execution_id"]).one()
+        assert saved.status == ExecutionStatus.cancelled
+        assert saved.result is None
+        assert saved.error_code == "EXECUTION_CANCELLED"
+        assert attempt.status.value == "failed"
+        assert attempt.lease_expires_at is None
+        assert verify_db.query(AuditEvent).filter_by(
+            resource_id=ctx["execution_id"],
+            event_type="execution.cancelled",
+        ).count() == 1
