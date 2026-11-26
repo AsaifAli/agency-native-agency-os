@@ -6,8 +6,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.auth import Principal, get_principal
-from app.db import Base, get_db
-from app.models import Membership, Organization, Role, User, Workspace, FounderAuthority
+from app.db import Base, get_db, set_rls_context
+from app.models import Membership, Organization, Role, User, Workspace, FounderAuthority, WorkspaceGrant
 from app.workforce_routes import router
 from app.workforce_service import initialize_workforce
 import app.domain_models  # noqa: F401 — register Revenue/Delivery tables before metadata.create_all
@@ -32,18 +32,28 @@ def app_client():
         FounderAuthority(org_id=org.id, user_id=founder.id, active=True),
     ])
     workspace = Workspace(id="wf-test", org_id=org.id, name="Agency Workspace")
-    db.add(workspace); db.commit()
-    identity={"user":founder, "org":org, "workspace":workspace, "operator":operator}
+    db.add(workspace)
+    db.flush()
+    db.add_all([
+        WorkspaceGrant(org_id=org.id, workspace_id=workspace.id, user_id=founder.id, granted_by=founder.id),
+        WorkspaceGrant(org_id=org.id, workspace_id=workspace.id, user_id=operator.id, granted_by=founder.id),
+    ])
+    db.commit()
+    identity={"user":founder, "principal":founder, "org":org, "workspace":workspace, "operator":operator}
     from app.main import app
     app.dependency_overrides.clear()
     def override_db():
         session=factory()
-        try: yield session
-        finally: session.close()
+        try:
+            set_rls_context(session, user_id=identity["principal"].id)
+            yield session
+        finally:
+            session.close()
     app.dependency_overrides[get_db]=override_db
-    app.dependency_overrides[get_principal]=lambda:Principal(user=identity["user"])
+    app.dependency_overrides[get_principal]=lambda:Principal(user=identity["principal"])
     client=TestClient(app)
     client.identity=identity
+    client.set_principal = lambda selected_user: identity.update(principal=selected_user)
     client.factory=factory
     yield client
     db.close(); Base.metadata.drop_all(engine); engine.dispose()
@@ -80,7 +90,7 @@ def test_founder_initializes_full_chart_idempotently(app_client):
 
 def test_organization_owner_without_founder_grant_cannot_initialize(app_client):
     i=app_client.identity
-    app_client.app.dependency_overrides[get_principal]=lambda:Principal(user=i["operator"])
+    app_client.set_principal(i["operator"])
     # Operator membership is also insufficient; founder grant is separately checked.
     r=app_client.post(f"/v1/orgs/{i['org'].id}/workforce/bootstrap",params={"workspace_id":i["workspace"].id})
     assert r.status_code==403
@@ -669,9 +679,7 @@ def test_plan_draft_queue_is_founder_only_and_idempotent(app_client, monkeypatch
     finally:
         db.close()
 
-    app_client.app.dependency_overrides[get_principal] = (
-        lambda: Principal(user=i["operator"])
-    )
+    app_client.set_principal(i["operator"])
     denied = app_client.post(
         f"/v1/orgs/{i['org'].id}/workforce/plan-drafts", json={
             **payload, "idempotency_key": "plan-draft-idempotency-002",
@@ -839,9 +847,7 @@ def test_chief_of_staff_draft_requires_founder_assignment_before_plan_creation(
     assert detail.json()["suggested_plan"]["tasks"][0]["department_key"] == "ai_engineering_development"
 
     # A non-founder cannot approve the proposal even after a valid model response.
-    app_client.app.dependency_overrides[get_principal] = (
-        lambda: Principal(user=i["operator"])
-    )
+    app_client.set_principal(i["operator"])
     denied = app_client.post(
         f"/v1/orgs/{i['org'].id}/workforce/plan-drafts/{draft_id}/approve",
         params={"workspace_id": i["workspace"].id},
@@ -853,9 +859,7 @@ def test_chief_of_staff_draft_requires_founder_assignment_before_plan_creation(
         }]},
     )
     assert denied.status_code == 403
-    app_client.app.dependency_overrides[get_principal] = (
-        lambda: Principal(user=i["user"])
-    )
+    app_client.set_principal(i["user"])
 
     approved = app_client.post(
         f"/v1/orgs/{i['org'].id}/workforce/plan-drafts/{draft_id}/approve",

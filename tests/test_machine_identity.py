@@ -7,9 +7,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.auth import Principal, get_principal
-from app.db import Base, get_db
+from app.db import Base, get_db, set_rls_context
 from app.machine_identity import authenticate_machine_token, authorize_tool_session, create_agent_session, expire_due_agent_sessions
-from app.models import FounderAuthority, Membership, Organization, Role, User, Workspace
+from app.models import FounderAuthority, Membership, Organization, Role, User, Workspace, WorkspaceGrant
 from app.security_models import AgentSession, MachineIdentity, ToolInvocation
 from app.security_routes import router
 from app.tool_gateway_routes import router as tool_gateway_router
@@ -35,20 +35,41 @@ def security_client():
     workspace = Workspace(id="security-ws", org_id=org.id, name="Security Workspace")
     db.add_all([workspace, Membership(org_id=org.id, user_id=founder.id, role=Role.owner),
                 FounderAuthority(org_id=org.id, user_id=founder.id, active=True)])
+    db.add(WorkspaceGrant(
+        org_id=org.id, workspace_id=workspace.id,
+        user_id=founder.id, granted_by=founder.id,
+    ))
     db.commit()
     app = FastAPI()
     app.include_router(router)
     app.include_router(tool_gateway_router)
     app.include_router(revenue_research_router)
+    principal = {"user": founder}
     def override_db():
         session = factory()
-        try: yield session
-        finally: session.close()
+        try:
+            set_rls_context(session, user_id=principal["user"].id)
+            yield session
+        finally:
+            session.close()
     app.dependency_overrides[get_db] = override_db
-    app.dependency_overrides[get_principal] = lambda: Principal(user=founder)
+    app.dependency_overrides[get_principal] = lambda: Principal(user=principal["user"])
     client = TestClient(app)
+    original_request = client.request
+
+    def workspace_scoped_request(method, url, **kwargs):
+        url_text = str(url)
+        params = kwargs.get("params")
+        if "/v1/orgs/" in url_text and "workspace_id=" not in url_text:
+            scoped_params = dict(params or {})
+            scoped_params.setdefault("workspace_id", workspace.id)
+            kwargs["params"] = scoped_params
+        return original_request(method, url, **kwargs)
+
+    client.request = workspace_scoped_request
     client.org_id, client.workspace_id, client.founder = org.id, workspace.id, founder
     client.factory = factory
+    client.set_principal = lambda selected_user: principal.update(user=selected_user)
     yield client
     db.close(); Base.metadata.drop_all(engine); engine.dispose()
 
@@ -166,10 +187,14 @@ def test_nonfounder_cannot_issue_machine_identity(security_client):
         db.add(operator)
         db.flush()
         db.add(Membership(org_id=security_client.org_id, user_id=operator.id, role=Role.operator))
+        db.add(WorkspaceGrant(
+            org_id=security_client.org_id, workspace_id=security_client.workspace_id,
+            user_id=operator.id, granted_by=security_client.founder.id,
+        ))
         db.commit()
     finally:
         db.close()
-    security_client.app.dependency_overrides[get_principal] = lambda: Principal(user=operator)
+    security_client.set_principal(operator)
     response = security_client.post(
         f"/v1/orgs/{security_client.org_id}/machine-identities",
         json={
@@ -566,10 +591,15 @@ def test_nonfounder_cannot_review_agent_research_draft(security_client):
     db = security_client.factory()
     try:
         db.add(operator); db.flush()
-        db.add(Membership(org_id=security_client.org_id, user_id=operator.id, role=Role.operator)); db.commit()
+        db.add(Membership(org_id=security_client.org_id, user_id=operator.id, role=Role.operator))
+        db.add(WorkspaceGrant(
+            org_id=security_client.org_id, workspace_id=security_client.workspace_id,
+            user_id=operator.id, granted_by=security_client.founder.id,
+        ))
+        db.commit()
     finally:
         db.close()
-    security_client.app.dependency_overrides[get_principal] = lambda: Principal(user=operator)
+    security_client.set_principal(operator)
     base = f"/v1/orgs/{security_client.org_id}/workspaces/{security_client.workspace_id}/lead-research-drafts"
     denied = security_client.post(f"{base}/{draft_id}/review", json={"decision": "approve"})
     assert denied.status_code == 403

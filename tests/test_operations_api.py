@@ -7,10 +7,10 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.auth import Principal, get_principal
-from app.db import Base, get_db
+from app.db import Base, get_db, set_rls_context
 from app.models import (
     Approval, ApprovalStatus, FounderAuthority, Membership, Organization,
-    Role, User, Workspace, Task,
+    Role, User, Workspace, Task, WorkspaceGrant,
 )
 from app.domain_models import Project, Opportunity, Client
 from app.operations_models import ServicePlaybook, ServiceOffering, Proposal, ContractRecord, ClientOnboarding, OnboardingChecklistItem, InvoiceRecord, PaymentReceipt, ScopeChangeRequest, TimeEntry, ProjectCost, RetainerServicePeriod
@@ -38,6 +38,7 @@ def client():
     db.add_all([
         Membership(org_id=org.id, user_id=user.id, role=Role.owner),
         FounderAuthority(org_id=org.id, user_id=user.id, grant_source="test"),
+        WorkspaceGrant(org_id=org.id, workspace_id=ws.id, user_id=user.id, granted_by=user.id),
     ])
     client = Client(
         org_id=org.id, workspace_id=ws.id, name="Acme Test Client",
@@ -63,17 +64,32 @@ def client():
 
     app = FastAPI()
     app.include_router(router)
+    principal = {"user": user}
 
     def override_db():
         session = TestingSession()
         try:
+            set_rls_context(session, user_id=principal["user"].id)
             yield session
         finally:
             session.close()
 
     app.dependency_overrides[get_db] = override_db
-    app.dependency_overrides[get_principal] = lambda: Principal(user=user)
+    app.dependency_overrides[get_principal] = lambda: Principal(user=principal["user"])
     tc = TestClient(app)
+    original_request = tc.request
+
+    def workspace_scoped_request(method, url, **kwargs):
+        url_text = str(url)
+        params = kwargs.get("params")
+        if "/v1/orgs/" in url_text and "workspace_id=" not in url_text:
+            scoped_params = dict(params or {})
+            scoped_params.setdefault("workspace_id", ws.id)
+            kwargs["params"] = scoped_params
+        return original_request(method, url, **kwargs)
+
+    tc.request = workspace_scoped_request
+    tc.set_principal = lambda selected_user: principal.update(user=selected_user)
     tc.org_id, tc.ws_id, tc.other_ws_id, tc.user_id, tc.project_id, tc.opportunity_id, tc.client_id = org.id, ws.id, other_ws.id, user.id, project.id, opportunity.id, client.id
     tc.session_factory = TestingSession
     yield tc
@@ -354,8 +370,9 @@ def test_service_catalogue_draft_requires_founder_activation(client):
         operator = User(email="catalog-operator@example.test", display_name="Operator")
         db.add(operator); db.flush()
         db.add(Membership(org_id=org, user_id=operator.id, role=Role.operator))
+        db.add(WorkspaceGrant(org_id=org, workspace_id=client.ws_id, user_id=operator.id, granted_by=client.user_id))
         db.commit()
-        client.app.dependency_overrides[get_principal] = lambda: Principal(user=operator)
+        client.set_principal(operator)
     finally:
         db.close()
     denied = client.patch(
@@ -363,7 +380,7 @@ def test_service_catalogue_draft_requires_founder_activation(client):
         headers=headers(), json={"status": "active"},
     )
     assert denied.status_code == 403
-    client.app.dependency_overrides[get_principal] = lambda: Principal(user=founder)
+    client.set_principal(founder)
     activated = client.patch(
         f"/v1/orgs/{org}/operations/service-catalog/{offering_id}/status",
         headers=headers(), json={"status": "active"},
@@ -796,8 +813,9 @@ def test_only_founder_can_waive_required_onboarding_checklist_item(client):
         db.add(operator)
         db.flush()
         db.add(Membership(org_id=client.org_id, user_id=operator.id, role=Role.operator))
+        db.add(WorkspaceGrant(org_id=client.org_id, workspace_id=client.ws_id, user_id=operator.id, granted_by=client.user_id))
         db.commit()
-        client.app.dependency_overrides[get_principal] = lambda: Principal(user=operator)
+        client.set_principal(operator)
     finally:
         db.close()
     denied = client.patch(
@@ -805,7 +823,7 @@ def test_only_founder_can_waive_required_onboarding_checklist_item(client):
         headers=headers(), json={"status": "waived", "note": "Not applicable for this engagement"},
     )
     assert denied.status_code == 403
-    client.app.dependency_overrides[get_principal] = lambda: Principal(user=founder)
+    client.set_principal(founder)
     waived = client.patch(
         "/v1/orgs/" + client.org_id + "/operations/onboardings/" + created.json()["id"] + "/checklist/" + item["id"],
         headers=headers(), json={"status": "waived", "note": "Founder accepted this documented exception"},
@@ -834,8 +852,9 @@ def test_founder_authority_viewer_can_read_commercial_and_delivery_registers(cli
         db.flush()
         db.add(Membership(org_id=client.org_id, user_id=founder_viewer.id, role=Role.viewer))
         db.add(FounderAuthority(org_id=client.org_id, user_id=founder_viewer.id, grant_source="test"))
+        db.add(WorkspaceGrant(org_id=client.org_id, workspace_id=client.ws_id, user_id=founder_viewer.id, granted_by=client.user_id))
         db.commit()
-        client.app.dependency_overrides[get_principal] = lambda: Principal(user=founder_viewer)
+        client.set_principal(founder_viewer)
     finally:
         db.close()
     for path in [
@@ -1431,6 +1450,7 @@ def test_outbox_health_is_founder_only_and_org_scoped(client):
 
     response = client.get(
         f"/v1/orgs/{client.org_id}/operations/outbox-health",
+        params={"workspace_id": client.ws_id},
         headers=headers(),
     )
 
@@ -1461,18 +1481,21 @@ def test_outbox_health_denies_member_without_founder_authority(client):
         ))
         db.commit()
 
-        client.app.dependency_overrides[get_principal] = (
-            lambda: Principal(user=member)
-        )
+        db.add(WorkspaceGrant(
+            org_id=client.org_id, workspace_id=client.ws_id,
+            user_id=member.id, granted_by=client.user_id,
+        ))
+        db.commit()
+        client.set_principal(member)
 
         response = client.get(
             f"/v1/orgs/{client.org_id}/operations/outbox-health",
+            params={"workspace_id": client.ws_id},
             headers=headers(),
         )
 
         assert response.status_code == 403
     finally:
-        client.app.dependency_overrides.pop(get_principal, None)
         db.close()
 
 def test_retainer_period_usage_rollover_and_closed_period_guard(client):

@@ -12,9 +12,25 @@ from app.models import (
     Workspace,
     Role,
     FounderAuthority,
+    WorkspaceGrant,
 )
 
 client = TestClient(app)
+
+# These routes require an explicit workspace query scope. Keep test calls concise
+# while preserving any deliberately supplied (including cross-workspace) scope.
+_original_client_request = client.request
+
+def _workspace_scoped_request(method, url, **kwargs):
+    url_text = str(url)
+    params = kwargs.get("params")
+    if "/v1/orgs/" in url_text and "workspace_id=" not in url_text:
+        scoped_params = dict(params or {})
+        scoped_params.setdefault("workspace_id", WORKSPACE_ID)
+        kwargs["params"] = scoped_params
+    return _original_client_request(method, url, **kwargs)
+
+client.request = _workspace_scoped_request
 
 OWNER_EMAIL = "approval-owner@test.local"
 ADMIN_EMAIL = "approval-admin@test.local"
@@ -86,6 +102,20 @@ def setup_module():
                     name="Approval Workspace",
                 )
             )
+            db.flush()
+
+        workspace = db.query(Workspace).filter_by(id=WORKSPACE_ID).one()
+        grantor = db.query(User).filter_by(email=OWNER_EMAIL).one()
+        for email, _, _ in users_and_roles:
+            user = db.query(User).filter_by(email=email).one()
+            grant = db.query(WorkspaceGrant).filter_by(
+                org_id=org.id, workspace_id=workspace.id, user_id=user.id,
+            ).filter(WorkspaceGrant.revoked_at.is_(None)).first()
+            if grant is None:
+                db.add(WorkspaceGrant(
+                    org_id=org.id, workspace_id=workspace.id,
+                    user_id=user.id, granted_by=grantor.id,
+                ))
 
         db.commit()
     finally:

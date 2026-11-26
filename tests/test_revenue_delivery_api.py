@@ -6,9 +6,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.auth import Principal, get_principal
-from app.db import Base, get_db
+from app.db import Base, get_db, set_rls_context
 from app.domain_routes import router
-from app.models import FounderAuthority, Membership, Organization, Role, User, Workspace
+from app.models import FounderAuthority, Membership, Organization, Role, User, Workspace, WorkspaceGrant
 from app.domain_models import Client
 import app.domain_models  # noqa: F401
 
@@ -33,6 +33,9 @@ def client():
     db.add_all([ws, other_ws])
     db.add(Membership(org_id=org.id, user_id=user.id, role=Role.owner))
     db.flush()
+    db.add(WorkspaceGrant(
+        org_id=org.id, workspace_id=ws.id, user_id=user.id, granted_by=user.id,
+    ))
     foreign_client = Client(
         org_id=other_org.id, workspace_id=other_ws.id,
         name="Foreign client", created_by=user.id,
@@ -42,18 +45,23 @@ def client():
 
     app = FastAPI()
     app.include_router(router)
+    principal = {"user": user}
 
     def override_db():
         session = TestingSession()
         try:
+            set_rls_context(session, user_id=principal["user"].id)
             yield session
         finally:
             session.close()
 
     app.dependency_overrides[get_db] = override_db
-    app.dependency_overrides[get_principal] = lambda: Principal(user=user)
+    app.dependency_overrides[get_principal] = lambda: Principal(user=principal["user"])
     test_client = TestClient(app)
+    test_client.testing_session_factory = TestingSession
+    test_client.set_principal = lambda selected_user: principal.update(user=selected_user)
     test_client.org_id = org.id
+    test_client.user_id = user.id
     test_client.ws_id = ws.id
     test_client.other_ws_id = other_ws.id
     test_client.foreign_client_id = foreign_client.id
@@ -332,13 +340,38 @@ def test_founder_authority_viewer_can_link_opportunity_to_client(client):
     db = client.app.dependency_overrides[get_db]()
     session = next(db)
     try:
-        founder_viewer = User(email="founder-domain-viewer@example.test", display_name="Founder Viewer")
+        founder_viewer = User(email="founder-domain-viewer@example.test", display_name="Founder Viewer", active=True)
         session.add(founder_viewer)
         session.flush()
         session.add(Membership(org_id=org, user_id=founder_viewer.id, role=Role.viewer))
-        session.add(FounderAuthority(org_id=org, user_id=founder_viewer.id, grant_source="test"))
+        session.add(FounderAuthority(org_id=org, user_id=founder_viewer.id, active=True, grant_source="test"))
+        session.add(WorkspaceGrant(
+            org_id=org, workspace_id=ws, user_id=founder_viewer.id, granted_by=client.user_id,
+        ))
+        session.flush()
+        from app.auth import has_founder_authority
+        assert founder_viewer.active is True
+        assert session.query(Membership).filter_by(
+            org_id=org, user_id=founder_viewer.id
+        ).one_or_none() is not None
+        assert session.query(FounderAuthority).filter_by(
+            org_id=org, user_id=founder_viewer.id, active=True
+        ).one_or_none() is not None
+        # Commit the grant fixture before opening a separate request session.
         session.commit()
-        client.app.dependency_overrides[get_principal] = lambda: Principal(user=founder_viewer)
+        verify_session = client.testing_session_factory()
+        try:
+            persisted_user = verify_session.query(User).filter_by(
+                id=founder_viewer.id, active=True
+            ).one_or_none()
+            assert persisted_user is not None, "Founder-viewer user row was not persisted"
+            assert has_founder_authority(verify_session, org, founder_viewer.id), (
+                "Founder authority must be effective only for a persisted active user "
+                "with active membership and an active founder grant"
+            )
+        finally:
+            verify_session.close()
+        client.set_principal(founder_viewer)
     finally:
         try:
             next(db)

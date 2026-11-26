@@ -7,8 +7,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.auth import Principal, get_principal
-from app.db import Base, get_db
-from app.models import Approval, ApprovalStatus, FounderAuthority, Membership, Organization, Role, User, Workspace
+from app.db import Base, get_db, set_rls_context
+from app.models import Approval, ApprovalStatus, FounderAuthority, Membership, Organization, Role, User, Workspace, WorkspaceGrant
 from app.domain_models import Contact, Lead
 import app.domain_models  # noqa: F401
 import app.operations_models  # noqa: F401
@@ -39,6 +39,10 @@ def client():
     db.add_all([ws, other_ws])
     db.add(Membership(org_id=org.id, user_id=founder.id, role=Role.owner))
     db.add(FounderAuthority(org_id=org.id, user_id=founder.id, grant_source="test"))
+    db.add(WorkspaceGrant(
+        org_id=org.id, workspace_id=ws.id,
+        user_id=founder.id, granted_by=founder.id,
+    ))
     db.flush()
     contact = Contact(
         org_id=org.id, workspace_id=ws.id, first_name="Asha",
@@ -60,17 +64,20 @@ def client():
 
     app = FastAPI()
     app.include_router(router)
+    principal = {"user": founder}
 
     def override_db():
         session = TestingSession()
         try:
+            set_rls_context(session, user_id=principal["user"].id)
             yield session
         finally:
             session.close()
 
     app.dependency_overrides[get_db] = override_db
-    app.dependency_overrides[get_principal] = lambda: Principal(user=founder)
+    app.dependency_overrides[get_principal] = lambda: Principal(user=principal["user"])
     test_client = TestClient(app)
+    test_client.set_principal = lambda selected_user: principal.update(user=selected_user)
     test_client.org_id = org.id
     test_client.ws_id = ws.id
     test_client.other_ws_id = other_ws.id
@@ -294,8 +301,12 @@ def test_sender_rate_limit_workspace_isolation_and_founder_controls(client):
         db.add(operator)
         db.flush()
         db.add(Membership(org_id=client.org_id, user_id=operator.id, role=Role.operator))
+        db.add(WorkspaceGrant(
+            org_id=client.org_id, workspace_id=client.ws_id,
+            user_id=operator.id, granted_by=client.user_id,
+        ))
         db.commit()
-        client.app.dependency_overrides[get_principal] = lambda: Principal(user=operator)
+        client.set_principal(operator)
     finally:
         db.close()
 
