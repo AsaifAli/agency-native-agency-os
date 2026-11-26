@@ -313,6 +313,11 @@ def test_production_worker_fails_closed_for_wrong_process_role(monkeypatch):
 def test_nonproduction_worker_skips_production_database_role_verification(monkeypatch):
     verification = Mock()
     monkeypatch.setattr(runner.settings, "app_env", "test")
+    monkeypatch.setattr(
+        runner,
+        "worker_engine",
+        SimpleNamespace(dialect=SimpleNamespace(name="postgresql")),
+    )
     monkeypatch.setattr(runner, "verify_postgres_role", verification)
 
     runner._verify_worker_database_role()
