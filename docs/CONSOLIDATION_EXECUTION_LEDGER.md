@@ -366,3 +366,23 @@ The migration search also confirms the GUCs are consumed across the base tenant 
 6. Switch callers and RLS policies only after both old and new paths are covered; then remove raw GUC trust and the all-workspace inventory function in a single reviewed migration sequence with rollback/restore evidence.
 
 **Status:** inventory complete at source level. No RLS policy, identity flow, migration, or runtime behavior was changed in this increment. The signed human/machine assertions and worker claim-and-bind remain unimplemented. PostgreSQL negative tests are still required before tenant-isolation acceptance.
+
+
+### Protected-action transaction boundary review (2026-11-26)
+
+Reviewed all six application call sites of `require_approved_action()` in `app/operations_routes.py` and `app/outreach/routes.py`.
+
+| Protected action | Route mutation after approval consumption | Transaction observation |
+|---|---|---|
+| `invoice.issue` | Records invoice as issued, external reference/time/actor, audit event and outbox event | Same request session; one commit after all writes |
+| `delivery.activate` | Creates project, activates onboarding, records actor/time, audit event and outbox event | Same request session; one commit after all writes |
+| `contract.execute` | Records executed contract and signed evidence, audit event and outbox event | Same request session; one commit after all writes |
+| `pricing.change` | Marks proposal approved and records approver/time, audit event and outbox event | Same request session; one commit after all writes |
+| `scope.change.accept` | Updates project budget/contract value/hours/due date and scope request decision, audit event and outbox event | Same request session; one commit after all writes |
+| `external_communication.sensitive` | Moves outbound message to queued, records queue metadata, audit event and outbox event | Same request session; one commit after all writes; this route queues but does not send |
+
+The helper's conditional one-time approval-consumption update and `approval.consumed` audit flush occur on the caller's session. The inspected routes commit only after the protected business mutation and associated audit/outbox writes, so rollback should revert the consumption together with the protected state change. Existing action-policy tests cover rollback and single-use semantics; the dedicated PostgreSQL race test covers two competing consumers at the helper boundary.
+
+**Limitations:** this was source inspection. It does not establish that every database trigger/provider adapter is side-effect-free before commit, nor does the single PostgreSQL race test cover every route under concurrent requests. Keep provider/network calls outside the transaction and add route-level PostgreSQL rollback/race tests for high-impact protected actions before production readiness.
+
+**Status:** no code behavior changed in this review. The six inspected application paths have the intended single-transaction shape; PostgreSQL route-level concurrency coverage remains partial.
