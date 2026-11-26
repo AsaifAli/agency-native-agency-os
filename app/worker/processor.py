@@ -398,10 +398,20 @@ def process_one_execution(
     if pause_requested:
         from app.execution_controls import acknowledge_execution_pause
         with session_factory() as pause_db:
-            acknowledge_execution_pause(
+            current_control = get_execution_control_request(
                 pause_db, execution_id=execution_id, attempt_id=attempt_id,
                 worker_id=worker_id,
             )
+            if current_control == "cancel":
+                acknowledge_execution_cancel(
+                    pause_db, execution_id=execution_id, attempt_id=attempt_id,
+                    worker_id=worker_id,
+                )
+            else:
+                acknowledge_execution_pause(
+                    pause_db, execution_id=execution_id, attempt_id=attempt_id,
+                    worker_id=worker_id,
+                )
             pause_db.commit()
         return execution_id
 
