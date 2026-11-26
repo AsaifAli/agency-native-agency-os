@@ -542,3 +542,102 @@ def test_managed_agents_interrupts_and_drains_session_on_os_cancellation():
 
     assert state["interrupts"] == 1
     assert state["control_checks"] >= 2
+
+
+
+def test_managed_agents_pause_waits_for_processed_interrupt_and_idle_session():
+    calls = []
+    controls = iter([None, "pause"])
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        if req.method == "GET" and req.url.path == "/v1/agents/agent_test":
+            return httpx.Response(200, json={"id": "agent_test", "archived_at": None,
+                "tools": [], "mcp_servers": [], "skills": [], "multiagent": None})
+        if req.method == "POST" and req.url.path == "/v1/sessions/sesn_pause/events":
+            return httpx.Response(200, json={"data": [{"id": "evt_interrupt"}]})
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_pause":
+            return httpx.Response(200, json={"id": "sesn_pause", "status": "idle"})
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_pause/events":
+            return httpx.Response(200, json={"data": [
+                {"id": "evt_interrupt", "type": "user.interrupt", "processed_at": "2026-11-26T00:00:00Z"},
+                {"type": "session.status_idle", "stop_reason": {"type": "interrupted"}},
+            ]})
+        return httpx.Response(404)
+    runtime = ManagedAgentsRuntime(
+        config(),
+        client_factory=lambda: httpx.Client(base_url="https://api.anthropic.com",
+            transport=httpx.MockTransport(handler)),
+        sleep=lambda _seconds: None,
+    )
+    with pytest.raises(RuntimePaused):
+        runtime.start(request(
+            external_run_id="sesn_pause", attempt_number=2,
+            control_check=lambda: next(controls),
+        ))
+    assert ("POST", "/v1/sessions/sesn_pause/events") in calls
+
+
+def test_managed_agents_resume_reconciles_existing_marker_without_duplicate_message():
+    calls, persisted = [], []
+    token = "resume-token-123"
+    marker = f"[agency-os-resume:{token}]"
+    ticks = iter([0.0, 100.0])
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        if req.method == "GET" and req.url.path == "/v1/agents/agent_test":
+            return httpx.Response(200, json={"id": "agent_test", "archived_at": None,
+                "tools": [], "mcp_servers": [], "skills": None, "multiagent": None})
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_resume":
+            return httpx.Response(200, json={"id": "sesn_resume", "status": "running"})
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_resume/events":
+            return httpx.Response(200, json={"data": [
+                {"id": "evt_resume", "type": "user.message",
+                 "content": [{"type": "text", "text": f"Continue. {marker}"}]},
+            ]})
+        return httpx.Response(404)
+    runtime = ManagedAgentsRuntime(
+        config(), client_factory=lambda: httpx.Client(base_url="https://api.anthropic.com",
+            transport=httpx.MockTransport(handler)),
+        sleep=lambda _seconds: None, clock=lambda: next(ticks),
+    )
+    with pytest.raises(RuntimeTransientError):
+        runtime.start(request(
+            external_run_id="sesn_resume", attempt_number=2,
+            request_metadata={"control_request": {"action": "resume", "resume_token": token}},
+            persist_resume_event=lambda received_token, event_id: persisted.append((received_token, event_id)),
+        ))
+    assert persisted == [(token, "evt_resume")]
+    assert ("POST", "/v1/sessions/sesn_resume/events") not in calls
+
+
+def test_managed_agents_resume_sends_marker_once_and_persists_provider_event():
+    calls, persisted = [], []
+    token = "resume-token-456"
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        if req.method == "GET" and req.url.path == "/v1/agents/agent_test":
+            return httpx.Response(200, json={"id": "agent_test", "archived_at": None,
+                "tools": [], "mcp_servers": [], "skills": None, "multiagent": None})
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_resume_new":
+            return httpx.Response(200, json={"id": "sesn_resume_new", "status": "running"})
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_resume_new/events":
+            return httpx.Response(200, json={"data": []})
+        if req.method == "POST" and req.url.path == "/v1/sessions/sesn_resume_new/events":
+            body = json.loads(req.content)
+            assert token in body["events"][0]["content"][0]["text"]
+            return httpx.Response(200, json={"data": [{"id": "evt_resume_new"}]})
+        return httpx.Response(404)
+    ticks = iter([0.0, 100.0])
+    runtime = ManagedAgentsRuntime(
+        config(), client_factory=lambda: httpx.Client(base_url="https://api.anthropic.com",
+            transport=httpx.MockTransport(handler)),
+        sleep=lambda _seconds: None, clock=lambda: next(ticks),
+    )
+    with pytest.raises(RuntimeTransientError):
+        runtime.start(request(
+            external_run_id="sesn_resume_new", attempt_number=2,
+            request_metadata={"control_request": {"action": "resume", "resume_token": token}},
+            persist_resume_event=lambda received_token, event_id: persisted.append((received_token, event_id)),
+        ))
+    assert persisted == [(token, "evt_resume_new")]
+    assert calls.count(("POST", "/v1/sessions/sesn_resume_new/events")) == 1
