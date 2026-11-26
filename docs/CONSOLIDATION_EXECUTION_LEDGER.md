@@ -108,3 +108,8 @@ Added the deterministic `safety_security` evaluation pack, registered it alongsi
 **Status:** source implementation and tests added; not executed in this session. The pack is not yet a trusted release gate: the current evaluation API accepts payloads from authorized workspace members, so signed runner attestation, immutable test/commit/environment manifests and a release-approval blocker remain unimplemented. Never treat caller-supplied booleans as proof of production security.
 
 A follow-on increment adds a deterministic `regression` pack, registered with the Harness and tested for complete, partial, missing and empty required-check evidence. The pack requires every named check to be explicitly true and rejects an empty check set. `docs/EVALUATION_HARNESS.md` now documents both safety/security and regression evidence contracts. These tests are source-added and remain unexecuted until repository CI/local verification.
+
+
+### CI evidence checkpoint
+
+GitHub workflow run **45844644766** (run #1404) tested the PR merge ref at the then-current PR head `aab8ba149ee5e6d9ce2173fc2f7db7791209cdc0`, not the later regression-pack commits. Frontend TypeScript check and production build passed. Backend Alembic graph validation passed, but PostgreSQL migration application stopped at `t0a1b2c3d4e5_postgresql_tenant_row_level_security.py` because the workflow's PostgreSQL service did not initialize role `agency_os_migrator`. Python compilation and backend/PostgreSQL tests were skipped. This confirms the known harness mismatch; it does not validate the backend. The newly added regression pack commits occurred after this run and have no recorded workflow run yet.
