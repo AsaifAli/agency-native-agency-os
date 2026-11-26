@@ -17,6 +17,7 @@ from app.worker_service import (
     _get_owned_execution_attempt,
     _sync_plan_draft_execution,
     _sync_task_delegation,
+    invalidate_worker_execution_capability,
 )
 
 
@@ -218,6 +219,7 @@ def acknowledge_execution_cancel(
         },
     )
     db.flush()
+    invalidate_worker_execution_capability(db)
     return execution, attempt
 
 
@@ -329,6 +331,7 @@ def acknowledge_execution_pause(
          "worker_id": worker_id, "provider_interruption_acknowledged": True},
     )
     db.flush()
+    invalidate_worker_execution_capability(db)
     return execution, attempt
 
 
