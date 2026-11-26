@@ -1028,3 +1028,34 @@ def test_worker_custom_tool_executor_rechecks_revoked_workforce_capability(secur
     )
     with pytest.raises(ToolExecutionRejected):
         executor("os_revenue_lead_research_capture", _research_payload(), "sevt_revoked_grant")
+
+
+def test_denied_tool_invocation_is_audited_without_raw_input(security_client):
+    from app.models import AuditEvent
+
+    _issued, session_id, headers = _issue_research_session(security_client)
+    payload = _research_payload()
+    payload["contact_email"] = "sensitive.owner@example.test"
+    response = security_client.post(
+        "/v1/machine/tools/revenue.lead.research.capture/invoke",
+        headers={**headers, "Idempotency-Key": "revenue-research-denied-audit"},
+        json={"session_id": session_id, "input": payload},
+    )
+    assert response.status_code == 422
+
+    db = security_client.factory()
+    try:
+        event = (
+            db.query(AuditEvent)
+            .filter_by(
+                org_id=security_client.org_id,
+                event_type="tool.invocation.denied",
+            )
+            .order_by(AuditEvent.created_at.desc())
+            .first()
+        )
+        assert event is not None
+        assert event.payload["reason_code"] == "INPUT_SCHEMA_INVALID"
+        assert "sensitive.owner@example.test" not in str(event.payload)
+    finally:
+        db.close()
