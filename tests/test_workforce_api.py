@@ -53,6 +53,7 @@ def app_client():
     app.dependency_overrides[get_principal]=lambda:Principal(user=identity["user"])
     client=TestClient(app)
     client.identity=identity
+    client.set_principal = lambda selected_user: identity.update(user=selected_user)
     client.factory=factory
     yield client
     db.close(); Base.metadata.drop_all(engine); engine.dispose()
