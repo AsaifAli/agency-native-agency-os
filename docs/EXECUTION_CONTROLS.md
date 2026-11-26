@@ -6,10 +6,10 @@ The integration branch adds:
 
 - `POST /v1/orgs/{org_id}/executions/{execution_id}/cancel?workspace_id=...`
 - Membership role gate: owner, admin or operator.
-- Exact active workspace-grant check; execution lookup is scoped by organization and workspace.
+- Exact active workspace-grant check; execution lookup is scoped by organization and workspace. Explicit Founder Authority can operate the control independently of organization role, consistent with the founder exception inbox.
 - Durable cancellation intent in the existing allowlisted execution metadata, with audit events.
 - Queued executions with no prior attempts become terminal immediately.
-- Queued/retry-wait executions with prior attempts are sent back through worker reconciliation. If the retry budget is exhausted, the OS records `CANCEL_REQUIRES_MANUAL_REVIEW` instead of claiming a successful stop.
+- Queued/retry-wait executions with prior attempts are sent back through worker reconciliation (retry backoff is bypassed). If the retry budget is exhausted, the OS records `CANCEL_REQUIRES_MANUAL_REVIEW` instead of claiming a successful stop.
 - Active executions are not marked cancelled merely because a request was received. The worker must own a valid lease and acknowledge the request.
 - Claude Managed Agents receives `user.interrupt`; the adapter waits for the exact interrupt event to have a non-null `processed_at`, the session to be idle, and all workflow runs to have ended before the OS acknowledges cancellation.
 - If an earlier provider session may exist but its ID was not durably recorded, the runtime requests manual review rather than asserting cancellation.
