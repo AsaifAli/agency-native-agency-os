@@ -31,13 +31,13 @@ ExecutionProcessor = Callable[..., str | None]
 
 
 def _verify_worker_database_role() -> None:
-    """Require the dedicated NOBYPASSRLS role whenever PostgreSQL is used."""
-    if settings.app_env.lower() == "production" and settings.process_role != "worker":
+    """Verify the dedicated NOBYPASSRLS role before production worker startup."""
+    if settings.app_env.lower() != "production":
+        return
+    if settings.process_role != "worker":
         raise RuntimeError("Worker process must use PROCESS_ROLE=worker in production")
     if worker_engine.dialect.name != "postgresql":
-        if settings.app_env.lower() == "production":
-            raise RuntimeError("Production worker execution requires PostgreSQL")
-        return
+        raise RuntimeError("Production worker execution requires PostgreSQL")
     verify_postgres_role(
         worker_engine,
         expected_bypassrls=False,
