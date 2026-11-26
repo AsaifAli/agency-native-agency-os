@@ -270,7 +270,8 @@ def test_production_worker_verifies_its_nobypassrls_database_role(monkeypatch):
     runner._verify_worker_database_role()
 
     verification.assert_called_once_with(
-        runner.worker_engine, expected_bypassrls=False, require_rls=True
+        runner.worker_engine, expected_bypassrls=False, require_rls=True,
+        expected_role="agency_os_worker",
     )
 
 
