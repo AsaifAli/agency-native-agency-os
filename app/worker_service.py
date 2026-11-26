@@ -76,6 +76,11 @@ def _sync_plan_draft_execution(
             draft.error_code = None
             if task:
                 task.status = "awaiting_review"
+    elif state == "paused":
+        draft.status = "paused"
+        draft.error_code = None
+        if task:
+            task.status = "paused"
     elif state == "running":
         draft.status = "running"
         draft.error_code = None
@@ -127,7 +132,7 @@ def _sync_task_delegation(db: Session, execution: Execution, state: str,
         row.review_status = "waived"
     if error_code:
         row.last_error_code = error_code
-    elif state in {"running", "succeeded"}:
+    elif state in {"running", "succeeded", "queued", "paused"}:
         row.last_error_code = None
     row.updated_at = datetime.now(timezone.utc)
     record_event(
@@ -471,6 +476,9 @@ def complete_execution(
     now = datetime.now(timezone.utc)
 
     execution.status = ExecutionStatus.succeeded
+    metadata = dict(execution.request_metadata or {})
+    metadata.pop("control_request", None)
+    execution.request_metadata = metadata
     execution.result = result
     execution.finished_at = now
     execution.error_code = None
