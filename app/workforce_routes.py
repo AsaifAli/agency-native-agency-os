@@ -25,6 +25,34 @@ from app.workforce_service import initialize_workforce
 router = APIRouter(prefix="/v1/orgs/{org_id}/workforce", tags=["workforce"])
 WRITERS = {Role.owner, Role.admin, Role.operator}
 
+from app.workforce_blueprints import list_specialists, list_blueprints
+
+
+@router.get("/specialists")
+def get_specialist_catalog(
+    org_id: str,
+    workspace_id: str = Query(min_length=1),
+    db: Session = Depends(get_db),
+    p: Principal = Depends(get_principal),
+):
+    """Read-only specialist catalogue; profiles never grant runtime capabilities."""
+    require_membership(org_id, p, db)
+    _workspace(db, org_id, workspace_id)
+    return list_specialists()
+
+
+@router.get("/blueprints")
+def get_team_blueprints(
+    org_id: str,
+    workspace_id: str = Query(min_length=1),
+    db: Session = Depends(get_db),
+    p: Principal = Depends(get_principal),
+):
+    """Read-only, versioned team blueprints; no execution or activation occurs."""
+    require_membership(org_id, p, db)
+    _workspace(db, org_id, workspace_id)
+    return list_blueprints()
+
 
 def _workspace(db: Session, org_id: str, workspace_id: str):
     return require_workspace_access_from_context(org_id, workspace_id, db)
