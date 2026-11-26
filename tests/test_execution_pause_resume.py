@@ -6,6 +6,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
+import app.workforce_models  # noqa: F401 — register execution foreign-key metadata
 from app.models import (
     Agent, AuditEvent, DataClass, Execution, ExecutionAttempt, ExecutionAttemptStatus,
     ExecutionStatus, Organization, Task, User, Workspace,
