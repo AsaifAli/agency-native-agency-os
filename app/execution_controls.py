@@ -82,7 +82,7 @@ def request_execution_cancel(
     execution.request_metadata = metadata
     execution.updated_at = now
 
-    if execution.status in {ExecutionStatus.queued, ExecutionStatus.retry_wait}:
+    if execution.status in {ExecutionStatus.queued, ExecutionStatus.retry_wait} and execution.attempt_count == 0:
         execution.status = ExecutionStatus.cancelled
         execution.finished_at = now
         execution.error_code = "EXECUTION_CANCELLED"
