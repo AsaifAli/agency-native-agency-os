@@ -61,6 +61,7 @@ def client():
     test_client.testing_session_factory = TestingSession
     test_client.set_principal = lambda selected_user: principal.update(user=selected_user)
     test_client.org_id = org.id
+    test_client.user_id = user.id
     test_client.ws_id = ws.id
     test_client.other_ws_id = other_ws.id
     test_client.foreign_client_id = foreign_client.id
@@ -345,7 +346,7 @@ def test_founder_authority_viewer_can_link_opportunity_to_client(client):
         session.add(Membership(org_id=org, user_id=founder_viewer.id, role=Role.viewer))
         session.add(FounderAuthority(org_id=org, user_id=founder_viewer.id, active=True, grant_source="test"))
         session.add(WorkspaceGrant(
-            org_id=org, workspace_id=ws, user_id=founder_viewer.id, granted_by=client_user_id(client),
+            org_id=org, workspace_id=ws, user_id=founder_viewer.id, granted_by=client.user_id,
         ))
         session.flush()
         from app.auth import has_founder_authority
