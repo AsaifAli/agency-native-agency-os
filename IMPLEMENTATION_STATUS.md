@@ -332,3 +332,19 @@ payload non-disclosure, expired leases and exhausted pending work. These tests
 have **not been executed** in the current environment. The endpoint is not yet
 surfaced in the Founder Console; HTTP authorization, PostgreSQL RLS, browser
 integration and live worker metrics remain unverified.
+
+
+## Integration verification update — 2026-11-26 (PR #58)
+
+The current integration branch head after the evaluation evidence-trust increment is `aac2d845587c3e2c07999e57afc0f74ed9261664`. The branch is 189 commits ahead of `main`, 0 behind at base `0a190719fd52c385e7e385989676cf9051e6b7b0`. The PR remains open/draft and no production deployment or merge has occurred.
+
+- Full backend suite on the integration source: **453 passed, 10 skipped, 2 deprecation warnings** (Python 3.13.18 sandbox). The skipped tests require PostgreSQL URLs; this run is not PostgreSQL proof.
+- `python -m compileall -q app tests`: passed.
+- Alembic reports one head: `x4c8d1e6f902`.
+- Full SQLite migration upgrade through `x4c8d1e6f902`: passed.
+- Evaluation API test confirms a caller-supplied passing `safety_security` payload is persisted as `self_reported` and returned with `release_eligible=false`; listing preserves the same classification.
+- The new migration adds non-null `evaluation_runs.evidence_trust`, defaulting existing and new ordinary API runs to `self_reported`. The API does not accept a caller-supplied trust flag.
+
+**Remaining release blockers:** worker RLS still trusts caller-settable custom GUC scope and the worker retains broad direct table privileges for lifecycle/maintenance operations. The full worker DB capability migration is not implemented. Human/browser/machine/intake RLS identity assertions also remain a separate open hardening item. No trusted evaluation runner attestation issuer/verifier, immutable manifest, signed artifact digest or non-bypassable release gate exists; all ordinary API evaluation runs are deliberately ineligible. MCP Streamable HTTP/session credentials remain unported because the candidate branch has a stale Tool Gateway call contract and a migration parent that cannot be copied directly. PostgreSQL migration/RLS/concurrency tests on this exact head, provider E2E, full frontend verification, production restore drill and independent security review remain outstanding.
+
+**Readiness:** development integration candidate only; not production-ready. Do not merge or enable production side effects until the PostgreSQL worker authorization boundary and other release blockers are resolved and tested.
