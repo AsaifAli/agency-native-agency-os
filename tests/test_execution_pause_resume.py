@@ -137,6 +137,11 @@ def test_resume_paused_execution_queues_same_provider_session_and_rotates_token(
     assert control["resume_event_id"] is None
     saved_attempt = ctx["db"].query(ExecutionAttempt).filter_by(execution_id=execution.id).one()
     assert saved_attempt.external_run_id == "sesn_existing"
+    repeated = resume_execution(
+        ctx["db"], execution_id=execution.id, org_id=ctx["org_id"],
+        workspace_id=ctx["workspace_id"], actor_user_id=ctx["user_id"],
+    )
+    assert repeated.request_metadata["control_request"]["resume_token"] == control["resume_token"]
 
 
 def test_resume_rejects_non_paused_execution(pause_context):
