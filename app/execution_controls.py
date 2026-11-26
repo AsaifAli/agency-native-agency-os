@@ -343,6 +343,13 @@ def resume_execution(
     )
     if execution is None:
         raise ExecutionNotFound("Execution not found")
+    existing_control = (execution.request_metadata or {}).get("control_request")
+    if (
+        isinstance(existing_control, dict)
+        and existing_control.get("action") == "resume"
+        and execution.status in {ExecutionStatus.queued, ExecutionStatus.claimed, ExecutionStatus.running}
+    ):
+        return execution
     if execution.status != ExecutionStatus.paused:
         raise InvalidExecutionState("Only a paused execution can be resumed")
     if execution.attempt_count >= execution.max_attempts:
