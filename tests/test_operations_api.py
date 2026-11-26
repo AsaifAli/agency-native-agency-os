@@ -358,8 +358,9 @@ def test_service_catalogue_draft_requires_founder_activation(client):
         operator = User(email="catalog-operator@example.test", display_name="Operator")
         db.add(operator); db.flush()
         db.add(Membership(org_id=org, user_id=operator.id, role=Role.operator))
+        db.add(WorkspaceGrant(org_id=org, workspace_id=client.ws_id, user_id=operator.id, granted_by=client.user_id))
         db.commit()
-        client.app.dependency_overrides[get_principal] = lambda: Principal(user=operator)
+        client.set_principal(operator)
     finally:
         db.close()
     denied = client.patch(
@@ -367,7 +368,7 @@ def test_service_catalogue_draft_requires_founder_activation(client):
         headers=headers(), json={"status": "active"},
     )
     assert denied.status_code == 403
-    client.app.dependency_overrides[get_principal] = lambda: Principal(user=founder)
+    client.set_principal(founder)
     activated = client.patch(
         f"/v1/orgs/{org}/operations/service-catalog/{offering_id}/status",
         headers=headers(), json={"status": "active"},
@@ -800,6 +801,7 @@ def test_only_founder_can_waive_required_onboarding_checklist_item(client):
         db.add(operator)
         db.flush()
         db.add(Membership(org_id=client.org_id, user_id=operator.id, role=Role.operator))
+        db.add(WorkspaceGrant(org_id=client.org_id, workspace_id=client.ws_id, user_id=operator.id, granted_by=client.user_id))
         db.commit()
         client.app.dependency_overrides[get_principal] = lambda: Principal(user=operator)
     finally:
@@ -838,8 +840,9 @@ def test_founder_authority_viewer_can_read_commercial_and_delivery_registers(cli
         db.flush()
         db.add(Membership(org_id=client.org_id, user_id=founder_viewer.id, role=Role.viewer))
         db.add(FounderAuthority(org_id=client.org_id, user_id=founder_viewer.id, grant_source="test"))
+        db.add(WorkspaceGrant(org_id=client.org_id, workspace_id=client.ws_id, user_id=founder_viewer.id, granted_by=client.user_id))
         db.commit()
-        client.app.dependency_overrides[get_principal] = lambda: Principal(user=founder_viewer)
+        client.set_principal(founder_viewer)
     finally:
         db.close()
     for path in [
