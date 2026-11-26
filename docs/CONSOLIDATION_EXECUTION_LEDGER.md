@@ -300,3 +300,22 @@ Added a regression test proving that a production worker does not call workspace
 - `c99bbb0cd6e37b23f49730a4f08b0eace4173128` — regression test.
 
 **Verification:** committed but not executed here. No additional runtime behavior changed in this increment. This protects the existing startup guard; it does not address the deeper arbitrary-workspace worker authorization issue.
+
+
+### Exact PostgreSQL login verification (2026-11-26)
+
+Strengthened production startup verification to check the actual PostgreSQL `current_user` against the exact dedicated role, not only its SUPERUSER/BYPASSRLS flags and table ownership.
+
+- API startup now requires `agency_os_app`.
+- Worker startup now requires `agency_os_worker`.
+- The shared verifier rejects an empty expected role and reports a generic exact-role mismatch without exposing connection details.
+- Added/updated regression tests for the worker verifier call and required expected-role argument.
+
+Commits:
+- `d9c4d0107922f6904e6e8c3224d4f432f24caec7` — worker verifier contract test.
+- `baa67b91bdf92150c508fa3150949ce6ee4eaa77` — enforce exact current database role in verifier.
+- `cc8ffcab82f8bcdf140ee9bf6b244bf597269df5` — pin API startup to `agency_os_app`.
+- `9cda0d1291d0369d4ea91cbdaeac8d22ccd376d4` — pin worker startup to `agency_os_worker`.
+- `9f67d9646c1c04cd3d10a7bae207115eec8b0c95` — verifier argument validation test.
+
+**Verification status:** source changes committed; tests not yet executed in this environment. The verifier still needs live PostgreSQL tests for actual role mismatch, and this does not resolve the caller-settable RLS GUC issue.
