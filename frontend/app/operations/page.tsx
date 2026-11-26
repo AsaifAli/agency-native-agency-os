@@ -67,12 +67,12 @@ export default function OperationsPage() {
     setCancelling(item.id);
     setError("");
     try {
-      const result = await api<{execution_id: string; status: string}>(
+      const result = await api<{execution_id: string; status: string; error_code: string | null; error_message: string | null}>(
         `/v1/orgs/${orgId()}/executions/${item.id}/cancel?workspace_id=${encodeURIComponent(workspace)}`,
         { method: "POST" },
       );
       setExceptions(current => current.map(row =>
-        row.id === item.id && row.kind === "execution" ? { ...row, status: result.status } : row
+        row.id === item.id && row.kind === "execution" ? { ...row, status: result.status, error_code: result.error_code, error_message: result.error_message } : row
       ));
     } catch (e) {
       setError((e as Error).message);
