@@ -266,8 +266,8 @@ A checkbox is complete only when code/infrastructure, tests, operational evidenc
 
 ## Known open blockers at the 2026-11-26 checkpoint
 
-- [ ] PostgreSQL 16 verification; latest worker integration evidence is PostgreSQL 17 (368 passed, 1 RLS-only test skipped).
-- [ ] NOBYPASSRLS RLS integration and complete role/grant/ownership verification.
+- [x] PostgreSQL 16 Compose migration and integration suite: 55 passed, 0 failed on 2026-11-26. The stack provisions a `NOBYPASSRLS` worker role and exercises the configured admin/application/worker database URLs; this is test-suite evidence, not proof of deployed production topology.
+- [ ] Complete independent role/grant/ownership and RLS policy review across every tenant-scoped table, SECURITY DEFINER function and deployment role; retain the 55-pass PostgreSQL 16 suite as regression evidence.
 - [ ] Replace broad worker BYPASSRLS with narrowly scoped queue operations.
 - [ ] Human workspace assignment model and complete nested-object authorization matrix.
 - [ ] Actual worker process termination/restart, sustained load, cancellation and deployed multi-replica verification.
