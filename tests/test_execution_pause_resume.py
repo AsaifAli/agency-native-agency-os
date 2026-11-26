@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine
@@ -78,6 +79,7 @@ def test_pause_active_execution_persists_request_until_worker_acknowledges(pause
     attempt = ExecutionAttempt(
         execution_id=execution.id, attempt_number=1, worker_id="pause-worker",
         runtime=execution.runtime, status=ExecutionAttemptStatus.running,
+        lease_expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
     )
     ctx["db"].add(attempt)
     ctx["db"].commit()
