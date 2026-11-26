@@ -473,6 +473,7 @@ class ManagedAgentsRuntime(AgentRuntime):
             deadline = self.clock() + self.config.claude_managed_timeout_seconds
             tool_calls_processed = 0
             interrupt_sent = False
+            interrupt_event_id: str | None = None
             while self.clock() < deadline:
                 control_action = (
                     request.control_check()
@@ -483,12 +484,23 @@ class ManagedAgentsRuntime(AgentRuntime):
                     # Managed Agents acknowledges interruption asynchronously.
                     # Do not mark the OS execution cancelled until the provider
                     # session is idle and every workflow run has ended.
-                    self._request(
+                    sent = self._request(
                         client,
                         "POST",
                         f"/v1/sessions/{session_id}/events",
                         json={"events": [{"type": "user.interrupt"}]},
                     )
+                    sent_events = sent.get("data", [])
+                    if (
+                        not isinstance(sent_events, list)
+                        or len(sent_events) != 1
+                        or not isinstance(sent_events[0], dict)
+                        or not isinstance(sent_events[0].get("id"), str)
+                    ):
+                        raise RuntimeManualReviewRequired(
+                            "Provider accepted an interrupt without returning a reconcilable event ID."
+                        )
+                    interrupt_event_id = sent_events[0]["id"]
                     interrupt_sent = True
 
                 session = self._request(
@@ -498,7 +510,7 @@ class ManagedAgentsRuntime(AgentRuntime):
                 if status in {"failed", "error", "archived", "terminated"}:
                     if interrupt_sent and status == "terminated":
                         raise RuntimeCancelled(
-                            "Claude Managed Agents acknowledged the cancellation."
+                            "Claude Managed Agents session terminated after cancellation."
                         )
                     raise RuntimeExecutionError(
                         "Claude Managed Agents session ended unsuccessfully."
@@ -508,7 +520,17 @@ class ManagedAgentsRuntime(AgentRuntime):
                 # process them before waiting for session.status_idle.
                 events = self._list_events(client, session_id)
                 if interrupt_sent:
-                    if status == "idle" and not self._open_workflow_runs(events):
+                    interrupt_processed = any(
+                        event.get("type") == "user.interrupt"
+                        and event.get("id") == interrupt_event_id
+                        and event.get("processed_at")
+                        for event in events
+                    )
+                    if (
+                        interrupt_processed
+                        and status == "idle"
+                        and not self._open_workflow_runs(events)
+                    ):
                         raise RuntimeCancelled(
                             "Claude Managed Agents acknowledged the cancellation."
                         )
