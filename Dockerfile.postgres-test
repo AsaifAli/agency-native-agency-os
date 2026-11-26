@@ -15,4 +15,4 @@ COPY docker ./docker
 COPY tests ./tests
 COPY pytest.ini .
 
-CMD ["python", "-m", "pytest", "-q", "tests/test_approval_postgres.py", "tests/test_tenant_integrity_postgres.py", "tests/test_tenant_rls_postgres.py", "tests/test_worker_postgres.py", "tests/test_worker_rls_postgres.py", "tests/test_rls_migration.py", "tests/test_rls_context.py", "tests/test_worker_rls_context.py", "tests/test_worker_runner.py", "tests/test_api.py", "tests/test_workspace_authorization.py", "tests/test_route_auth_inventory.py"]
+CMD ["python", "-m", "pytest", "-q", "tests/test_approval_postgres.py", "tests/test_execution_control_postgres.py", "tests/test_tenant_integrity_postgres.py", "tests/test_tenant_rls_postgres.py", "tests/test_worker_postgres.py", "tests/test_worker_rls_postgres.py", "tests/test_rls_migration.py", "tests/test_rls_context.py", "tests/test_worker_rls_context.py", "tests/test_worker_runner.py", "tests/test_api.py", "tests/test_workspace_authorization.py", "tests/test_route_auth_inventory.py"]
