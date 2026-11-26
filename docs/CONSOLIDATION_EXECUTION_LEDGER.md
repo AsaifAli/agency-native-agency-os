@@ -421,3 +421,15 @@ Verification at integration head `56137e1ce8f642f18fed6f66c4f3026a57e3895c`:
 - Full SQLite Alembic upgrade through `x4c8d1e6f902`: passed.
 
 **Limitations:** there is still no trusted runner attestation issuer/verifier, immutable run manifest, signed artifact digest, or non-bypassable release integration. Therefore all API-created evaluations remain ineligible for release gating. This is a fail-safe classification improvement, not completion of the Evaluation Harness release gate. PostgreSQL migration and RLS verification remain pending.
+
+
+### Worker capability-boundary regression tests (2026-11-26)
+
+Added `tests/test_worker_capability_boundary_postgres.py` and included it in `Dockerfile.postgres-test`.
+
+- `test_forged_workspace_gucs_do_not_authorize_worker_reads` uses the actual `agency_os_worker` login, sets the legacy `agency_os.machine_org_id` and `agency_os.machine_workspace_id` values, and asserts that a synthetic tenant task remains invisible without a lease capability.
+- `test_worker_cannot_read_private_lease_capability_storage` requires the private capability table to exist, asserts the worker has no SELECT privilege, and asserts a direct read is rejected.
+
+**Verification at code commit `8c3dce0ce5a9afbee301a483ce7660fb40f8b000`:** focused test collection succeeds but both PostgreSQL tests were skipped because the sandbox has no PostgreSQL URLs. Full SQLite/unit suite: **453 passed, 12 skipped, 2 deprecation warnings**; `compileall` passed. These tests are added but not yet demonstrated failing against the old PostgreSQL policy or passing after a capability cutover. Do not treat this as a security fix.
+
+**Next gate:** run the isolated PostgreSQL harness with the actual worker role to establish the expected RED result for forged GUC authorization. Then implement the complete capability-backed claim/lifecycle/maintenance contracts and only later change RLS policies and grants. No worker privilege or RLS policy has been changed in this increment.
