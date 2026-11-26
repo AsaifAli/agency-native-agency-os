@@ -170,19 +170,31 @@ def test_outbox_summary_is_workspace_scoped_and_never_returns_payload(outbox_con
     from app.outbox_service import summarize_outbox
 
     ctx = outbox_context
-    pending_id = add_event(ctx, payload={"secret": "must-not-leak"})
-    published_id = add_event(ctx, status="published")
+    now = datetime.now(timezone.utc)
+    add_event(ctx, payload={"secret": "must-not-leak"}, created_at=now - timedelta(seconds=90))
+    add_event(ctx, status="published")
+
+    other_workspace = Workspace(
+        id=f"other-{uuid.uuid4().hex[:10]}", org_id=ctx["org_id"],
+        name="Other Workspace",
+    )
+    ctx["db"].add(other_workspace)
+    ctx["db"].commit()
+    add_event({
+        **ctx, "workspace_id": other_workspace.id,
+    }, payload={"other_workspace": True})
+
     summary = summarize_outbox(
-        ctx["db"], org_id=ctx["org_id"], workspace_id=ctx["workspace_id"],
-        now=datetime.now(timezone.utc),
+        ctx["db"], org_id=ctx["org_id"], workspace_id=ctx["workspace_id"], now=now,
     )
     assert summary["counts"] == {
         "pending": 1, "processing": 0, "published": 1, "dead_letter": 0,
     }
     assert summary["total"] == 2
-    assert summary["oldest_pending_at"] is not None
+    assert summary["oldest_pending_age_seconds"] == 90
     assert "payload" not in summary
     assert "secret" not in str(summary)
+    assert "other_workspace" not in str(summary)
 
 
 def test_outbox_summary_reports_expired_and_exhausted_work(outbox_context):
