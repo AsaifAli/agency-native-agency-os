@@ -77,6 +77,18 @@ def client():
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_principal] = lambda: Principal(user=principal["user"])
     tc = TestClient(app)
+    original_request = tc.request
+
+    def workspace_scoped_request(method, url, **kwargs):
+        url_text = str(url)
+        params = kwargs.get("params")
+        if "/v1/orgs/" in url_text and "workspace_id=" not in url_text:
+            scoped_params = dict(params or {})
+            scoped_params.setdefault("workspace_id", ws.id)
+            kwargs["params"] = scoped_params
+        return original_request(method, url, **kwargs)
+
+    tc.request = workspace_scoped_request
     tc.set_principal = lambda selected_user: principal.update(user=selected_user)
     tc.org_id, tc.ws_id, tc.other_ws_id, tc.user_id, tc.project_id, tc.opportunity_id, tc.client_id = org.id, ws.id, other_ws.id, user.id, project.id, opportunity.id, client.id
     tc.session_factory = TestingSession
