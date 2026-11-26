@@ -278,6 +278,7 @@ class ExecutionAttempt(Base):
     )
 
     attempt_number: Mapped[int] = mapped_column(nullable=False)
+    lease_generation: Mapped[int] = mapped_column(default=1, nullable=False)
     worker_id: Mapped[str | None] = mapped_column(
         String(160), nullable=True
     )
