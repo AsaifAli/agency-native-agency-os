@@ -40,6 +40,7 @@ def _verify_worker_database_role() -> None:
         worker_engine,
         expected_bypassrls=False,
         require_rls=True,
+        expected_role="agency_os_worker",
     )
 
 
