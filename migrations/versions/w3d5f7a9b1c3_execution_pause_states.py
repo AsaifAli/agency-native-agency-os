@@ -13,6 +13,10 @@ depends_on = None
 
 
 def upgrade() -> None:
+    if op.get_bind().dialect.name != "postgresql":
+        # SQLite stores SQLAlchemy Enum values as VARCHAR; create_all already
+        # includes the new labels for isolated unit tests.
+        return
     op.execute("ALTER TYPE executionstatus ADD VALUE IF NOT EXISTS 'paused'")
     op.execute("ALTER TYPE executionattemptstatus ADD VALUE IF NOT EXISTS 'paused'")
 
