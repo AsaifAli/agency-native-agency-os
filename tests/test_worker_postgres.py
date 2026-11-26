@@ -220,7 +220,10 @@ def test_postgres_workers_claim_different_executions(monkeypatch):
                 base_delay_seconds=5,
                 max_delay_seconds=30,
             )
-            assert recovered_count == 1
+            # Recovery is intentionally global across workspaces. A prior test may
+            # leave another expired lease in this shared disposable database; assert
+            # this invocation recovered work, then verify this execution specifically.
+            assert recovered_count >= 1
             recovery.commit()
 
             recovered_execution = recovery.query(Execution).filter(
@@ -643,8 +646,21 @@ try:
 finally:
     engine.dispose()
 """
+        worker_database_url = os.getenv("AGENCY_OS_TEST_RLS_WORKER_DATABASE_URL")
+        if not worker_database_url:
+            pytest.fail(
+                "AGENCY_OS_TEST_RLS_WORKER_DATABASE_URL must point to the "
+                "agency_os_worker role for the real worker-process test"
+            )
+        worker_parsed_url = make_url(worker_database_url)
+        assert worker_parsed_url.get_backend_name() == "postgresql"
+        assert worker_parsed_url.database == "agency_os_worker_test"
+
         child_env = os.environ.copy()
-        child_env["AGENCY_OS_TEST_DATABASE_URL"] = database_url
+        # The SECURITY DEFINER claim RPC intentionally checks session_user.
+        # Run the child as the actual least-privilege worker role, not the
+        # admin role used by the parent to seed and inspect test data.
+        child_env["AGENCY_OS_TEST_DATABASE_URL"] = worker_database_url
         child_env["AGENCY_OS_TEST_WORKER_ID"] = worker_id
         child_env["APP_ENV"] = "test"
         child_env["MOCK_RUNTIME_ENABLED"] = "true"
