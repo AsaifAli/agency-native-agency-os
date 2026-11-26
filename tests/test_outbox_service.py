@@ -163,3 +163,37 @@ def test_outbox_model_declares_lease_recovery_index():
 
     assert "ix_outbox_dispatch" in index_names
     assert "ix_outbox_lease_recovery" in index_names
+
+
+def test_outbox_summary_is_workspace_scoped_and_never_returns_payload(outbox_context):
+    from app.outbox_service import summarize_outbox
+
+    ctx = outbox_context
+    pending_id = add_event(ctx, payload={"secret": "must-not-leak"})
+    published_id = add_event(ctx, status="published")
+    summary = summarize_outbox(
+        ctx["db"], org_id=ctx["org_id"], workspace_id=ctx["workspace_id"],
+        now=datetime.now(timezone.utc),
+    )
+    assert summary["counts"] == {
+        "pending": 1, "processing": 0, "published": 1, "dead_letter": 0,
+    }
+    assert summary["total"] == 2
+    assert summary["oldest_pending_at"] is not None
+    assert "payload" not in summary
+    assert "secret" not in str(summary)
+
+
+def test_outbox_summary_reports_expired_and_exhausted_work(outbox_context):
+    from app.outbox_service import summarize_outbox
+
+    ctx = outbox_context
+    add_event(ctx, status="processing", claimed_by="stale-worker",
+              lease_expires_at=datetime.now(timezone.utc) - timedelta(seconds=10))
+    add_event(ctx, attempts=8, max_attempts=8)
+    summary = summarize_outbox(
+        ctx["db"], org_id=ctx["org_id"], workspace_id=ctx["workspace_id"],
+        now=datetime.now(timezone.utc),
+    )
+    assert summary["expired_leases"] == 1
+    assert summary["exhausted_pending"] == 1
