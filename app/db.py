@@ -120,20 +120,34 @@ REQUIRED_RLS_TABLES = frozenset({
 })
 
 
-def verify_postgres_role(database_engine, *, expected_bypassrls: bool, require_rls: bool) -> None:
-    """Fail closed unless the connection role and complete tenant RLS inventory are safe."""
+def verify_postgres_role(
+    database_engine, *, expected_bypassrls: bool, require_rls: bool,
+    expected_role: str,
+) -> None:
+    """Fail closed unless the exact connection role and complete tenant RLS inventory are safe."""
+    if not isinstance(expected_role, str) or not expected_role.strip():
+        raise ValueError("expected_role must be a non-empty PostgreSQL role name")
     if database_engine.dialect.name != "postgresql":
         raise RuntimeError("Production database role verification requires PostgreSQL")
     with database_engine.connect() as connection:
         role = connection.execute(text("""
-            SELECT r.rolsuper, r.rolbypassrls,
+            SELECT r.rolname AS role_name, r.rolsuper, r.rolbypassrls,
                 EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
                     WHERE n.nspname='public' AND c.relrowsecurity AND c.relowner=r.oid) owns_rls_tables
             FROM pg_roles r WHERE r.rolname=current_user
         """)).mappings().one_or_none()
-        if role is None or role["rolsuper"] or bool(role["rolbypassrls"]) != expected_bypassrls or role["owns_rls_tables"]:
-            expected = "non-owner BYPASSRLS role" if expected_bypassrls else "non-owner NOBYPASSRLS API/worker"
-            raise RuntimeError(f"PostgreSQL connection must use a {expected} role")
+        if (
+            role is None
+            or role["role_name"] != expected_role
+            or role["rolsuper"]
+            or bool(role["rolbypassrls"]) != expected_bypassrls
+            or role["owns_rls_tables"]
+        ):
+            expected = "non-owner BYPASSRLS role" if expected_bypassrls else "non-owner NOBYPASSRLS role"
+            raise RuntimeError(
+                f"PostgreSQL connection must use the exact {expected_role} "
+                f"({expected}) role"
+            )
         if require_rls:
             required = sorted(REQUIRED_RLS_TABLES)
             inventory = connection.execute(text("""
