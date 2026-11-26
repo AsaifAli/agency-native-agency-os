@@ -545,3 +545,13 @@ Additional review controls: identity/session locks follow revocation lock order;
 
 **Release decision: NO-GO.** The PR is a tested code candidate, not production approval. Restore the repository to private visibility now that the temporary public clone requirement is over; PR #47 remains available to authorized collaborators.
 
+
+
+## 2026-11-26 — PostgreSQL execution lease recovery test reconciliation
+
+- [x] Ported the worker lease-expiry recovery assertion onto a fresh branch based on current `main`; it verifies retry scheduling, attempt abandonment, lease clearing, error classification and persisted audit metadata.
+- [x] Test cleanup is scoped to the synthetic organization so both execution-scoped and attempt-scoped audit rows are removed.
+- [ ] Re-run the focused PostgreSQL worker integration test and full backend suite against this exact `main)-based branch before merge.
+- [ ] PostgreSQL 16, NOBYPASSRLS integration, actual process termination/restart, sustained load, cancellation and multi-replica verification remain open.
+
+**Evidence boundary:** the earlier isolated PostgreSQL 17 run on the superseded branch reported 4 focused integration tests passed and a full suite of 368 passed / 1 skipped. That is historical evidence only; it does not validate this newly reconciled branch. No GitHub Actions run is requested at this stage.
