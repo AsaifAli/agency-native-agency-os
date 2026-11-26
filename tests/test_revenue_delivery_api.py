@@ -355,6 +355,34 @@ def test_founder_authority_viewer_can_link_opportunity_to_client(client):
         assert session.query(FounderAuthority).filter_by(
             org_id=org, user_id=founder_viewer.id, active=True
         ).one_or_none() is not None
+        # Diagnose the complete join independently before exercising the helper.
+        joined_authority = (
+            session.query(FounderAuthority.id, User.id, Membership.id)
+            .join(User, User.id == FounderAuthority.user_id)
+            .join(
+                Membership,
+                (Membership.user_id == FounderAuthority.user_id)
+                & (Membership.org_id == FounderAuthority.org_id),
+            )
+            .filter(
+                FounderAuthority.org_id == org,
+                FounderAuthority.user_id == founder_viewer.id,
+                FounderAuthority.active.is_(True),
+                User.active.is_(True),
+            )
+            .all()
+        )
+        assert joined_authority, {
+            "org_id": org,
+            "user_id": founder_viewer.id,
+            "user_active_db": session.query(User.active).filter_by(id=founder_viewer.id).scalar(),
+            "membership": session.query(Membership.org_id, Membership.user_id).filter_by(
+                org_id=org, user_id=founder_viewer.id
+            ).all(),
+            "founder_authority": session.query(
+                FounderAuthority.org_id, FounderAuthority.user_id, FounderAuthority.active
+            ).filter_by(org_id=org, user_id=founder_viewer.id).all(),
+        }
         assert has_founder_authority(session, org, founder_viewer.id)
         session.commit()
         client.set_principal(founder_viewer)
