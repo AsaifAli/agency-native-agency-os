@@ -280,6 +280,7 @@ def test_worker_claim_rpc_issues_a_live_workspace_bound_capability():
             )
             execution.queued_at = datetime(2000, 1, 1, tzinfo=timezone.utc)
             execution_id, task_a_id, task_b_id = execution.id, task_a.id, task_b.id
+            workspace_a_id, workspace_b_id = workspace_a.id, workspace_b.id
             db.commit()
 
         worker_id = f"capability-worker-{suffix}"
@@ -373,21 +374,36 @@ def test_worker_claim_rpc_issues_a_live_workspace_bound_capability():
                 scope_claim_db, worker_id=worker_id, lease_seconds=120,
             )
             assert workspace_capability is not None
-            assert workspace_capability.workspace_id == f"00000000-0000-4000-8000-{suffix}"
+            # Maintenance claims are global and ordered across every workspace
+            # in the disposable database, not scoped to this test's organization.
+            # Assert the returned capability is the sole visible workspace rather
+            # than assuming this fixture is the first workspace in the database.
             scope_claim_db.commit()
 
         workspace_factory = scoped_worker_workspace_session_factory(
             workspace_capability, Worker,
         )
         with workspace_factory() as db:
-            assert db.execute(
-                text("SELECT id FROM public.tasks WHERE id = :id"),
-                {"id": task_a_id},
-            ).scalars().all() == [task_a_id]
-            assert db.execute(
-                text("SELECT id FROM public.tasks WHERE id = :id"),
-                {"id": task_b_id},
-            ).scalars().all() == []
+            visible_workspaces = db.execute(
+                text("SELECT id FROM public.workspaces")
+            ).scalars().all()
+            assert visible_workspaces == [workspace_capability.workspace_id]
+
+            visible_fixture_tasks = db.execute(
+                text("""
+                    SELECT id FROM public.tasks
+                    WHERE id IN (:task_a_id, :task_b_id)
+                    ORDER BY id
+                """),
+                {"task_a_id": task_a_id, "task_b_id": task_b_id},
+            ).scalars().all()
+            expected_fixture_tasks = (
+                [task_a_id] if workspace_capability.workspace_id == workspace_a_id
+                else [task_b_id] if workspace_capability.workspace_id == workspace_b_id
+                else []
+            )
+            assert visible_fixture_tasks == expected_fixture_tasks
+
             # Workspace maintenance cannot inspect machine identities; that
             # access is reserved for an execution capability bound to its agent.
             assert db.query(MachineIdentity.id).all() == []
