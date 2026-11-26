@@ -17,6 +17,21 @@ from app.models import (
 
 client = TestClient(app)
 
+# These routes require an explicit workspace query scope. Keep test calls concise
+# while preserving any deliberately supplied (including cross-workspace) scope.
+_original_client_request = client.request
+
+def _workspace_scoped_request(method, url, **kwargs):
+    url_text = str(url)
+    params = kwargs.get("params")
+    if "/v1/orgs/" in url_text and "workspace_id=" not in url_text:
+        scoped_params = dict(params or {})
+        scoped_params.setdefault("workspace_id", WORKSPACE_ID)
+        kwargs["params"] = scoped_params
+    return _original_client_request(method, url, **kwargs)
+
+client.request = _workspace_scoped_request
+
 OWNER_EMAIL = "approval-owner@test.local"
 ADMIN_EMAIL = "approval-admin@test.local"
 REVIEWER_EMAIL = "approval-reviewer@test.local"
