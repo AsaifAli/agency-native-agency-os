@@ -190,6 +190,7 @@ def process_one_execution(
             return None
         execution, attempt = claimed
         execution_id, attempt_id = execution.id, attempt.id
+        attempt_number = attempt.attempt_number
         db.commit()
 
     with session_factory() as db:
@@ -232,7 +233,7 @@ def process_one_execution(
             agent_instructions=agent.instructions, task_title=task.title,
             task_description=task.description,
             external_run_id=prior_attempt.external_run_id if prior_attempt else None,
-            attempt_number=attempt.attempt_number,
+            attempt_number=attempt_number,
             persist_external_run_id=persist_provider_run,
             request_metadata=execution.request_metadata or {},
         )
