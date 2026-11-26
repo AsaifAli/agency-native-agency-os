@@ -15,11 +15,16 @@ from app.integrations.runtime import (
     ExecutionResult,
     RuntimeExecutionError,
     RuntimeManualReviewRequired,
+    RuntimeCancelled,
     RuntimeNotConfiguredError,
     RuntimeTransientError,
 )
 from app.worker.runtime_factory import get_runtime
 from app.worker.tool_executor import build_machine_tool_executor
+from app.execution_controls import (
+    acknowledge_execution_cancel,
+    get_execution_control_request,
+)
 from app.worker_service import (
     LeaseExpired,
     claim_next_execution,
@@ -230,6 +235,17 @@ def process_one_execution(
             persist_external_run_id=persist_provider_run,
             request_metadata=execution.request_metadata or {},
         )
+
+        def check_execution_control() -> str | None:
+            with session_factory() as control_db:
+                return get_execution_control_request(
+                    control_db,
+                    execution_id=execution_id,
+                    attempt_id=attempt_id,
+                    worker_id=worker_id,
+                )
+
+        request.control_check = check_execution_control
         runtime_name = execution.runtime
         execution_org_id = execution.org_id
         execution_workspace_id = execution.workspace_id
@@ -277,6 +293,7 @@ def process_one_execution(
     heartbeat.start()
     runtime_error: tuple[str, str, bool] | None = None
     serialized_result: dict | None = None
+    cancellation_requested = False
     data_protection_block_code: str | None = None
     try:
         runtime = get_runtime(runtime_name)
@@ -290,6 +307,8 @@ def process_one_execution(
                 session_ttl_seconds=settings.claude_managed_timeout_seconds,
             )
         runtime_result = runtime.start(request)
+        if request.control_check is not None and request.control_check() == "cancel":
+            raise RuntimeCancelled("OS cancellation request observed after provider return.")
         runtime_result, output_protection = protect_execution_result(runtime_result)
         if output_protection.total_redactions:
             try:
@@ -329,6 +348,8 @@ def process_one_execution(
             "The managed agent paused for a human decision; no tool action was authorized.",
             False,
         )
+    except RuntimeCancelled:
+        cancellation_requested = True
     except RuntimeTransientError:
         runtime_error = (
             "RUNTIME_TRANSIENT_ERROR",
@@ -357,6 +378,17 @@ def process_one_execution(
         return execution_id
 
     heartbeat.assert_healthy()
+    if cancellation_requested:
+        with session_factory() as cancel_db:
+            acknowledge_execution_cancel(
+                cancel_db,
+                execution_id=execution_id,
+                attempt_id=attempt_id,
+                worker_id=worker_id,
+            )
+            cancel_db.commit()
+        return execution_id
+
     if runtime_error is not None:
         error_code, error_message, retryable = runtime_error
         _record_failure(
@@ -368,6 +400,20 @@ def process_one_execution(
 
     with session_factory() as db:
         heartbeat.assert_healthy()
+        if get_execution_control_request(
+            db,
+            execution_id=execution_id,
+            attempt_id=attempt_id,
+            worker_id=worker_id,
+        ) == "cancel":
+            acknowledge_execution_cancel(
+                db,
+                execution_id=execution_id,
+                attempt_id=attempt_id,
+                worker_id=worker_id,
+            )
+            db.commit()
+            return execution_id
         complete_execution(
             db, execution_id=execution_id, attempt_id=attempt_id,
             worker_id=worker_id, result=serialized_result,
