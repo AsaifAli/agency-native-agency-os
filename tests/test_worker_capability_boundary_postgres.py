@@ -113,3 +113,58 @@ def test_worker_cannot_read_private_lease_capability_storage():
     finally:
         worker_engine.dispose()
         admin_engine.dispose()
+
+
+def test_worker_can_only_establish_context_through_capability_verifier():
+    """The worker may invoke the verifier but cannot forge its private context."""
+    admin_engine = create_engine(ADMIN_URL, pool_pre_ping=True)
+    worker_engine = create_engine(WORKER_URL, pool_pre_ping=True)
+    try:
+        with admin_engine.connect() as connection:
+            function_exists = connection.execute(
+                text("""
+                    SELECT to_regprocedure(
+                        'agency_os_private.establish_worker_execution_context(bytea,text,text,text,integer)'
+                    )
+                """)
+            ).scalar_one()
+            assert function_exists is not None, "Capability verifier must be installed"
+
+        with worker_engine.connect() as connection:
+            can_execute = connection.execute(
+                text("""
+                    SELECT has_function_privilege(
+                        current_user,
+                        'agency_os_private.establish_worker_execution_context(bytea,text,text,text,integer)',
+                        'EXECUTE'
+                    )
+                """)
+            ).scalar_one()
+            can_insert_context = connection.execute(
+                text("""
+                    SELECT has_table_privilege(
+                        current_user,
+                        'agency_os_private.worker_transaction_context',
+                        'INSERT'
+                    )
+                """)
+            ).scalar_one()
+            assert can_execute is True
+            assert can_insert_context is False
+
+            accepted = connection.execute(
+                text("""
+                    SELECT agency_os_private.establish_worker_execution_context(
+                        decode(repeat('00', 32), 'hex'),
+                        'nonexistent-execution',
+                        'nonexistent-attempt',
+                        'untrusted-worker',
+                        1
+                    )
+                """)
+            ).scalar_one()
+            assert accepted is False
+            connection.rollback()
+    finally:
+        worker_engine.dispose()
+        admin_engine.dispose()
