@@ -1102,11 +1102,11 @@ def test_specialist_catalog_and_team_blueprints_are_workspace_scoped(app_client)
 
     blueprints = app_client.get(f"{base}/blueprints", params={"workspace_id": i["workspace"].id})
     assert blueprints.status_code == 200, blueprints.text
+    assert blueprints.json()["schema_version"] == 1
     runs = blueprints.json()["blueprints"]
     assert {"client_onboarding_delivery", "enterprise_feature_delivery",
             "marketing_campaign", "incident_response"} <= {item["slug"] for item in runs}
     for blueprint in runs:
-        assert blueprint["schema_version"] == 1
         assert blueprint["groups"]
         assert all(group["activation"] in {"always", "phase", "as_needed", "post_fix"}
                    for group in blueprint["groups"])
