@@ -283,3 +283,67 @@ def test_organization_owner_without_founder_authority_cannot_change_workspace_gr
         headers=headers,
     )
     assert denied_revoke.status_code == 403
+
+
+def test_execution_cancel_api_cancels_queued_execution_and_audits():
+    monkeypatch_settings = settings
+    monkeypatch_settings.mock_runtime_enabled = True
+    org_id, workspace_id, task_id, agent_id = _seed_execution_records("mock")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer dev:owner@test.local"}
+    created = client.post(
+        f"/v1/orgs/{org_id}/executions",
+        headers=headers,
+        json={
+            "workspace_id": workspace_id,
+            "task_id": task_id,
+            "agent_id": agent_id,
+            "idempotency_key": f"cancel-api-{uuid.uuid4().hex}",
+        },
+    )
+    assert created.status_code == 201
+    execution_id = created.json()["id"]
+
+    cancelled = client.post(
+        f"/v1/orgs/{org_id}/executions/{execution_id}/cancel",
+        params={"workspace_id": workspace_id},
+        headers=headers,
+    )
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+
+    db = SessionLocal()
+    try:
+        saved = db.get(Execution, execution_id)
+        assert saved.status == ExecutionStatus.cancelled
+        assert saved.finished_at is not None
+        assert db.query(AuditEvent).filter_by(
+            resource_id=execution_id, event_type="execution.cancelled"
+        ).count() == 1
+    finally:
+        db.close()
+
+
+def test_execution_cancel_api_hides_cross_workspace_execution():
+    org_id, workspace_id, task_id, agent_id = _seed_execution_records("mock")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer dev:owner@test.local"}
+    created = client.post(
+        f"/v1/orgs/{org_id}/executions",
+        headers=headers,
+        json={
+            "workspace_id": workspace_id,
+            "task_id": task_id,
+            "agent_id": agent_id,
+            "idempotency_key": f"cancel-scope-{uuid.uuid4().hex}",
+        },
+    )
+    assert created.status_code == 201
+    execution_id = created.json()["id"]
+
+    denied = client.post(
+        f"/v1/orgs/{org_id}/executions/{execution_id}/cancel",
+        params={"workspace_id": "another-workspace"},
+        headers=headers,
+    )
+    assert denied.status_code == 404
