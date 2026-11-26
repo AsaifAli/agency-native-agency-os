@@ -11,7 +11,12 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.audit import record_event
-from app.models import Execution, ExecutionStatus
+from app.models import Execution, ExecutionAttemptStatus, ExecutionStatus
+from app.worker_service import (
+    _get_owned_execution_attempt,
+    _sync_plan_draft_execution,
+    _sync_task_delegation,
+)
 
 
 class ExecutionControlError(Exception):
@@ -96,3 +101,78 @@ def request_execution_cancel(
 
     db.flush()
     return execution
+
+
+def get_execution_control_request(
+    db: Session,
+    *,
+    execution_id: str,
+    attempt_id: str,
+    worker_id: str,
+) -> str | None:
+    """Read a control request only while the supplied worker owns the live lease."""
+    execution, _attempt = _get_owned_execution_attempt(
+        db,
+        execution_id=execution_id,
+        attempt_id=attempt_id,
+        worker_id=worker_id,
+    )
+    request = (execution.request_metadata or {}).get("control_request")
+    if isinstance(request, dict) and request.get("action") == "cancel":
+        return "cancel"
+    return None
+
+
+def acknowledge_execution_cancel(
+    db: Session,
+    *,
+    execution_id: str,
+    attempt_id: str,
+    worker_id: str,
+) -> tuple[Execution, object]:
+    """Atomically acknowledge cancellation after provider interruption/drain."""
+    execution, attempt = _get_owned_execution_attempt(
+        db,
+        execution_id=execution_id,
+        attempt_id=attempt_id,
+        worker_id=worker_id,
+    )
+    request = (execution.request_metadata or {}).get("control_request")
+    if not isinstance(request, dict) or request.get("action") != "cancel":
+        raise InvalidExecutionState("No durable cancellation request exists")
+    if execution.status not in {ExecutionStatus.claimed, ExecutionStatus.running}:
+        raise InvalidExecutionState("Execution is not in a cancellable active state")
+    if attempt.status not in {ExecutionAttemptStatus.claimed, ExecutionAttemptStatus.running}:
+        raise InvalidExecutionState("Attempt is not active")
+
+    now = datetime.now(timezone.utc)
+    execution.status = ExecutionStatus.cancelled
+    execution.finished_at = now
+    execution.error_code = "EXECUTION_CANCELLED"
+    execution.error_message = "Execution cancelled after worker acknowledgement."
+    attempt.status = ExecutionAttemptStatus.failed
+    attempt.finished_at = now
+    attempt.lease_expires_at = None
+    attempt.heartbeat_at = now
+    attempt.error_code = "EXECUTION_CANCELLED"
+    attempt.error_message = "Provider interruption acknowledged by worker."
+
+    _sync_task_delegation(db, execution, "cancelled", "EXECUTION_CANCELLED")
+    _sync_plan_draft_execution(db, execution, "cancelled", "EXECUTION_CANCELLED")
+    record_event(
+        db,
+        execution.org_id,
+        request.get("requested_by"),
+        "execution.cancelled",
+        "execution",
+        execution.id,
+        execution.workspace_id,
+        {
+            "attempt_id": attempt.id,
+            "attempt_number": attempt.attempt_number,
+            "worker_id": worker_id,
+            "provider_interruption_acknowledged": True,
+        },
+    )
+    db.flush()
+    return execution, attempt
