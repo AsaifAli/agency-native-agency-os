@@ -74,10 +74,12 @@ def upgrade() -> None:
     for table in ORG_WORKSPACE_TABLES:
         op.execute(f'DROP POLICY IF EXISTS tenant_isolation ON public."{table}"')
         human = "agency_os_private.user_has_org_access(org_id, nullif(current_setting('agency_os.user_id', true), ''))"
+        machine = "(session_user <> 'agency_os_worker' AND org_id = nullif(current_setting('agency_os.machine_org_id', true), '') AND workspace_id = nullif(current_setting('agency_os.machine_workspace_id', true), ''))"
         worker = "(session_user = 'agency_os_worker' AND agency_os_private.worker_has_execution_context(org_id, workspace_id, NULL))"
         if table == "outbox_events":
+            machine = "(session_user <> 'agency_os_worker' AND org_id = nullif(current_setting('agency_os.machine_org_id', true), '') AND (workspace_id IS NULL OR workspace_id = nullif(current_setting('agency_os.machine_workspace_id', true), '')))"
             worker = "(session_user = 'agency_os_worker' AND workspace_id IS NOT NULL AND agency_os_private.worker_has_execution_context(org_id, workspace_id, NULL))"
-        predicate = f"({human} OR {worker})"
+        predicate = f"({human} OR {machine} OR {worker})"
         op.execute(f'CREATE POLICY tenant_isolation ON public."{table}" USING ({predicate}) WITH CHECK ({predicate})')
 
     op.execute("DROP POLICY IF EXISTS execution_attempt_tenant_isolation ON public.execution_attempts")
@@ -86,6 +88,7 @@ def upgrade() -> None:
         WHERE e.id = execution_attempts.execution_id
           AND (
             agency_os_private.user_has_org_access(e.org_id, nullif(current_setting('agency_os.user_id', true), ''))
+            OR (session_user <> 'agency_os_worker' AND e.org_id = nullif(current_setting('agency_os.machine_org_id', true), '') AND e.workspace_id = nullif(current_setting('agency_os.machine_workspace_id', true), ''))
             OR (session_user = 'agency_os_worker' AND agency_os_private.worker_has_execution_context(e.org_id, e.workspace_id, e.id))
           )
     )"""
@@ -93,11 +96,11 @@ def upgrade() -> None:
 
     for policy in ("tenant_isolation", "workspace_select", "workspace_insert", "workspace_update", "workspace_delete"):
         op.execute(f"DROP POLICY IF EXISTS {policy} ON public.workspaces")
-    workspace_predicate = "(agency_os_private.user_has_org_access(org_id, nullif(current_setting('agency_os.user_id', true), '')) OR (session_user = 'agency_os_worker' AND agency_os_private.worker_has_execution_context(org_id, id, NULL)))"
+    workspace_predicate = "(agency_os_private.user_has_org_access(org_id, nullif(current_setting('agency_os.user_id', true), '')) OR (session_user <> 'agency_os_worker' AND org_id = nullif(current_setting('agency_os.machine_org_id', true), '') AND id = nullif(current_setting('agency_os.machine_workspace_id', true), '')) OR (session_user = 'agency_os_worker' AND agency_os_private.worker_has_execution_context(org_id, id, NULL)))"
     op.execute(f"CREATE POLICY tenant_isolation ON public.workspaces USING ({workspace_predicate}) WITH CHECK ({workspace_predicate})")
 
     op.execute("DROP POLICY IF EXISTS tenant_isolation ON public.organizations")
-    org_predicate = "(agency_os_private.user_has_org_access(id, nullif(current_setting('agency_os.user_id', true), '')) OR (session_user = 'agency_os_worker' AND EXISTS (SELECT 1 FROM public.executions e WHERE e.org_id = organizations.id AND agency_os_private.worker_has_execution_context(e.org_id, e.workspace_id, e.id))))"
+    org_predicate = "(agency_os_private.user_has_org_access(id, nullif(current_setting('agency_os.user_id', true), '')) OR (session_user <> 'agency_os_worker' AND id = nullif(current_setting('agency_os.machine_org_id', true), '')) OR (session_user = 'agency_os_worker' AND EXISTS (SELECT 1 FROM public.executions e WHERE e.org_id = organizations.id AND agency_os_private.worker_has_execution_context(e.org_id, e.workspace_id, e.id))))"
     op.execute(f"CREATE POLICY tenant_isolation ON public.organizations USING ({org_predicate}) WITH CHECK ({org_predicate})")
 
 
