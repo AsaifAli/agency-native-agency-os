@@ -95,10 +95,42 @@ def request_execution_cancel(
             {"previous_status": "queued_or_retry_wait", "control": "cancel"},
         )
     else:
+        previous_status = execution.status.value
+        if execution.status in {ExecutionStatus.queued, ExecutionStatus.retry_wait}:
+            if execution.attempt_count >= execution.max_attempts:
+                # No worker attempt remains to reconcile an earlier provider call.
+                # Do not falsely report a successful cancellation.
+                execution.status = ExecutionStatus.failed
+                execution.finished_at = now
+                execution.error_code = "CANCEL_REQUIRES_MANUAL_REVIEW"
+                execution.error_message = (
+                    "Cancellation requested after retry exhaustion; provider outcome requires manual reconciliation."
+                )
+                _sync_task_delegation(
+                    db, execution, "failed", "CANCEL_REQUIRES_MANUAL_REVIEW"
+                )
+                _sync_plan_draft_execution(
+                    db, execution, "failed", "CANCEL_REQUIRES_MANUAL_REVIEW"
+                )
+                record_event(
+                    db, org_id, actor_user_id,
+                    "execution.cancel_reconciliation_required",
+                    "execution", execution.id, workspace_id,
+                    {"previous_status": previous_status, "control": "cancel"},
+                )
+                db.flush()
+                return execution
+            if execution.status == ExecutionStatus.retry_wait:
+                # Bring reconciliation forward rather than waiting for the old
+                # retry backoff. The worker will reuse the persisted provider ID.
+                execution.status = ExecutionStatus.queued
+                execution.next_retry_at = None
+                execution.queued_at = now
+
         record_event(
             db, org_id, actor_user_id, "execution.cancel_requested",
             "execution", execution.id, workspace_id,
-            {"previous_status": execution.status.value, "control": "cancel"},
+            {"previous_status": previous_status, "control": "cancel"},
         )
 
     db.flush()
