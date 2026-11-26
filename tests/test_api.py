@@ -347,3 +347,39 @@ def test_execution_cancel_api_hides_cross_workspace_execution(monkeypatch):
         headers=headers,
     )
     assert denied.status_code == 404
+
+
+def test_execution_cancel_api_persists_request_for_active_execution(monkeypatch):
+    monkeypatch.setattr(settings, "mock_runtime_enabled", True)
+    org_id, workspace_id, task_id, agent_id = _seed_execution_records("mock")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer dev:owner@test.local"}
+    created = client.post(
+        f"/v1/orgs/{org_id}/executions",
+        headers=headers,
+        json={
+            "workspace_id": workspace_id,
+            "task_id": task_id,
+            "agent_id": agent_id,
+            "idempotency_key": f"cancel-active-{uuid.uuid4().hex}",
+        },
+    )
+    assert created.status_code == 201
+    execution_id = created.json()["id"]
+
+    db = SessionLocal()
+    try:
+        execution = db.get(Execution, execution_id)
+        execution.status = ExecutionStatus.running
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.post(
+        f"/v1/orgs/{org_id}/executions/{execution_id}/cancel",
+        params={"workspace_id": workspace_id},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "running"
+    assert response.json()["control_request"]["action"] == "cancel"
