@@ -108,7 +108,7 @@ class Settings(BaseSettings):
             if self.process_role == "api" and urlparse(self.database_url).username == "agency_os_worker":
                 errors.append("API PROCESS_ROLE cannot use the BYPASSRLS worker database role")
             if self.process_role == "worker" and urlparse(self.database_url).username == "agency_os_app":
-                errors.append("Worker PROCESS_ROLE must use the dedicated BYPASSRLS worker database role")
+                errors.append("Worker PROCESS_ROLE must use the dedicated NOBYPASSRLS worker database role")
             if not db_password or len(db_password) < 32 or db_password.lower() in {"change-me", "password", "postgres", "local-only-change-me"}:
                 errors.append("DATABASE_URL must contain a strong, unique database password in production")
             if not self.redis_url.startswith("rediss://"):
