@@ -1,4 +1,8 @@
+import json
 import os
+import select
+import subprocess
+import sys
 import uuid
 
 import pytest
@@ -532,4 +536,243 @@ def test_postgres_outbox_recovers_expired_lease_and_dead_letters_exhausted_event
             finally:
                 cleanup.close()
 
+        engine.dispose()
+
+
+
+def test_postgres_worker_process_killed_during_runtime_recovers_execution(monkeypatch):
+    """A real worker process killed mid-runtime leaves a recoverable persisted lease."""
+    monkeypatch.setattr(settings, "app_env", "test")
+    monkeypatch.setattr(settings, "mock_runtime_enabled", True)
+    database_url = os.getenv("AGENCY_OS_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("Set AGENCY_OS_TEST_DATABASE_URL to run PostgreSQL process recovery test")
+
+    parsed_url = make_url(database_url)
+    assert parsed_url.get_backend_name() == "postgresql"
+    assert parsed_url.database == "agency_os_worker_test", (
+        "Safety check: this test may only use agency_os_worker_test"
+    )
+
+    engine = create_engine(database_url, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    org_id = workspace_id = task_id = agent_id = user_id = execution_id = None
+    process = None
+    suffix = uuid.uuid4().hex[:12]
+    worker_id = f"crash-test-worker-{suffix}"
+
+    try:
+        setup = Session()
+        try:
+            user = User(
+                email=f"pg-crash-{suffix}@test.local",
+                display_name="PostgreSQL Worker Crash Test",
+            )
+            org = Organization(name=f"PostgreSQL Worker Crash Test {suffix}")
+            setup.add_all([user, org])
+            setup.flush()
+
+            workspace = Workspace(
+                id=f"pg-crash-{suffix}",
+                org_id=org.id,
+                name="PostgreSQL Worker Crash Test Workspace",
+            )
+            setup.add(workspace)
+            setup.flush()
+
+            agent = Agent(
+                org_id=org.id,
+                workspace_id=workspace.id,
+                name=f"PostgreSQL Crash Agent {suffix}",
+                runtime="mock",
+                data_class=DataClass.synthetic,
+                enabled=True,
+            )
+            task = Task(
+                org_id=org.id,
+                workspace_id=workspace.id,
+                title="Crash worker during provider execution",
+                description="Synthetic process-crash recovery test",
+                created_by=user.id,
+            )
+            setup.add_all([agent, task])
+            setup.flush()
+
+            org_id, workspace_id = org.id, workspace.id
+            task_id, agent_id, user_id = task.id, agent.id, user.id
+            execution = create_execution(
+                setup,
+                org_id=org_id,
+                workspace_id=workspace_id,
+                task_id=task_id,
+                agent_id=agent_id,
+                requested_by=user_id,
+                idempotency_key=f"pg-worker-crash-{suffix}",
+            )
+            execution_id = execution.id
+            setup.commit()
+        finally:
+            setup.close()
+
+        # Exercise the actual process_one_execution lifecycle. The test runtime
+        # blocks after the execution has been claimed, started and its heartbeat
+        # thread has begun. The parent then terminates the entire child process.
+        child_code = r"""
+import json
+import os
+import time
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from app.worker import processor
+
+class BlockingRuntime:
+    def start(self, request):
+        print(json.dumps({"stage": "runtime_started"}), flush=True)
+        time.sleep(300)
+
+processor.get_runtime = lambda runtime_name: BlockingRuntime()
+engine = create_engine(os.environ["AGENCY_OS_TEST_DATABASE_URL"], pool_pre_ping=True)
+Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+try:
+    processor.process_one_execution(
+        worker_id=os.environ["AGENCY_OS_TEST_WORKER_ID"],
+        lease_seconds=15,
+        heartbeat_interval_seconds=2,
+        session_factory=Session,
+    )
+finally:
+    engine.dispose()
+"""
+        child_env = os.environ.copy()
+        child_env["AGENCY_OS_TEST_DATABASE_URL"] = database_url
+        child_env["AGENCY_OS_TEST_WORKER_ID"] = worker_id
+        child_env["APP_ENV"] = "test"
+        child_env["MOCK_RUNTIME_ENABLED"] = "true"
+        process = subprocess.Popen(
+            [sys.executable, "-c", child_code],
+            cwd=os.getcwd(),
+            env=child_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+
+        ready, _, _ = select.select([process.stdout], [], [], 20)
+        if not ready:
+            process.kill()
+            stdout, stderr = process.communicate(timeout=10)
+            pytest.fail(
+                "Worker child did not reach the runtime before timeout. "
+                f"stdout={stdout!r}; stderr={stderr!r}"
+            )
+
+        marker = process.stdout.readline()
+        assert marker, "Worker child exited without confirming runtime start"
+        assert json.loads(marker) == {"stage": "runtime_started"}
+
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=10)
+        assert process.returncode is not None and process.returncode != 0
+
+        # The execution and attempt were committed before the provider runtime
+        # began. Verify that killing the process did not erase that state.
+        with Session() as verification:
+            crashed_execution = verification.query(Execution).filter_by(
+                id=execution_id
+            ).one()
+            crashed_attempt = verification.query(ExecutionAttempt).filter_by(
+                execution_id=execution_id
+            ).one()
+            assert crashed_execution.status.value == "running"
+            assert crashed_attempt.status.value == "running"
+            assert crashed_attempt.worker_id == worker_id
+            attempt_id = crashed_attempt.id
+
+            # Fast-forward only this test-owned lease; process termination above
+            # is real, while waiting a full 15-second lease adds no test value.
+            crashed_attempt.lease_expires_at = (
+                datetime.now(timezone.utc) - timedelta(seconds=5)
+            )
+            verification.commit()
+
+            recovered_count = recover_expired_execution_leases(
+                verification,
+                base_delay_seconds=5,
+                max_delay_seconds=30,
+            )
+            assert recovered_count >= 1
+            verification.commit()
+
+            recovered_execution = verification.query(Execution).filter_by(
+                id=execution_id
+            ).one()
+            recovered_attempt = verification.query(ExecutionAttempt).filter_by(
+                id=attempt_id
+            ).one()
+            assert recovered_execution.status.value == "retry_wait"
+            assert recovered_execution.next_retry_at is not None
+            assert recovered_attempt.status.value == "abandoned"
+            assert recovered_attempt.lease_expires_at is None
+            assert recovered_attempt.error_code == "WORKER_LEASE_EXPIRED"
+
+            recovery_event = verification.query(AuditEvent).filter_by(
+                event_type="execution.attempt_abandoned",
+                resource_id=attempt_id,
+            ).one()
+            assert recovery_event.payload["error_code"] == "WORKER_LEASE_EXPIRED"
+            assert recovery_event.payload["worker_id"] == worker_id
+
+    finally:
+        if process is not None and process.poll() is None:
+            process.kill()
+            process.wait(timeout=10)
+        if process is not None:
+            if process.stdout:
+                process.stdout.close()
+            if process.stderr:
+                process.stderr.close()
+
+        if org_id is not None:
+            cleanup = Session()
+            try:
+                if execution_id:
+                    cleanup.query(AuditEvent).filter(
+                        AuditEvent.org_id == org_id
+                    ).delete(synchronize_session=False)
+                    cleanup.query(ExecutionAttempt).filter(
+                        ExecutionAttempt.execution_id == execution_id
+                    ).delete(synchronize_session=False)
+                    cleanup.query(Execution).filter(
+                        Execution.id == execution_id
+                    ).delete(synchronize_session=False)
+                if task_id:
+                    cleanup.query(Task).filter(Task.id == task_id).delete(
+                        synchronize_session=False
+                    )
+                if agent_id:
+                    cleanup.query(Agent).filter(Agent.id == agent_id).delete(
+                        synchronize_session=False
+                    )
+                if workspace_id:
+                    cleanup.query(Workspace).filter(
+                        Workspace.id == workspace_id
+                    ).delete(synchronize_session=False)
+                if user_id:
+                    cleanup.query(User).filter(User.id == user_id).delete(
+                        synchronize_session=False
+                    )
+                cleanup.query(Organization).filter(
+                    Organization.id == org_id
+                ).delete(synchronize_session=False)
+                cleanup.commit()
+            except Exception:
+                cleanup.rollback()
+                raise
+            finally:
+                cleanup.close()
         engine.dispose()
