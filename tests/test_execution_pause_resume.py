@@ -20,6 +20,7 @@ from app.execution_controls import (
     request_execution_pause,
     resume_execution,
     acknowledge_execution_pause,
+    persist_execution_control_event,
 )
 
 
@@ -98,6 +99,11 @@ def test_pause_active_execution_persists_request_until_worker_acknowledges(pause
     assert execution.request_metadata["control_request"]["action"] == "pause"
 
     with ctx["session_factory"]() as worker_db:
+        persist_execution_control_event(
+            worker_db, execution_id=execution.id, attempt_id=attempt_id,
+            worker_id="pause-worker", action="pause", provider_event_id="evt_pause_1",
+        )
+        worker_db.commit()
         acknowledged, saved_attempt = acknowledge_execution_pause(
             worker_db, execution_id=execution.id, attempt_id=attempt_id,
             worker_id="pause-worker",
@@ -106,6 +112,7 @@ def test_pause_active_execution_persists_request_until_worker_acknowledges(pause
         assert acknowledged.status == ExecutionStatus.paused
         assert saved_attempt.status == ExecutionAttemptStatus.paused
         assert saved_attempt.lease_expires_at is None
+        assert acknowledged.request_metadata["control_request"]["interrupt_event_id"] == "evt_pause_1"
 
 
 def test_resume_paused_execution_queues_same_provider_session_and_rotates_token(pause_context):
