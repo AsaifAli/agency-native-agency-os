@@ -1097,8 +1097,13 @@ def test_specialist_catalog_and_team_blueprints_are_workspace_scoped(app_client)
     ids = {item["specialist_key"] for item in payload["specialists"]}
     assert {"multi_agent_architect", "database_reliability_engineer", "privacy_engineer",
             "ai_code_security_auditor", "ui_finish_gate_reviewer", "discovery_coach"} <= ids
+    assert all(item["runtime_owner"] == "claude" for item in payload["specialists"])
+    assert all(item["status"] == "catalogued" for item in payload["specialists"])
     assert all(item["default_enabled"] is False for item in payload["specialists"])
-    assert all(item["tool_grants"] == [] for item in payload["specialists"])
+    assert all("mission" not in item and "responsibilities" not in item for item in payload["specialists"])
+    from agents.specialists.catalog import SPECIALIST_PROFILES
+    assert {item["specialist_key"] for item in SPECIALIST_PROFILES} == ids
+    assert all(item["review_gate"] for item in SPECIALIST_PROFILES)
 
     blueprints = app_client.get(f"{base}/blueprints", params={"workspace_id": i["workspace"].id})
     assert blueprints.status_code == 200, blueprints.text
