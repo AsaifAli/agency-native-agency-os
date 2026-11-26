@@ -678,9 +678,7 @@ def test_plan_draft_queue_is_founder_only_and_idempotent(app_client, monkeypatch
     finally:
         db.close()
 
-    app_client.app.dependency_overrides[get_principal] = (
-        lambda: Principal(user=i["operator"])
-    )
+    app_client.set_principal(i["operator"])
     denied = app_client.post(
         f"/v1/orgs/{i['org'].id}/workforce/plan-drafts", json={
             **payload, "idempotency_key": "plan-draft-idempotency-002",
@@ -862,9 +860,7 @@ def test_chief_of_staff_draft_requires_founder_assignment_before_plan_creation(
         }]},
     )
     assert denied.status_code == 403
-    app_client.app.dependency_overrides[get_principal] = (
-        lambda: Principal(user=i["user"])
-    )
+    app_client.set_principal(i["user"])
 
     approved = app_client.post(
         f"/v1/orgs/{i['org'].id}/workforce/plan-drafts/{draft_id}/approve",
