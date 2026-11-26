@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.auth import (
     Principal,
     get_principal,
+    has_founder_authority,
     require_membership,
     require_role,
     require_workspace_access_from_context,
@@ -30,7 +31,8 @@ def cancel_execution_endpoint(
 ):
     """Request cancellation of an execution in an exactly authorized workspace."""
     role = require_membership(org_id, p, db)
-    require_role(role, {Role.owner, Role.admin, Role.operator})
+    if role not in {Role.owner, Role.admin, Role.operator} and not has_founder_authority(db, org_id, p.user.id):
+        require_role(role, {Role.owner, Role.admin, Role.operator})
     require_workspace_access_from_context(org_id, workspace_id, db)
 
     try:
