@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db import (
     WorkerSessionLocal,
+    worker_engine,
+    verify_postgres_role,
     list_worker_scopes,
     scoped_worker_session_factory,
 )
@@ -26,6 +28,19 @@ logger = logging.getLogger(__name__)
 
 SessionFactory = Callable[[], Session]
 ExecutionProcessor = Callable[..., str | None]
+
+
+def _verify_worker_database_role() -> None:
+    """Fail closed when a production worker is not using its dedicated RLS role."""
+    if settings.app_env.lower() != "production":
+        return
+    if settings.process_role != "worker":
+        raise RuntimeError("Worker process must use PROCESS_ROLE=worker in production")
+    verify_postgres_role(
+        worker_engine,
+        expected_bypassrls=False,
+        require_rls=True,
+    )
 
 
 def _run_maintenance(
@@ -132,6 +147,8 @@ def run_worker(
         raise ValueError("maintenance_interval_seconds must be at least 1")
     if not 1 <= maintenance_batch_size <= 1000:
         raise ValueError("maintenance_batch_size must be between 1 and 1000")
+
+    _verify_worker_database_role()
 
     next_maintenance_at = 0.0
     logger.info("Worker started: worker_id=%s", worker_id)
