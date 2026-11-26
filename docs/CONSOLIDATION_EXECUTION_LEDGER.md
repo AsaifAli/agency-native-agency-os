@@ -340,3 +340,29 @@ Commits after the prior ledger entry:
 - `40dd96777f82856a52a8bc1b18e7c321de57e18c` — exact worker role in standalone process entrypoint.
 
 Tested branch head: `40dd96777f82856a52a8bc1b18e7c321de57e18c`.
+
+
+### RLS identity and context call-site inventory (2026-11-26)
+
+A call-site inventory was completed before changing the RLS trust mechanism. This is a source-level inventory, not proof that each route is secure at runtime.
+
+| Context kind | Current call sites | Current trust input | Required replacement boundary |
+|---|---|---|---|
+| Human user identity | `app/auth.py`, `app/main.py` | Authenticated bearer/browser-session result is copied into `agency_os.user_id` | API-issued signed assertion, verified by PostgreSQL; live membership and workspace grants remain checked by RLS |
+| Browser-session bootstrap | `app/browser_sessions.py` | Raw token hash copied into `agency_os.browser_session_token_hash` to locate the session, then resolved user copied into `agency_os.user_id` | Narrow verifier function for token-hash lookup; then signed human assertion for subsequent access; do not expose token hash or signing material to app-role SQL |
+| Machine identity bootstrap/use | `app/machine_identity.py` | Lookup ID and then org/workspace are copied into `agency_os.machine_identity_lookup_id`, `agency_os.machine_org_id`, and `agency_os.machine_workspace_id` | Narrow machine-identity verifier bound to the authenticated credential and current active identity; do not accept caller-selected org/workspace as authority |
+| Public website intake | `app/website_intake_routes.py` | Configured org/workspace identifiers copied directly into machine GUCs | Dedicated intake capability scoped to the configured target and operation; must not inherit a general-purpose worker scope mechanism |
+| Worker execution | `app/db.py` via `scoped_worker_session_factory`, called from `app/worker/runner.py` | Worker enumerates all workspace IDs, then sets org/workspace GUCs itself | Database-owned claim-and-bind transaction: claim one eligible execution, derive scope from its row, and bind every lease mutation to execution/attempt/worker tuple |
+
+The migration search also confirms the GUCs are consumed across the base tenant RLS migration and the human workspace-authorization migration, including organizations/workspaces, execution/attempt paths, machine identities, browser sessions, and outbox policy logic. A migration must update the complete policy/function inventory atomically; changing only the most obvious task policy would leave alternate data paths exposed or break authentication bootstrap.
+
+#### Safe implementation order
+
+1. Introduce PostgreSQL verifier primitives and role/privilege checks without removing the existing GUC policies. Keep verifier secrets unreadable to `agency_os_app` and `agency_os_worker`; the API can only submit signed assertions, not retrieve signing keys.
+2. Add human and browser-session negative PostgreSQL tests (forged user GUC, token-hash lookup boundaries, expired/tampered assertion, revoked membership/grant, key rotation, and pooled-connection reuse).
+3. Add machine-identity and public-intake capability tests, including revoked/disabled identity and attempts to select another workspace.
+4. Implement worker claim-and-bind as a DB-owned atomic operation. Keep provider calls outside the transaction; heartbeat, control, completion, failure, and recovery must prove the exact live lease tuple.
+5. Separate maintenance/outbox/retention operations into narrowly parameterized, bounded database contracts. Do not reintroduce a generic org/workspace scope-minting function.
+6. Switch callers and RLS policies only after both old and new paths are covered; then remove raw GUC trust and the all-workspace inventory function in a single reviewed migration sequence with rollback/restore evidence.
+
+**Status:** inventory complete at source level. No RLS policy, identity flow, migration, or runtime behavior was changed in this increment. The signed human/machine assertions and worker claim-and-bind remain unimplemented. PostgreSQL negative tests are still required before tenant-isolation acceptance.
