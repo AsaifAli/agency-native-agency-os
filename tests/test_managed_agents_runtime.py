@@ -496,7 +496,7 @@ def test_managed_agents_propagates_unexpected_os_tool_failures_for_worker_retry(
 
 
 def test_managed_agents_interrupts_and_drains_session_on_os_cancellation():
-    state = {"control_checks": 0, "interrupts": 0}
+    state = {"control_checks": 0, "interrupts": 0, "interrupt_id": "sevt_interrupt_1"}
 
     def control_check():
         state["control_checks"] += 1
@@ -514,11 +514,19 @@ def test_managed_agents_interrupts_and_drains_session_on_os_cancellation():
             payload = json.loads(req.content)
             assert payload["events"] == [{"type": "user.interrupt"}]
             state["interrupts"] += 1
-            return httpx.Response(200, json={"data": []})
+            return httpx.Response(200, json={"data": [{
+                "id": state["interrupt_id"],
+                "type": "user.interrupt",
+                "processed_at": None,
+            }]})
         if req.method == "GET" and req.url.path == "/v1/sessions/sesn_cancel":
             return httpx.Response(200, json={"id": "sesn_cancel", "status": "idle"})
         if req.method == "GET" and req.url.path == "/v1/sessions/sesn_cancel/events":
-            return httpx.Response(200, json={"data": []})
+            return httpx.Response(200, json={"data": [{
+                "id": state["interrupt_id"],
+                "type": "user.interrupt",
+                "processed_at": "2026-11-26T10:00:00Z",
+            }]})
         return httpx.Response(404)
 
     runtime = ManagedAgentsRuntime(
