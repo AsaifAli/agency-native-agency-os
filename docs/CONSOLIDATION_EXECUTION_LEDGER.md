@@ -170,3 +170,14 @@ Remaining acceptance tests before PR can leave draft:
 5. Complete remaining migration/RLS, tenant-isolation, backup/restore and release-readiness checks from the phase ledger.
 
 The outbox summary API authorization and workspace-isolation tests are now executed and passed in the user's local API test run. This does not establish browser/dashboard integration or PostgreSQL-specific route concurrency behavior.
+
+### PostgreSQL harness verification update (2026-11-26)
+
+The project owner ran the isolated PostgreSQL Compose harness against integration commit `019de10c16f6460f208b109fd40d0a324b5d546a` after adding the expired-worker cancellation acknowledgement regression:
+
+- Command: `docker compose -p agency-os-pg-test -f docker-compose.postgres-test.yml up --build --abort-on-container-exit --exit-code-from postgres-tests postgres-tests`.
+- Result: **61 passed, 2 warnings in 2.66s**, exit code 0.
+- The run included the PostgreSQL approval-consumption concurrency test and the expired-lease recovery/stale-worker acknowledgement test. The latter verifies recovery clears the expired lease, a stale acknowledgement is rejected, the execution remains in retry state, and no cancellation audit event is emitted.
+- Warnings were Starlette/Authlib deprecations concerning the `httpx` compatibility layer; they did not fail the run.
+
+This is owner-reported runtime evidence for the isolated PostgreSQL harness at that exact commit. It does not establish full RLS/tenant isolation across all API, file, cache and worker surfaces, browser E2E, backup restore, trusted evaluation attestation, or production readiness. The harness should be rerun after any subsequent backend or migration changes.
