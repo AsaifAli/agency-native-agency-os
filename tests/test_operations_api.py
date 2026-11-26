@@ -7,10 +7,10 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.auth import Principal, get_principal
-from app.db import Base, get_db
+from app.db import Base, get_db, set_rls_context
 from app.models import (
     Approval, ApprovalStatus, FounderAuthority, Membership, Organization,
-    Role, User, Workspace, Task,
+    Role, User, Workspace, Task, WorkspaceGrant,
 )
 from app.domain_models import Project, Opportunity, Client
 from app.operations_models import ServicePlaybook, ServiceOffering, Proposal, ContractRecord, ClientOnboarding, OnboardingChecklistItem, InvoiceRecord, PaymentReceipt, ScopeChangeRequest, TimeEntry, ProjectCost, RetainerServicePeriod
@@ -38,6 +38,7 @@ def client():
     db.add_all([
         Membership(org_id=org.id, user_id=user.id, role=Role.owner),
         FounderAuthority(org_id=org.id, user_id=user.id, grant_source="test"),
+        WorkspaceGrant(org_id=org.id, workspace_id=ws.id, user_id=user.id, granted_by=user.id),
     ])
     client = Client(
         org_id=org.id, workspace_id=ws.id, name="Acme Test Client",
@@ -67,6 +68,7 @@ def client():
     def override_db():
         session = TestingSession()
         try:
+            set_rls_context(session, user_id=user.id)
             yield session
         finally:
             session.close()
