@@ -7,8 +7,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.auth import Principal, get_principal
-from app.db import Base, get_db
-from app.models import Approval, ApprovalStatus, FounderAuthority, Membership, Organization, Role, User, Workspace
+from app.db import Base, get_db, set_rls_context
+from app.models import Approval, ApprovalStatus, FounderAuthority, Membership, Organization, Role, User, Workspace, WorkspaceGrant
 from app.domain_models import Contact, Lead
 import app.domain_models  # noqa: F401
 import app.operations_models  # noqa: F401
@@ -39,6 +39,10 @@ def client():
     db.add_all([ws, other_ws])
     db.add(Membership(org_id=org.id, user_id=founder.id, role=Role.owner))
     db.add(FounderAuthority(org_id=org.id, user_id=founder.id, grant_source="test"))
+    db.add(WorkspaceGrant(
+        org_id=org.id, workspace_id=ws.id,
+        user_id=founder.id, granted_by=founder.id,
+    ))
     db.flush()
     contact = Contact(
         org_id=org.id, workspace_id=ws.id, first_name="Asha",
@@ -64,6 +68,7 @@ def client():
     def override_db():
         session = TestingSession()
         try:
+            set_rls_context(session, user_id=founder.id)
             yield session
         finally:
             session.close()
