@@ -153,8 +153,8 @@ def get_execution_control_request(
         worker_id=worker_id,
     )
     request = (execution.request_metadata or {}).get("control_request")
-    if isinstance(request, dict) and request.get("action") == "cancel":
-        return "cancel"
+    if isinstance(request, dict) and request.get("action") in {"cancel", "pause"}:
+        return request["action"]
     return None
 
 
