@@ -346,7 +346,7 @@ def process_one_execution(
     except RuntimeManualReviewRequired:
         runtime_error = (
             "RUNTIME_REQUIRES_REVIEW",
-            "The managed agent paused for a human decision; no tool action was authorized.",
+            "The runtime requires human review before this execution can be treated as complete.",
             False,
         )
     except RuntimeCancelled:
