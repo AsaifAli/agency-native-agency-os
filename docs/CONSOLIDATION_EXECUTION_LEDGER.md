@@ -450,3 +450,25 @@ Verification on integration head `9b30cd3ab24dc448da9e878772ac8b0ab8aee913`:
 - `python -m compileall -q app tests`: passed.
 
 **Not yet verified:** PostgreSQL execution of this migration, actual table ownership/privileges, SECURITY DEFINER verifier, claim/capability issuance, RLS context consumption, and worker runtime conversion. The prior live PostgreSQL run confirmed forged worker GUCs still authorize cross-workspace reads. The migration is storage groundwork only; no RLS policy or worker direct-table grant was changed. The worker vulnerability remains open and the forged-GUC PostgreSQL regression is expected to remain RED until the full cutover.
+
+
+### Worker capability verifier increment (2026-11-26)
+
+Added migration `z6f1b3d8a2c5_worker_capability_verifier.py` and mapped `ExecutionAttempt.lease_generation`.
+
+The PostgreSQL migration:
+- Adds a positive lease generation to execution attempts (existing attempts default to generation 1).
+- Adds SECURITY DEFINER `agency_os_private.establish_worker_execution_context(bytea,text,text,text,integer)` with a fixed search path and migration-role ownership.
+- Requires the real `agency_os_worker` session, a 32-byte presented token, exact execution/attempt/worker/generation match, non-invalidated/unexpired capability hash, and a still-live claimed/running attempt and execution.
+- Writes verified context only into the private transaction-context table; it does not accept caller-set workspace GUCs as proof.
+- Grants EXECUTE to `agency_os_worker` only; PUBLIC and `agency_os_app` are revoked. Worker cannot directly INSERT into the private context table.
+
+Added PostgreSQL test `test_worker_can_only_establish_context_through_capability_verifier` for function presence, execute grant, denied direct context INSERT, and rejection of a nonexistent capability.
+
+Verification on integration source through commit `695922142d7dfefccc60f386d236edf7d8c7a30d`:
+- Single Alembic head: `z6f1b3d8a2c5`.
+- Full SQLite migration upgrade: passed (PostgreSQL-specific function DDL intentionally no-ops on SQLite).
+- Full unit/API suite: **453 passed, 13 skipped, 2 deprecation warnings**.
+- `python -m compileall -q app tests`: passed.
+
+**PostgreSQL verification is still required** for this new function, notably whether the target PostgreSQL version provides `sha256(bytea)`, SECURITY DEFINER ownership/search path and exact grants. The live forged-GUC regression remains open: RLS policies still trust historical worker GUCs and broad worker table privileges remain. The verifier is not yet called by the worker runtime; capability issuance/claim is not implemented; lifecycle/maintenance contracts are not converted; no RLS policy cutover has occurred. Do not represent this increment as fixing worker tenant isolation.
