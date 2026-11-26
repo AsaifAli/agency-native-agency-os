@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
 from app.models import (
-    Agent, AuditEvent, DataClass, Execution, ExecutionStatus,
+    Agent, AuditEvent, DataClass, Execution, ExecutionAttempt, ExecutionStatus,
     Organization, Task, User, Workspace,
 )
 import app.workforce_models  # noqa: F401 — register worker service metadata
@@ -160,9 +160,9 @@ def test_worker_acknowledges_cancel_requested_during_runtime(control_context, mo
 
     with ctx["session_factory"]() as verify_db:
         saved = verify_db.get(Execution, ctx["execution_id"])
-        attempt = verify_db.query(
-            __import__("app.models", fromlist=["ExecutionAttempt"]).ExecutionAttempt
-        ).filter_by(execution_id=ctx["execution_id"]).one()
+        attempt = verify_db.query(ExecutionAttempt).filter_by(
+            execution_id=ctx["execution_id"]
+        ).one()
         assert saved.status == ExecutionStatus.cancelled
         assert saved.result is None
         assert saved.error_code == "EXECUTION_CANCELLED"
