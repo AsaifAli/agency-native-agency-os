@@ -126,8 +126,8 @@ def _ensure_delegation_check(bind: sa.Connection) -> None:
     }
     if DELEGATION_CHECK in checks:
         actual = (checks[DELEGATION_CHECK].get("sqltext") or "").lower()
-        normalized = actual.replace(" ", "").replace("'", "")
-        required = DELEGATION_CHECK_SQL.lower().replace(" ", "").replace("'", "")
+        normalized = actual.replace(" ", "").replace("(", "").replace(")", "").replace("'", "")
+        required = DELEGATION_CHECK_SQL.lower().replace(" ", "").replace("(", "").replace(")", "").replace("'", "")
         if normalized != required:
             raise RuntimeError(f"Unexpected definition for {DELEGATION_CHECK}")
         return
