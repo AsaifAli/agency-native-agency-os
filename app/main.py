@@ -1084,6 +1084,7 @@ def create_evaluation(
         passed=result["passed"],
         metrics=result["metrics"],
         gate_results=result["gate_results"],
+        evidence_trust="self_reported",
         created_by=p.user.id,
     )
 
