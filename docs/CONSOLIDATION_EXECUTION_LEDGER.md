@@ -131,3 +131,31 @@ were added but have **not been executed** in this environment. PostgreSQL RLS,
 HTTP authorization and browser/dashboard integration remain awaiting local
 verification. The endpoint is an API foundation; no Founder Console widget
 has been claimed.
+
+
+### Test-gate audit (2026-11-26)
+
+Latest PR-head workflow run #1431:
+- Frontend dependency install, TypeScript check and production build passed.
+- Alembic graph validation passed.
+- PostgreSQL migration application failed before Python compilation or pytest because the CI service does not create the `agency_os_migrator` role required by the migration ownership statements.
+- Python compilation and backend/PostgreSQL tests were skipped. This is an environment/bootstrap failure, not evidence that backend tests pass or fail.
+
+Coverage present on the integration branch:
+- Execution controls: queued/running cancellation, workspace boundary, retry-wait cancellation, pause acknowledgement, resume/session reuse, runtime capability rejection and stop-over-pause.
+- PostgreSQL worker integration: concurrent claims, expired lease recovery, outbox concurrent claims/recovery/dead-letter, and real subprocess kill/recovery. These require the isolated PostgreSQL test stack and must not be replaced by SQLite-only tests.
+- Outbox unit/migration tests: handler allowlist, leases, success acknowledgement, retry/redaction, dead-letter, reconciliation and migration idempotency.
+- Tenant/security: workspace grant migration, RLS dialect checks, machine identity expiry/revocation, workspace/data-class scope, Tool Gateway grants, idempotent replay and audit redaction.
+- Managed Agents: provider session reuse, tool approval boundaries, policy checks, retries, interrupt/pause/resume and custom-tool execution.
+- Evaluation: RAG/agent workflow and the new safety/security and regression packs.
+
+Remaining acceptance tests before PR can leave draft:
+1. Run the complete Python suite and compileall on the exact PR head.
+2. Run the isolated PostgreSQL stack, including non-superuser app/worker RLS tests, concurrent claims, lease recovery and process-kill recovery.
+3. Add HTTP tests for the new outbox summary route: unauthenticated, non-member, missing workspace grant, org owner without Founder Authority, founder with grant, cross-workspace isolation and payload-free response.
+4. Add race/idempotency tests for pause/resume/cancel vs lease expiry, retry and worker acknowledgement; assert one terminal outcome and complete audit.
+5. Exercise approval consume + protected action under concurrent requests; exactly one transaction may consume the approval.
+6. Add trusted-runner provenance/replay tests before treating Evaluation Harness results as release-grade evidence.
+7. Run frontend workflow controls against API capability differences (pause-after-start only for runtimes that support safe interruption), plus browser E2E for pause/resume/stop and error states.
+
+The latest outbox summary unit test was strengthened to prove an event in another workspace is excluded and that pending age is deterministic. It is committed but not yet executed.
