@@ -66,8 +66,29 @@ def upgrade() -> None:
         $function$
     """)
     op.execute("ALTER FUNCTION agency_os_private.worker_has_execution_context(text, text, text) OWNER TO agency_os_migrator")
-    op.execute("REVOKE ALL ON FUNCTION agency_os_private.worker_has_execution_context(text, text, text) FROM PUBLIC, agency_os_app")
-    op.execute("GRANT EXECUTE ON FUNCTION agency_os_private.worker_has_execution_context(text, text, text) TO agency_os_worker")
+    op.execute("REVOKE ALL ON FUNCTION agency_os_private.worker_has_execution_context(text, text, text) FROM PUBLIC")
+    # RLS evaluates this helper for app queries too. It returns false unless
+    # session_user is the dedicated worker login, preserving human/API access.
+    op.execute("GRANT EXECUTE ON FUNCTION agency_os_private.worker_has_execution_context(text, text, text) TO agency_os_app, agency_os_worker")
+
+    # Remove the legacy global workspace enumerator from the worker role.
+    # Tenant discovery must use a future atomic claim returning one scoped lease.
+    op.execute("""
+        DO $block$
+        DECLARE fn record;
+        BEGIN
+            FOR fn IN
+                SELECT p.oid::regprocedure AS signature
+                FROM pg_proc p
+                JOIN pg_namespace n ON n.oid = p.pronamespace
+                WHERE n.nspname = 'agency_os_private'
+                  AND p.proname = 'worker_workspace_scopes'
+            LOOP
+                EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC, agency_os_worker', fn.signature);
+            END LOOP;
+        END
+        $block$
+    """)
 
     # Keep human/API access unchanged. A worker's machine GUC values are ignored;
     # only the private PID+transaction-bound capability context grants a row.
