@@ -85,3 +85,18 @@ def test_runner_does_not_skip_maintenance_or_execution_polling():
     assert "MaintenanceLeaseHeartbeat" in source
     assert "lease_heartbeat.assert_healthy()" in source
     assert "processor(" in source
+
+
+def test_worker_claim_rpc_casts_varchar_ids_to_declared_text_types():
+    source = (
+        MIGRATIONS / "f2a6c8e0b4d1_worker_claim_return_type_fix.py"
+    ).read_text()
+    assert "target.id::text" in source
+    assert "target.org_id::text" in source
+    assert "target.workspace_id::text" in source
+    assert "RETURNS TABLE(" in source
+
+
+def test_postgres_test_image_includes_compose_file_for_contract_tests():
+    dockerfile = (ROOT / "Dockerfile.postgres-test").read_text()
+    assert "COPY docker-compose.postgres-test.yml ." in dockerfile
