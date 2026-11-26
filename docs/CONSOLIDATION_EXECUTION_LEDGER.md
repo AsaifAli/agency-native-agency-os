@@ -78,3 +78,17 @@ Per project direction, do not spend this consolidation increment redesigning Git
 ## Non-negotiable merge gate
 
 Do not merge PR #58 while migration/RLS correctness, worker recovery, tenant isolation or approval boundaries are unverified. Do not delete source branches until all relevant changes have been accounted for, branch tip SHAs archived, and ancestry checked against the merged integration commit.
+
+
+## Follow-up source comparison (2026-11-26)
+
+A direct file comparison against the candidate branches found that several foundations are **already present on the integration branch**. Do not copy the older branch versions over them:
+
+- **Workspace authorization:** the integration branch already contains `v2c4e6a8b0d2_human_workspace_authorization.py`. Its revision ancestry is the same as the security candidate, but the integration copy includes SQLite interrupted-DDL/idempotency handling. Preserve the integration copy pending PostgreSQL validation; review its full RLS policies and grant backfill before acceptance.
+- **RLS inventory:** integration `app/db.py` already has `REQUIRED_RLS_TABLES`, role verification and includes `workspace_grants` in the inventory. The standalone hardening candidate's inventory does not include that table. Do not replace the integration inventory with the candidate version. Still verify every tenant table against PostgreSQL's actual schema and policy catalogue.
+- **Data Protection Gateway:** integration already has `app/data_protection.py` and `tests/test_data_protection.py`. The tenant-DPG candidate differs in recursive metadata sanitization and trusted internal identifier handling; do not replace the current file wholesale. Review the candidate delta for compatibility with runtime metadata and add focused tests only where a concrete gap is proven.
+- **Tenant outreach integrity:** integration already contains the exact candidate migration `m3f9c2a7e514_enforce_outreach_tenant_integrity.py` (same blob SHA). Preserve it and run the PostgreSQL test `tests/test_tenant_integrity_postgres.py`.
+- **Tool Gateway:** integration already has `app/tool_gateway.py`, `app/tool_gateway_routes.py`, `app/tool_registry.py` and `app/machine_identity.py`. The reviewed custom-tools candidate is older in key files; the integration Tool Gateway includes workforce capability checks and a stricter sanitized denial audit. Keep the integration implementation as the baseline; review the MCP branch only for protocol-adapter gaps, not as a replacement authorization layer.
+- **Worker crash recovery:** integration `tests/test_worker_postgres.py` is byte-for-byte identical to the process-crash-recovery candidate and contains a real subprocess launch. The lease-recovery candidate's file is older/different and must not overwrite the integration test. Review whether its distinct concurrent claim/lease/outbox cases are already covered before adding tests.
+
+These are source-level comparisons only. They do not establish that PostgreSQL RLS, DPG behavior, Tool Gateway authorization or process recovery passes at runtime.
