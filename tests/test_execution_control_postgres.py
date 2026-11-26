@@ -110,8 +110,10 @@ def test_expired_worker_cannot_acknowledge_cancel_after_lease_recovery():
 
         stale_worker = Session()
         try:
-            from app.worker_service import LeaseExpired
-            with pytest.raises(LeaseExpired):
+            from app.worker_service import InvalidExecutionState
+            # Recovery clears the lease; a stale acknowledgement is therefore
+            # rejected as an invalid state (rather than an unexpired lease timeout).
+            with pytest.raises(InvalidExecutionState):
                 acknowledge_execution_cancel(
                     stale_worker, execution_id=execution_id,
                     attempt_id=attempt_id, worker_id=worker_id,
