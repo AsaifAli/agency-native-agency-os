@@ -11,7 +11,7 @@ from app.models import (
     Organization, Task, User, Workspace,
 )
 import app.workforce_models  # noqa: F401 — register worker service metadata
-from app.worker_service import (
+from app.execution_controls import (
     ExecutionNotFound,
     InvalidExecutionState,
     request_execution_cancel,
