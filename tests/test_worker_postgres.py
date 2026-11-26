@@ -668,8 +668,19 @@ finally:
             )
 
         marker = process.stdout.readline()
-        assert marker, "Worker child exited without confirming runtime start"
-        assert json.loads(marker) == {"stage": "runtime_started"}
+        if not marker:
+            stdout_tail, stderr = process.communicate(timeout=10)
+            pytest.fail(
+                "Worker child exited before confirming runtime start. "
+                f"stdout_tail={stdout_tail!r}; stderr={stderr!r}; "
+                f"returncode={process.returncode}"
+            )
+        if json.loads(marker) != {"stage": "runtime_started"}:
+            stdout_tail, stderr = process.communicate(timeout=10)
+            pytest.fail(
+                "Worker child emitted an unexpected startup marker. "
+                f"marker={marker!r}; stdout_tail={stdout_tail!r}; stderr={stderr!r}"
+            )
 
         process.terminate()
         try:
