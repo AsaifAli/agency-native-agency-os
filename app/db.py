@@ -34,6 +34,50 @@ _RLS_KEYS = ("user_id", "machine_org_id", "machine_workspace_id", "machine_ident
 
 
 def _apply_rls_context(session: Session, transaction, connection) -> None:
+    workspace_capability = session.info.get("agency_os_worker_workspace_capability")
+    if workspace_capability is not None:
+        if connection.dialect.name != "postgresql":
+            raise RuntimeError("Worker workspace capabilities require PostgreSQL")
+        accepted = connection.execute(
+            text("""
+                SELECT agency_os_private.establish_worker_workspace_context(
+                    :token, :org_id, :workspace_id, :worker_id
+                )
+            """),
+            {
+                "token": workspace_capability.token,
+                "org_id": workspace_capability.org_id,
+                "workspace_id": workspace_capability.workspace_id,
+                "worker_id": workspace_capability.worker_id,
+            },
+        ).scalar_one()
+        if accepted is not True:
+            raise PermissionError("Worker maintenance capability is expired, revoked, or invalid")
+        return
+
+    capability = session.info.get("agency_os_worker_capability")
+    if capability is not None:
+        if connection.dialect.name != "postgresql":
+            raise RuntimeError("Worker execution capabilities require PostgreSQL")
+        accepted = connection.execute(
+            text("""
+                SELECT agency_os_private.establish_worker_execution_context(
+                    :token, :execution_id, :attempt_id, :worker_id,
+                    :lease_generation
+                )
+            """),
+            {
+                "token": capability.token,
+                "execution_id": capability.execution_id,
+                "attempt_id": capability.attempt_id,
+                "worker_id": capability.worker_id,
+                "lease_generation": capability.lease_generation,
+            },
+        ).scalar_one()
+        if accepted is not True:
+            raise PermissionError("Worker execution capability is expired, revoked, or invalid")
+        return
+
     context = session.info.get("agency_os_rls_context")
     if not context or connection.dialect.name != "postgresql":
         return
@@ -61,40 +105,6 @@ def set_rls_context(db: Session, *, user_id: str | None = None,
         for key, value in context.items():
             db.execute(text("SELECT set_config(:name, :value, true)"),
                 {"name": f"agency_os.{key}", "value": value})
-
-
-def list_worker_scopes(session_factory=WorkerSessionLocal) -> list[tuple[str, str]]:
-    """Return the minimal org/workspace inventory required for fair worker polling.
-
-    PostgreSQL exposes this through a narrowly granted SECURITY DEFINER function;
-    the worker cannot list arbitrary tenant records through this operation.
-    """
-    with session_factory() as db:
-        rows = db.execute(text(
-            "SELECT org_id, workspace_id "
-            "FROM agency_os_private.worker_workspace_scopes()"
-        )).all()
-        db.commit()
-    return [(str(row[0]), str(row[1])) for row in rows]
-
-
-def scoped_worker_session_factory(
-    org_id: str,
-    workspace_id: str,
-    session_factory=WorkerSessionLocal,
-):
-    """Create sessions that reapply one exact workspace context per transaction."""
-    if not org_id or not workspace_id:
-        raise ValueError("Worker organization and workspace scope are required")
-
-    def create_scoped_session():
-        db = session_factory()
-        set_rls_context(
-            db, machine_org_id=org_id, machine_workspace_id=workspace_id
-        )
-        return db
-
-    return create_scoped_session
 
 
 # Keep this inventory aligned with the tenant RLS migrations. A startup check
@@ -192,3 +202,34 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def scoped_worker_capability_session_factory(capability, session_factory=WorkerSessionLocal):
+    """Create transaction-scoped sessions authorized by one live execution lease."""
+    required = (
+        "token", "execution_id", "attempt_id", "worker_id", "lease_generation",
+    )
+    if any(not getattr(capability, name, None) for name in required):
+        raise ValueError("A complete worker execution capability is required")
+
+    def create_capability_session():
+        db = session_factory()
+        db.info["agency_os_worker_capability"] = capability
+        return db
+
+    return create_capability_session
+
+
+
+def scoped_worker_workspace_session_factory(capability, session_factory=WorkerSessionLocal):
+    """Create sessions authorized for one short-lived maintenance workspace lease."""
+    required = ("token", "org_id", "workspace_id", "worker_id")
+    if any(not getattr(capability, name, None) for name in required):
+        raise ValueError("A complete worker workspace capability is required")
+
+    def create_workspace_session():
+        db = session_factory()
+        db.info["agency_os_worker_workspace_capability"] = capability
+        return db
+
+    return create_workspace_session
