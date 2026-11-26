@@ -64,18 +64,20 @@ def client():
 
     app = FastAPI()
     app.include_router(router)
+    principal = {"user": user}
 
     def override_db():
         session = TestingSession()
         try:
-            set_rls_context(session, user_id=user.id)
+            set_rls_context(session, user_id=principal["user"].id)
             yield session
         finally:
             session.close()
 
     app.dependency_overrides[get_db] = override_db
-    app.dependency_overrides[get_principal] = lambda: Principal(user=user)
+    app.dependency_overrides[get_principal] = lambda: Principal(user=principal["user"])
     tc = TestClient(app)
+    tc.set_principal = lambda selected_user: principal.update(user=selected_user)
     tc.org_id, tc.ws_id, tc.other_ws_id, tc.user_id, tc.project_id, tc.opportunity_id, tc.client_id = org.id, ws.id, other_ws.id, user.id, project.id, opportunity.id, client.id
     tc.session_factory = TestingSession
     yield tc
@@ -1433,6 +1435,7 @@ def test_outbox_health_is_founder_only_and_org_scoped(client):
 
     response = client.get(
         f"/v1/orgs/{client.org_id}/operations/outbox-health",
+        params={"workspace_id": client.ws_id},
         headers=headers(),
     )
 
@@ -1463,18 +1466,22 @@ def test_outbox_health_denies_member_without_founder_authority(client):
         ))
         db.commit()
 
-        client.app.dependency_overrides[get_principal] = (
-            lambda: Principal(user=member)
-        )
+        db.add(WorkspaceGrant(
+            org_id=client.org_id, workspace_id=client.ws_id,
+            user_id=member.id, granted_by=client.user_id,
+        ))
+        db.commit()
+        client.set_principal(member)
 
         response = client.get(
             f"/v1/orgs/{client.org_id}/operations/outbox-health",
+            params={"workspace_id": client.ws_id},
             headers=headers(),
         )
 
         assert response.status_code == 403
     finally:
-        client.app.dependency_overrides.pop(get_principal, None)
+        client.set_principal(client.session_factory().query(User).filter_by(email="founder-ops@example.test").one())
         db.close()
 
 def test_retainer_period_usage_rollover_and_closed_period_guard(client):
