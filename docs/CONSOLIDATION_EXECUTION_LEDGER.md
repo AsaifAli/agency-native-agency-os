@@ -498,3 +498,25 @@ Verification on integration source at `e59febcf7a5b96ff9c97b9778de6f79580657b05`
 Not implemented by design: automatic activation, tool grants, blueprint execution/instantiation, or automatic external communication. Blueprints are currently read-only plans; the next phase can add founder-approved conversion into persisted OS task plans after worker authorization and execution security are complete.
 
 Upstream attribution: specialist/blueprint concepts adapted from https://github.com/msitarzewski/agency-agents under MIT; no upstream agent files or installer code copied.
+
+
+### Claude / Agency OS workforce boundary refinement (2026-11-26)
+
+Refined the specialist catalogue adoption to preserve the intended runtime boundary:
+
+- Moved the ten detailed specialist definitions (mission, responsibilities, inputs, outputs, non-responsibilities and review gates) into agents/specialists/catalog.py as source material reserved for the future Claude runtime integration. These are not executable agents and are not loaded as a runtime by the OS.
+- Reduced app/workforce_blueprints.py specialist records to OS-owned identity/governance metadata: stable specialist key, title, department, Claude runtime ownership, source reference, catalogued status and disabled-by-default state.
+- Kept versioned team blueprints in the OS as declarative workflow templates. They reference specialist keys and departments and retain structured task objectives, input/output contracts, activation phases and mandatory review gates.
+- The specialist API now exposes only the OS registry metadata; it no longer returns detailed specialist instructions. The Founder Console labels these as Claude-owned profile references and no longer renders detailed agent behavior as OS-managed profiles.
+- Updated the workforce API regression test to assert the separation: API payloads contain no mission/responsibility prompt content, while the detailed source catalogue remains available for the future Claude adapter.
+- Updated agents/README.md to document the boundary. Claude will own specialist prompts, skills, reasoning, collaboration and delegation; the OS remains authoritative for identities, permissions, plans, approvals, budgets, execution records and audit. Claude tool access must pass through the OS Tool Gateway/MCP boundary.
+
+Verification on the integration branch working tree based on ec56e022ee0172afc782b3c5135a66430c5cac82:
+- Specialist/blueprint focused API tests: 3 passed.
+- Full Python suite: 456 passed, 13 skipped, 2 deprecation warnings.
+- python -m compileall -q app agents tests: passed.
+- git diff --check: passed.
+- PostgreSQL-only tests were skipped because test database URLs are not configured in this sandbox.
+- Frontend lint/build was not run; frontend dependencies are not installed in this sandbox.
+
+This is an ownership and presentation boundary refinement only. It does not implement the Claude Managed Agents adapter, MCP Tool Gateway, specialist provisioning, automatic collaboration, or blueprint execution. No agent was activated and no permissions were granted.
