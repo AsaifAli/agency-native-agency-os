@@ -45,18 +45,20 @@ def client():
 
     app = FastAPI()
     app.include_router(router)
+    principal = {"user": user}
 
     def override_db():
         session = TestingSession()
         try:
-            set_rls_context(session, user_id=user.id)
+            set_rls_context(session, user_id=principal["user"].id)
             yield session
         finally:
             session.close()
 
     app.dependency_overrides[get_db] = override_db
-    app.dependency_overrides[get_principal] = lambda: Principal(user=user)
+    app.dependency_overrides[get_principal] = lambda: Principal(user=principal["user"])
     test_client = TestClient(app)
+    test_client.set_principal = lambda selected_user: principal.update(user=selected_user)
     test_client.org_id = org.id
     test_client.ws_id = ws.id
     test_client.other_ws_id = other_ws.id
@@ -341,8 +343,11 @@ def test_founder_authority_viewer_can_link_opportunity_to_client(client):
         session.flush()
         session.add(Membership(org_id=org, user_id=founder_viewer.id, role=Role.viewer))
         session.add(FounderAuthority(org_id=org, user_id=founder_viewer.id, grant_source="test"))
+        session.add(WorkspaceGrant(
+            org_id=org, workspace_id=ws, user_id=founder_viewer.id, granted_by=client_user_id(client),
+        ))
         session.commit()
-        client.app.dependency_overrides[get_principal] = lambda: Principal(user=founder_viewer)
+        client.set_principal(founder_viewer)
     finally:
         try:
             next(db)
