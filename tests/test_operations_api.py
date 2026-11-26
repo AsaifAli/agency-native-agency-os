@@ -1481,7 +1481,6 @@ def test_outbox_health_denies_member_without_founder_authority(client):
 
         assert response.status_code == 403
     finally:
-        client.set_principal(client.session_factory().query(User).filter_by(email="founder-ops@example.test").one())
         db.close()
 
 def test_retainer_period_usage_rollover_and_closed_period_guard(client):
