@@ -21,6 +21,7 @@ from app.integrations.runtime import (
     ExecutionResult,
     RuntimeExecutionError,
     RuntimeCancelled,
+    RuntimePaused,
     RuntimeManualReviewRequired,
     RuntimeNotConfiguredError,
     RuntimeTransientError,
@@ -411,19 +412,15 @@ class ManagedAgentsRuntime(AgentRuntime):
                 "Claude Managed Agents is not fully configured."
             )
 
-        if request.control_check is not None and request.control_check() == "cancel":
-            if request.external_run_id:
-                # Reconcile/interrupt the existing provider session below.
-                pass
-            elif request.attempt_number > 1:
-                # A previous attempt may have created a provider session before
-                # its ID was durably attached. Never claim cancellation while
-                # that external outcome is ambiguous.
+        initial_control = request.control_check() if request.control_check is not None else None
+        if initial_control in {"cancel", "pause"} and not request.external_run_id:
+            if request.attempt_number > 1:
                 raise RuntimeManualReviewRequired(
-                    "Cancellation needs provider-session reconciliation; no durable session ID is available."
+                    "Execution control needs provider-session reconciliation; no durable session ID is available."
                 )
-            else:
+            if initial_control == "cancel":
                 raise RuntimeCancelled("OS cancellation requested before provider session start.")
+            raise RuntimePaused("OS pause requested before provider session start.")
 
         with self.client_factory() as client:
             # Validate the provider Agent on every attempt, including recovery of a
@@ -470,9 +467,35 @@ class ManagedAgentsRuntime(AgentRuntime):
                     )
                 request.persist_external_run_id(session_id)
 
+            resume_request = (request.request_metadata or {}).get("control_request") or {}
+            if resume_request.get("action") == "resume":
+                resume_token = resume_request.get("resume_token")
+                if not isinstance(resume_token, str) or not resume_token:
+                    raise RuntimeManualReviewRequired("Resume request has no durable idempotency token.")
+                marker = f"[agency-os-resume:{resume_token}]"
+                prior_events = self._list_events(client, session_id)
+                matching_resume = next((event for event in prior_events if event.get("type") == "user.message" and any(isinstance(block, dict) and block.get("type") == "text" and marker in block.get("text", "") for block in (event.get("content") or []))), None)
+                if matching_resume is not None:
+                    event_id = matching_resume.get("id")
+                    if not isinstance(event_id, str):
+                        raise RuntimeManualReviewRequired("Existing resume message has no provider event ID.")
+                    if request.persist_resume_event is not None:
+                        request.persist_resume_event(resume_token, event_id)
+                else:
+                    if resume_request.get("resume_event_id"):
+                        raise RuntimeManualReviewRequired("Persisted resume event is missing from provider history.")
+                    sent = self._request(client, "POST", f"/v1/sessions/{session_id}/events", json={"events": [{"type": "user.message", "content": [{"type": "text", "text": f"Continue the interrupted Agency OS task from the existing session and its prior context. Do not repeat completed work. {marker}"}]}]})
+                    sent_events = sent.get("data", [])
+                    if not isinstance(sent_events, list) or len(sent_events) != 1 or not isinstance(sent_events[0], dict) or not isinstance(sent_events[0].get("id"), str):
+                        raise RuntimeManualReviewRequired("Resume message acceptance is ambiguous; reconcile provider event history before retrying.")
+                    if request.persist_resume_event is None:
+                        raise RuntimeManualReviewRequired("No durable resume-event persistence callback is available.")
+                    request.persist_resume_event(resume_token, sent_events[0]["id"])
+
             deadline = self.clock() + self.config.claude_managed_timeout_seconds
             tool_calls_processed = 0
             interrupt_sent = False
+            interrupt_action: str | None = None
             interrupt_event_id: str | None = None
             while self.clock() < deadline:
                 control_action = (
@@ -480,7 +503,8 @@ class ManagedAgentsRuntime(AgentRuntime):
                     if request.control_check is not None
                     else None
                 )
-                if control_action == "cancel" and not interrupt_sent:
+                if control_action in {"cancel", "pause"} and not interrupt_sent:
+                    interrupt_action = control_action
                     # Managed Agents acknowledges interruption asynchronously.
                     # Do not mark the OS execution cancelled until the provider
                     # session is idle and every workflow run has ended.
@@ -531,9 +555,9 @@ class ManagedAgentsRuntime(AgentRuntime):
                         and status == "idle"
                         and not self._open_workflow_runs(events)
                     ):
-                        raise RuntimeCancelled(
-                            "Claude Managed Agents acknowledged the cancellation."
-                        )
+                        if interrupt_action == "pause":
+                            raise RuntimePaused("Claude Managed Agents acknowledged the pause.")
+                        raise RuntimeCancelled("Claude Managed Agents acknowledged the cancellation.")
                     self.sleep(self.config.claude_managed_poll_interval_seconds)
                     continue
                 if any(event.get("type") == "session.error" for event in events):
