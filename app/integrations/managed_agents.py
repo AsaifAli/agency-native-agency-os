@@ -485,13 +485,15 @@ class ManagedAgentsRuntime(AgentRuntime):
                 else:
                     if resume_request.get("resume_event_id"):
                         raise RuntimeManualReviewRequired("Persisted resume event is missing from provider history.")
-                    sent = self._request(client, "POST", f"/v1/sessions/{session_id}/events", json={"events": [{"type": "user.message", "content": [{"type": "text", "text": f"Continue the interrupted Agency OS task from the existing session and its prior context. Do not repeat completed work. {marker}"}]}]})
-                    sent_events = sent.get("data", [])
-                    if not isinstance(sent_events, list) or len(sent_events) != 1 or not isinstance(sent_events[0], dict) or not isinstance(sent_events[0].get("id"), str):
-                        raise RuntimeManualReviewRequired("Resume message acceptance is ambiguous; reconcile provider event history before retrying.")
-                    if request.persist_resume_event is None:
-                        raise RuntimeManualReviewRequired("No durable resume-event persistence callback is available.")
-                    request.persist_resume_event(resume_token, sent_events[0]["id"])
+                    latest_control = request.control_check() if request.control_check is not None else None
+                    if latest_control not in {"pause", "cancel"}:
+                        sent = self._request(client, "POST", f"/v1/sessions/{session_id}/events", json={"events": [{"type": "user.message", "content": [{"type": "text", "text": f"Continue the interrupted Agency OS task from the existing session and its prior context. Do not repeat completed work. {marker}"}]}]})
+                        sent_events = sent.get("data", [])
+                        if not isinstance(sent_events, list) or len(sent_events) != 1 or not isinstance(sent_events[0], dict) or not isinstance(sent_events[0].get("id"), str):
+                            raise RuntimeManualReviewRequired("Resume message acceptance is ambiguous; reconcile provider event history before retrying.")
+                        if request.persist_resume_event is None:
+                            raise RuntimeManualReviewRequired("No durable resume-event persistence callback is available.")
+                        request.persist_resume_event(resume_token, sent_events[0]["id"])
 
             deadline = self.clock() + self.config.claude_managed_timeout_seconds
             tool_calls_processed = 0
