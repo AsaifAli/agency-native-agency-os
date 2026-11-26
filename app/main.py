@@ -1141,6 +1141,10 @@ def list_evaluations(
     )
 
 
+# Workspace-authorized durable execution controls.
+from app.execution_control_routes import router as execution_control_router
+app.include_router(execution_control_router)
+
 # Revenue and Delivery API module installed by Agency OS bundle.
 from app.domain_routes import router as revenue_delivery_router
 app.include_router(revenue_delivery_router)
