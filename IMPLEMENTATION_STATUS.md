@@ -314,3 +314,21 @@ This section describes only `integration/consolidated-agency-os-2026-11-26`; it 
 - The PR adds `docs/CONSOLIDATION_EXECUTION_LEDGER.md`, which is the current phase-by-phase reconciliation and verification ownership record.
 
 **Verification:** this PR head has not had a fresh full local test run in this session. The previously observed backend workflow failed before backend compilation/tests because its disposable PostgreSQL service did not create `agency_os_migrator`. Do not interpret earlier main/other-PR test results above as tests of this integration head.
+
+
+## Consolidation increment — outbox observability (2026-11-26)
+
+**Implemented on integration branch, not yet runtime-tested:** a founder-only
+workspace-scoped outbox summary API is registered at
+`GET /v1/orgs/{org_id}/workspaces/{workspace_id}/outbox/summary`. It requires
+active organization membership, an exact active workspace grant and explicit
+Founder Authority. It returns aggregate state counts, oldest pending age,
+expired lease count, exhausted pending count and an as-of timestamp. It does
+not return event payloads, idempotency keys, worker identifiers or provider
+error text.
+
+Focused tests were added for the aggregate summary, workspace scoping inputs,
+payload non-disclosure, expired leases and exhausted pending work. These tests
+have **not been executed** in the current environment. The endpoint is not yet
+surfaced in the Founder Console; HTTP authorization, PostgreSQL RLS, browser
+integration and live worker metrics remain unverified.
