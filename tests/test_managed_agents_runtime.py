@@ -641,3 +641,35 @@ def test_managed_agents_resume_sends_marker_once_and_persists_provider_event():
         ))
     assert persisted == [(token, "evt_resume_new")]
     assert calls.count(("POST", "/v1/sessions/sesn_resume_new/events")) == 1
+
+
+
+def test_managed_agents_recovers_persisted_interrupt_without_sending_another():
+    calls = []
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        if req.method == "GET" and req.url.path == "/v1/agents/agent_test":
+            return httpx.Response(200, json={"id": "agent_test", "archived_at": None,
+                "tools": [], "mcp_servers": [], "skills": [], "multiagent": None})
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_pause_recover":
+            return httpx.Response(200, json={"id": "sesn_pause_recover", "status": "idle"})
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_pause_recover/events":
+            return httpx.Response(200, json={"data": [
+                {"id": "evt_interrupt_saved", "type": "user.interrupt", "processed_at": "2026-11-26T00:00:00Z"},
+                {"type": "session.status_idle", "stop_reason": {"type": "interrupted"}},
+            ]})
+        return httpx.Response(404)
+    runtime = ManagedAgentsRuntime(
+        config(), client_factory=lambda: httpx.Client(base_url="https://api.anthropic.com",
+            transport=httpx.MockTransport(handler)),
+        sleep=lambda _seconds: None,
+    )
+    with pytest.raises(RuntimePaused):
+        runtime.start(request(
+            external_run_id="sesn_pause_recover", attempt_number=2,
+            request_metadata={"control_request": {
+                "action": "pause", "interrupt_event_id": "evt_interrupt_saved",
+            }},
+            control_check=lambda: "pause",
+        ))
+    assert ("POST", "/v1/sessions/sesn_pause_recover/events") not in calls
