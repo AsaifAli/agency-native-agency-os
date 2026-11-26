@@ -411,6 +411,9 @@ class ManagedAgentsRuntime(AgentRuntime):
                 "Claude Managed Agents is not fully configured."
             )
 
+        if request.control_check is not None and request.control_check() == "cancel":
+            raise RuntimeCancelled("OS cancellation requested before provider session start.")
+
         with self.client_factory() as client:
             # Validate the provider Agent on every attempt, including recovery of a
             # persisted session. Provider-side configuration can change between retries.
