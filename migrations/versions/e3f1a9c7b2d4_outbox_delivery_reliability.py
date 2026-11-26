@@ -109,15 +109,17 @@ def upgrade() -> None:
                 f"Unexpected definition for {check_name}"
             )
     else:
-        op.create_check_constraint(
-            check_name,
-            "outbox_events",
-            "attempts >= 0 AND max_attempts >= 1",
-        )
+        # SQLite does not support ALTER TABLE ADD CONSTRAINT. Alembic batch
+        # mode rebuilds the table while preserving its existing schema/data.
+        with op.batch_alter_table("outbox_events") as batch_op:
+            batch_op.create_check_constraint(
+                check_name,
+                "attempts >= 0 AND max_attempts >= 1",
+            )
 
     indexes = {
         item["name"]: item
-        for item in inspector.get_indexes("outbox_events")
+        for item in sa.inspect(bind).get_indexes("outbox_events")
     }
 
     index_name = "ix_outbox_lease_recovery"
