@@ -87,6 +87,8 @@ def request_execution_cancel(
         execution.finished_at = now
         execution.error_code = "EXECUTION_CANCELLED"
         execution.error_message = "Execution cancelled before worker start."
+        _sync_task_delegation(db, execution, "cancelled", "EXECUTION_CANCELLED")
+        _sync_plan_draft_execution(db, execution, "cancelled", "EXECUTION_CANCELLED")
         record_event(
             db, org_id, actor_user_id, "execution.cancelled",
             "execution", execution.id, workspace_id,
