@@ -383,3 +383,33 @@ def test_execution_cancel_api_persists_request_for_active_execution(monkeypatch)
     assert response.status_code == 200
     assert response.json()["status"] == "running"
     assert response.json()["control_request"]["action"] == "cancel"
+
+
+
+def test_execution_pause_and_resume_api_for_unstarted_execution(monkeypatch):
+    monkeypatch.setattr(settings, "mock_runtime_enabled", True)
+    org_id, workspace_id, task_id, agent_id = _seed_execution_records("mock")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer dev:owner@test.local"}
+    created = client.post(
+        f"/v1/orgs/{org_id}/executions", headers=headers,
+        json={"workspace_id": workspace_id, "task_id": task_id,
+              "agent_id": agent_id, "idempotency_key": f"pause-api-{uuid.uuid4().hex}"},
+    )
+    assert created.status_code == 201
+    execution_id = created.json()["id"]
+
+    paused = client.post(
+        f"/v1/orgs/{org_id}/executions/{execution_id}/pause",
+        params={"workspace_id": workspace_id}, headers=headers,
+    )
+    assert paused.status_code == 200
+    assert paused.json()["status"] == "paused"
+
+    resumed = client.post(
+        f"/v1/orgs/{org_id}/executions/{execution_id}/resume",
+        params={"workspace_id": workspace_id}, headers=headers,
+    )
+    assert resumed.status_code == 200
+    assert resumed.json()["status"] == "queued"
+    assert resumed.json()["control_request"]["action"] == "resume"
