@@ -1,7 +1,11 @@
 
 import re
+import hashlib
+import secrets
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.audit import record_event
@@ -146,6 +150,125 @@ class WorkerServiceError(Exception):
     """Base exception for worker lifecycle errors."""
 
 
+@dataclass(frozen=True)
+class WorkerExecutionCapability:
+    """Short-lived execution capability; token is process-memory only."""
+
+    token: bytes = field(repr=False)
+    execution_id: str
+    attempt_id: str
+    org_id: str
+    workspace_id: str
+    worker_id: str
+    lease_generation: int
+
+
+@dataclass(frozen=True)
+class WorkerWorkspaceCapability:
+    """Short-lived capability for one bounded workspace maintenance lease."""
+
+    token: bytes = field(repr=False)
+    org_id: str
+    workspace_id: str
+    worker_id: str
+    lease_seconds: int = 300
+
+
+def claim_worker_maintenance_scope(
+    db: Session, *, worker_id: str, after_workspace_id: str | None = None,
+    lease_seconds: int = 300,
+) -> WorkerWorkspaceCapability | None:
+    """Claim one workspace maintenance lease without returning a tenant inventory."""
+    if not isinstance(worker_id, str) or not worker_id.strip() or len(worker_id) > 160:
+        raise ValueError("worker_id must contain 1-160 characters")
+    if not isinstance(lease_seconds, int) or isinstance(lease_seconds, bool) or not 15 <= lease_seconds <= 300:
+        raise ValueError("maintenance lease_seconds must be an integer between 15 and 300")
+    if after_workspace_id is not None and (
+        not isinstance(after_workspace_id, str) or not after_workspace_id or len(after_workspace_id) > 36
+    ):
+        raise ValueError("after_workspace_id must be a workspace ID of at most 36 characters")
+    if db.get_bind().dialect.name != "postgresql":
+        raise RuntimeError("Database-verified worker capabilities require PostgreSQL")
+
+    token = secrets.token_bytes(32)
+    row = db.execute(
+        text("""
+            SELECT org_id, workspace_id
+            FROM agency_os_private.claim_worker_maintenance_scope(
+                :worker_id, :lease_seconds, :token_hash, :after_workspace_id
+            )
+        """),
+        {
+            "worker_id": worker_id,
+            "lease_seconds": lease_seconds,
+            "token_hash": hashlib.sha256(token).digest(),
+            "after_workspace_id": after_workspace_id,
+        },
+    ).mappings().one_or_none()
+    if row is None:
+        return None
+    return WorkerWorkspaceCapability(
+        token=token, org_id=row["org_id"],
+        workspace_id=row["workspace_id"], worker_id=worker_id,
+        lease_seconds=lease_seconds,
+    )
+
+
+def invalidate_worker_execution_capability(db: Session) -> None:
+    """Revoke the current execution token after terminal state is flushed."""
+    if db.get_bind().dialect.name != "postgresql":
+        return
+    if "agency_os_worker_capability" not in db.info:
+        return
+    invalidated = db.execute(text(
+        "SELECT agency_os_private.invalidate_worker_execution_capability()"
+    )).scalar_one()
+    if invalidated is not True:
+        raise LeaseExpired("Worker execution capability could not be revoked")
+
+
+def claim_worker_execution_capability(
+    db: Session, *, worker_id: str, lease_seconds: int = 60,
+) -> WorkerExecutionCapability | None:
+    """Atomically claim one execution and issue a hash-bound DB capability.
+
+    The worker never selects a tenant or execution. PostgreSQL chooses the next
+    eligible execution and persists the attempt, capability hash, and audit row
+    in one SECURITY DEFINER transaction.
+    """
+    if not isinstance(worker_id, str) or not worker_id.strip() or len(worker_id) > 160:
+        raise ValueError("worker_id must contain 1-160 characters")
+    _validate_lease_seconds(lease_seconds)
+    if db.get_bind().dialect.name != "postgresql":
+        raise RuntimeError("Database-verified worker capabilities require PostgreSQL")
+
+    token = secrets.token_bytes(32)
+    row = db.execute(
+        text("""
+            SELECT execution_id, attempt_id, org_id, workspace_id, lease_generation
+            FROM agency_os_private.claim_worker_execution(
+                :worker_id, :lease_seconds, :token_hash
+            )
+        """),
+        {
+            "worker_id": worker_id,
+            "lease_seconds": lease_seconds,
+            "token_hash": hashlib.sha256(token).digest(),
+        },
+    ).mappings().one_or_none()
+    if row is None:
+        return None
+    return WorkerExecutionCapability(
+        token=token,
+        execution_id=row["execution_id"],
+        attempt_id=row["attempt_id"],
+        org_id=row["org_id"],
+        workspace_id=row["workspace_id"],
+        worker_id=worker_id,
+        lease_generation=row["lease_generation"],
+    )
+
+
 def claim_next_execution(
     db: Session,
     *,
@@ -246,8 +369,12 @@ class LeaseExpired(WorkerServiceError):
 
 
 def _validate_lease_seconds(lease_seconds: int) -> None:
-    if not 15 <= lease_seconds <= 3600:
-        raise ValueError("lease_seconds must be between 15 and 3600")
+    if (
+        not isinstance(lease_seconds, int)
+        or isinstance(lease_seconds, bool)
+        or not 15 <= lease_seconds <= 3600
+    ):
+        raise ValueError("lease_seconds must be an integer between 15 and 3600")
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -508,6 +635,8 @@ def complete_execution(
             "worker_id": worker_id,
         },
     )
+    db.flush()
+    invalidate_worker_execution_capability(db)
 
     return execution, attempt
 
@@ -658,6 +787,8 @@ def fail_execution(
             "error_code": error_code,
         },
     )
+    db.flush()
+    invalidate_worker_execution_capability(db)
 
     return execution, attempt
 
@@ -760,9 +891,10 @@ def promote_due_retries(
     limit: int = 100,
 ) -> int:
     """
-    Move due retry_wait executions back to queued.
+    Move due retry_wait executions back to queued within one authorized workspace.
 
-    Workers still claim executions through claim_next_execution().
+    PostgreSQL workers invoke this only inside a verified maintenance-scope
+    transaction. Execution claiming uses claim_worker_execution_capability().
     The caller owns the transaction and must commit or roll back.
     """
     if not 1 <= limit <= 1000:
