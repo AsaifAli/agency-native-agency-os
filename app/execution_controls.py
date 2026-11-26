@@ -236,6 +236,12 @@ def request_execution_pause(
         return execution
     if execution.status == ExecutionStatus.paused:
         return execution
+    if execution.runtime != "claude_managed_agents" and not (
+        execution.status == ExecutionStatus.queued and execution.attempt_count == 0
+    ):
+        raise InvalidExecutionState(
+            "This runtime cannot safely pause an active or previously attempted execution."
+        )
 
     now = datetime.now(timezone.utc)
     previous_status = execution.status.value
