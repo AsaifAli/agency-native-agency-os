@@ -392,5 +392,6 @@ class EvaluationRun(Base):
     passed: Mapped[bool] = mapped_column(Boolean, nullable=False)
     metrics: Mapped[dict] = mapped_column(JSON, default=dict)
     gate_results: Mapped[dict] = mapped_column(JSON, default=dict)
+    evidence_trust: Mapped[str] = mapped_column(String(32), default="self_reported", nullable=False)
     created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
