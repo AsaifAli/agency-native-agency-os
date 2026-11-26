@@ -42,17 +42,18 @@ def outbox_context(tmp_path):
 
 
 def add_event(ctx, **overrides):
-    row = OutboxEvent(
-        org_id=ctx["org_id"],
-        workspace_id=ctx["workspace_id"],
-        event_type="test.event",
-        schema_version=1,
-        aggregate_type="test",
-        aggregate_id=str(uuid.uuid4()),
-        idempotency_key=f"test:{uuid.uuid4().hex}",
-        payload={"safe": True},
-        **overrides,
-    )
+    values = {
+        "org_id": ctx["org_id"],
+        "workspace_id": ctx["workspace_id"],
+        "event_type": "test.event",
+        "schema_version": 1,
+        "aggregate_type": "test",
+        "aggregate_id": str(uuid.uuid4()),
+        "idempotency_key": f"test:{uuid.uuid4().hex}",
+        "payload": {"safe": True},
+    }
+    values.update(overrides)
+    row = OutboxEvent(**values)
     ctx["db"].add(row)
     ctx["db"].commit()
     return row.id
