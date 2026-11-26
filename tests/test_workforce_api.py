@@ -1131,4 +1131,4 @@ def test_operator_can_read_catalog_but_cannot_change_founder_authority(app_clien
     response = app_client.get(f"{base}/specialists", params={"workspace_id": i["workspace"].id})
     assert response.status_code == 200
     # The catalogue exposes no activation or grant mutation endpoint.
-    assert not any(route.path.endswith("/specialists/activate") for route in app_client.app.routes)
+    assert not any("/specialists/activate" in path for path in app_client.app.openapi()["paths"])
