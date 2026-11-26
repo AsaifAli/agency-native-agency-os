@@ -97,6 +97,16 @@ def test_worker_claim_rpc_casts_varchar_ids_to_declared_text_types():
     assert "RETURNS TABLE(" in source
 
 
-def test_postgres_test_image_includes_compose_file_for_contract_tests():
+def test_maintenance_claim_rpc_casts_varchar_ids_to_declared_text_types():
+    source = (
+        MIGRATIONS / "f3b7d9e1a5c2_worker_maintenance_claim_return_type_fix.py"
+    ).read_text()
+    assert "target.org_id::text" in source
+    assert "target.id::text" in source
+    assert "RETURN QUERY SELECT" in source
+
+
+def test_postgres_test_image_includes_its_contract_inputs():
     dockerfile = (ROOT / "Dockerfile.postgres-test").read_text()
+    assert "COPY Dockerfile.postgres-test ." in dockerfile
     assert "COPY docker-compose.postgres-test.yml ." in dockerfile
