@@ -545,3 +545,15 @@ Additional review controls: identity/session locks follow revocation lock order;
 
 **Release decision: NO-GO.** The PR is a tested code candidate, not production approval. Restore the repository to private visibility now that the temporary public clone requirement is over; PR #47 remains available to authorized collaborators.
 
+
+
+## 2026-11-26 — PostgreSQL execution lease recovery coverage
+
+- [x] Added a PostgreSQL integration assertion that expires a committed execution-attempt lease and invokes the existing recovery service.
+- [x] The test verifies retry scheduling, attempt abandonment, lease clearing, `WORKER_LEASE_EXPIRED` classification, and persisted audit metadata.
+- [x] Cleanup is restricted to the synthetic test organization and removes both execution-scoped and attempt-scoped audit events.
+- [x] Focused PostgreSQL 16 Compose test target on this candidate: **50 passed, 0 failed**, 2 dependency deprecation warnings (user-run, 2026-11-26).
+- [ ] Full backend suite: local attempt used Python 3.11, while the repository's Dockerfiles pin Python 3.12. Collection failed on Python 3.12 f-string syntax in `app/oidc_auth.py:59`; the same local environment also lacks the declared `cryptography` dependency. Re-run with a clean Python 3.12 environment and `requirements-dev.txt` before merge.
+- [ ] Actual worker process termination/restart, sustained-load behavior, cancellation, and multi-replica recovery remain separate release-verification items.
+
+**Evidence boundary:** the earlier PostgreSQL test results from the superseded PR branch are historical and are not evidence for this branch. No GitHub Actions run is requested; validation will use the repository's Docker Compose PostgreSQL test target and backend test command.
