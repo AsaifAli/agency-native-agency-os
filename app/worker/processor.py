@@ -6,10 +6,11 @@ from app.data_protection import DataProtectionBlocked, protect_execution_request
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.db import WorkerSessionLocal
+from app.db import WorkerSessionLocal, scoped_worker_capability_session_factory
 from app.integrations.runtime import (
     ExecutionRequest,
     ExecutionResult,
@@ -34,6 +35,7 @@ from app.worker_service import (
     heartbeat_execution,
     start_execution,
     attach_external_run_id,
+    claim_worker_execution_capability,
 )
 SessionFactory = Callable[[], Session]
 
@@ -83,6 +85,12 @@ class LeaseHeartbeat:
                         db, execution_id=self.execution_id, attempt_id=self.attempt_id,
                         worker_id=self.worker_id, lease_seconds=self.lease_seconds,
                     )
+                    if db.get_bind().dialect.name == "postgresql":
+                        renewed = db.execute(text(
+                            "SELECT agency_os_private.renew_worker_execution_capability()"
+                        )).scalar_one()
+                        if renewed is not True:
+                            raise LeaseExpired("Worker capability could not be renewed")
                     db.commit()
             except Exception as exc:
                 self._error = exc
@@ -186,13 +194,37 @@ def process_one_execution(
 ) -> str | None:
     """Claim and process one execution; provider work runs outside DB transactions."""
     with session_factory() as db:
-        claimed = claim_next_execution(db, worker_id=worker_id, lease_seconds=lease_seconds)
-        if claimed is None:
-            return None
-        execution, attempt = claimed
-        execution_id, attempt_id = execution.id, attempt.id
-        attempt_number = attempt.attempt_number
-        db.commit()
+        if db.get_bind().dialect.name == "postgresql":
+            capability = claim_worker_execution_capability(
+                db, worker_id=worker_id, lease_seconds=lease_seconds,
+            )
+            if capability is None:
+                return None
+            execution_id, attempt_id = capability.execution_id, capability.attempt_id
+            db.commit()
+            # Every subsequent transaction re-establishes the database-verified
+            # capability. No tenant GUC or workspace inventory authorizes reads.
+            session_factory = scoped_worker_capability_session_factory(
+                capability, session_factory,
+            )
+            from app.models import Execution, ExecutionAttempt
+            with session_factory() as scoped_db:
+                execution = scoped_db.query(Execution).filter_by(id=execution_id).one()
+                attempt = scoped_db.query(ExecutionAttempt).filter_by(
+                    id=attempt_id, execution_id=execution_id,
+                ).one()
+                attempt_number = attempt.attempt_number
+                scoped_db.commit()
+        else:
+            claimed = claim_next_execution(
+                db, worker_id=worker_id, lease_seconds=lease_seconds,
+            )
+            if claimed is None:
+                return None
+            execution, attempt = claimed
+            execution_id, attempt_id = execution.id, attempt.id
+            attempt_number = attempt.attempt_number
+            db.commit()
 
     with session_factory() as db:
         execution, _ = start_execution(
