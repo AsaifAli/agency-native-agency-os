@@ -433,3 +433,20 @@ Added `tests/test_worker_capability_boundary_postgres.py` and included it in `Do
 **Verification at code commit `8c3dce0ce5a9afbee301a483ce7660fb40f8b000`:** focused test collection succeeds but both PostgreSQL tests were skipped because the sandbox has no PostgreSQL URLs. Full SQLite/unit suite: **453 passed, 12 skipped, 2 deprecation warnings**; `compileall` passed. These tests are added but not yet demonstrated failing against the old PostgreSQL policy or passing after a capability cutover. Do not treat this as a security fix.
 
 **Next gate:** run the isolated PostgreSQL harness with the actual worker role to establish the expected RED result for forged GUC authorization. Then implement the complete capability-backed claim/lifecycle/maintenance contracts and only later change RLS policies and grants. No worker privilege or RLS policy has been changed in this increment.
+
+
+### Worker lease capability storage foundation (2026-11-26)
+
+Added migration `y5e9a2c7d1f4_worker_lease_capability_storage.py` after `x4c8d1e6f902`. On PostgreSQL it creates:
+
+- `agency_os_private.worker_lease_capabilities`: unique SHA-256 token hash, execution/attempt/worker/generation binding, expiry and invalidation timestamps.
+- `agency_os_private.worker_transaction_context`: transaction-bound backend PID + transaction ID context linked to a capability and its exact execution tuple.
+- Both tables are owned by `agency_os_migrator`; direct privileges are revoked from PUBLIC, `agency_os_app` and `agency_os_worker`.
+
+Verification on integration head `9b30cd3ab24dc448da9e878772ac8b0ab8aee913`:
+- Alembic reports a single head: `y5e9a2c7d1f4`.
+- Full SQLite migration upgrade through the new revision: passed (PostgreSQL-only DDL intentionally no-ops on SQLite).
+- Full unit/API suite: **453 passed, 12 skipped, 2 deprecation warnings**.
+- `python -m compileall -q app tests`: passed.
+
+**Not yet verified:** PostgreSQL execution of this migration, actual table ownership/privileges, SECURITY DEFINER verifier, claim/capability issuance, RLS context consumption, and worker runtime conversion. The prior live PostgreSQL run confirmed forged worker GUCs still authorize cross-workspace reads. The migration is storage groundwork only; no RLS policy or worker direct-table grant was changed. The worker vulnerability remains open and the forged-GUC PostgreSQL regression is expected to remain RED until the full cutover.
