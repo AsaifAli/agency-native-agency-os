@@ -6,8 +6,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from app.auth import Principal, get_principal
-from app.db import Base, get_db
-from app.models import Membership, Organization, Role, User, Workspace
+from app.db import Base, get_db, set_rls_context
+from app.models import Membership, Organization, Role, User, Workspace, WorkspaceGrant
 from app.domain_models import Lead, Contact
 from app.telephony.models import CallSession, CallTranscript, OutboxEvent
 from app.telephony.routes import router
@@ -28,7 +28,11 @@ def client():
     ws = Workspace(id="voice-ws", org_id=org.id, name="Workspace")
     other_ws = Workspace(id="voice-other-ws", org_id=other_org.id, name="Other")
     db.add_all([ws, other_ws])
-    db.add(Membership(org_id=org.id, user_id=user.id, role=Role.owner)); db.flush()
+    db.add(Membership(org_id=org.id, user_id=user.id, role=Role.owner))
+    db.add(WorkspaceGrant(
+        org_id=org.id, workspace_id=ws.id, user_id=user.id, granted_by=user.id,
+    ))
+    db.flush()
     lead = Lead(org_id=org.id, workspace_id=ws.id, company_name="Acme", created_by=user.id)
     foreign_lead = Lead(org_id=other_org.id, workspace_id=other_ws.id, company_name="Foreign", created_by=user.id)
     contact = Contact(org_id=org.id, workspace_id=ws.id, first_name="Consented", email="consented@example.test", phone="+919999999999", consent_status="granted", phone_call_consent_status="granted", phone_call_consent_source="caller_requested_callback", phone_call_consent_recorded_at=datetime.now(timezone.utc), created_by=user.id)
@@ -37,8 +41,11 @@ def client():
     app = FastAPI(); app.include_router(router)
     def override_db():
         session = TestingSession()
-        try: yield session
-        finally: session.close()
+        try:
+            set_rls_context(session, user_id=user.id)
+            yield session
+        finally:
+            session.close()
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_principal] = lambda: Principal(user=user)
     tc = TestClient(app); tc.org_id = org.id; tc.ws_id = ws.id
