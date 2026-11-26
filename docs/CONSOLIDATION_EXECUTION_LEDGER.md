@@ -386,3 +386,22 @@ The helper's conditional one-time approval-consumption update and `approval.cons
 **Limitations:** this was source inspection. It does not establish that every database trigger/provider adapter is side-effect-free before commit, nor does the single PostgreSQL race test cover every route under concurrent requests. Keep provider/network calls outside the transaction and add route-level PostgreSQL rollback/race tests for high-impact protected actions before production readiness.
 
 **Status:** no code behavior changed in this review. The six inspected application paths have the intended single-transaction shape; PostgreSQL route-level concurrency coverage remains partial.
+
+
+### Verification refresh and worker-scope implementation gate (2026-11-26)
+
+At PR code head `df36a07b2eae19cc22c9caaf15e8bff98cac66e8`, the disposable Python 3.13.18 sandbox reran:
+
+- `env -u MIGRATION_DATABASE_URL DATABASE_URL=sqlite:////tmp/agency-os-api-tests.db python -m pytest -q --tb=short`: **452 passed, 10 skipped, 2 deprecation warnings**.
+- `python -m compileall -q app tests`: passed.
+- `python -m alembic heads`: exactly one head, `w3d5f7a9b1c3`.
+- `git status --short`: clean.
+- PostgreSQL-only tests were skipped because no PostgreSQL test URLs/Docker daemon are available in this sandbox. This run does not replace the user's earlier 61-test PostgreSQL result, which was at an earlier code head.
+
+#### Worker-scope implementation gate
+
+The worker source review confirms that `run_worker()` enumerates `worker_workspace_scopes()`, constructs `scoped_worker_session_factory(org_id, workspace_id)`, and uses that factory for execution processing, retry promotion, lease recovery, delegation queueing, machine-session expiry, and outbox dispatch. Browser-session pruning is a separate bounded SECURITY DEFINER operation.
+
+A partial change that merely removes the inventory function and adds a no-argument SQL claim function would be misleading: current RLS policies still trust worker-settable `agency_os.machine_org_id` and `agency_os.machine_workspace_id` settings, and the worker has direct table privileges for the existing service operations. A genuine boundary requires migrating all execution/attempt reads and writes, heartbeat/provider-run attachment, cancellation, retry/recovery, delegation synchronization, and workspace-bound outbox work to narrowly scoped database contracts, then revoking direct worker access where appropriate. It must also prevent the worker role from minting a workspace scope through custom GUCs. This is a coordinated schema + service + runner migration, not a safe one-file patch.
+
+**Decision:** do not introduce a partial claim function or remove the existing inventory yet. Preserve the known-working worker path while designing the full contract inventory and PostgreSQL tests first. The raw GUC trust weakness remains a critical, explicitly open security finding; current worker NOBYPASSRLS and scope tests protect against accidental unscoped access and pool leakage, not malicious SQL under a compromised worker credential.
