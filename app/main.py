@@ -1187,4 +1187,6 @@ app.include_router(machine_tool_gateway_router)
 
 # Founder-reviewed agent research drafts; CRM promotion remains an explicit human action.
 from app.revenue_research_routes import router as revenue_research_router
+from app.outbox_observability_routes import router as outbox_observability_router
 app.include_router(revenue_research_router)
+app.include_router(outbox_observability_router)
