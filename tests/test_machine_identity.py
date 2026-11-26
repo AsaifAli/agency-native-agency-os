@@ -7,9 +7,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.auth import Principal, get_principal
-from app.db import Base, get_db
+from app.db import Base, get_db, set_rls_context
 from app.machine_identity import authenticate_machine_token, authorize_tool_session, create_agent_session, expire_due_agent_sessions
-from app.models import FounderAuthority, Membership, Organization, Role, User, Workspace
+from app.models import FounderAuthority, Membership, Organization, Role, User, Workspace, WorkspaceGrant
 from app.security_models import AgentSession, MachineIdentity, ToolInvocation
 from app.security_routes import router
 from app.tool_gateway_routes import router as tool_gateway_router
@@ -35,6 +35,10 @@ def security_client():
     workspace = Workspace(id="security-ws", org_id=org.id, name="Security Workspace")
     db.add_all([workspace, Membership(org_id=org.id, user_id=founder.id, role=Role.owner),
                 FounderAuthority(org_id=org.id, user_id=founder.id, active=True)])
+    db.add(WorkspaceGrant(
+        org_id=org.id, workspace_id=workspace.id,
+        user_id=founder.id, granted_by=founder.id,
+    ))
     db.commit()
     app = FastAPI()
     app.include_router(router)
@@ -42,8 +46,11 @@ def security_client():
     app.include_router(revenue_research_router)
     def override_db():
         session = factory()
-        try: yield session
-        finally: session.close()
+        try:
+            set_rls_context(session, user_id=founder.id)
+            yield session
+        finally:
+            session.close()
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_principal] = lambda: Principal(user=founder)
     client = TestClient(app)
