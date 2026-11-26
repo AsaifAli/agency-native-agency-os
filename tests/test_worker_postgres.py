@@ -20,8 +20,12 @@ from app.models import (
     User,
     Workspace,
 )
-from app.worker_service import claim_next_execution
+from app.worker_service import (
+    claim_next_execution,
+    recover_expired_execution_leases,
+)
 from datetime import datetime, timedelta, timezone
+import app.security_models  # noqa: F401 — register security FK metadata
 from app.telephony.models import OutboxEvent
 from app.outbox_service import reconcile_outbox_events, claim_outbox_batch
 
@@ -193,14 +197,60 @@ def test_postgres_workers_claim_different_executions(monkeypatch):
         finally:
             verification.close()
 
+        # Simulate a worker process disappearing after its claim was committed.
+        # The persisted lease expiry must make the attempt recoverable.
+        recovery = Session()
+        try:
+            crashed_attempt = (
+                recovery.query(ExecutionAttempt)
+                .filter(ExecutionAttempt.execution_id == execution_ids[0])
+                .one()
+            )
+            crashed_attempt.lease_expires_at = (
+                datetime.now(timezone.utc) - timedelta(seconds=5)
+            )
+            recovery.commit()
+
+            recovered_count = recover_expired_execution_leases(
+                recovery,
+                base_delay_seconds=5,
+                max_delay_seconds=30,
+            )
+            assert recovered_count == 1
+            recovery.commit()
+
+            recovered_execution = recovery.query(Execution).filter(
+                Execution.id == execution_ids[0]
+            ).one()
+            recovered_attempt = recovery.query(ExecutionAttempt).filter(
+                ExecutionAttempt.id == crashed_attempt.id
+            ).one()
+            assert recovered_execution.status.value == "retry_wait"
+            assert recovered_execution.next_retry_at is not None
+            assert recovered_attempt.status.value == "abandoned"
+            assert recovered_attempt.lease_expires_at is None
+            assert recovered_attempt.error_code == "WORKER_LEASE_EXPIRED"
+
+            recovery_event = recovery.query(AuditEvent).filter_by(
+                event_type="execution.attempt_abandoned",
+                resource_id=recovered_attempt.id,
+            ).one()
+            assert recovery_event.payload["error_code"] == "WORKER_LEASE_EXPIRED"
+            assert recovery_event.payload["worker_id"].startswith(
+                "postgres-worker-"
+            )
+        finally:
+            recovery.close()
+
     finally:
         # Remove only records created by this test.
         if org_id is not None:
             cleanup = Session()
             try:
                 if execution_ids:
+                    # Recovery also emits attempt-scoped audit rows.
                     cleanup.query(AuditEvent).filter(
-                        AuditEvent.resource_id.in_(execution_ids)
+                        AuditEvent.org_id == org_id
                     ).delete(synchronize_session=False)
                     cleanup.query(ExecutionAttempt).filter(
                         ExecutionAttempt.execution_id.in_(execution_ids)
