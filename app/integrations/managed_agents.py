@@ -497,9 +497,11 @@ class ManagedAgentsRuntime(AgentRuntime):
 
             deadline = self.clock() + self.config.claude_managed_timeout_seconds
             tool_calls_processed = 0
-            interrupt_sent = False
-            interrupt_action: str | None = None
-            interrupt_event_id: str | None = None
+            persisted_control = (request.request_metadata or {}).get("control_request") or {}
+            persisted_interrupt_id = persisted_control.get("interrupt_event_id")
+            interrupt_sent = isinstance(persisted_interrupt_id, str) and bool(persisted_interrupt_id)
+            interrupt_action: str | None = persisted_control.get("action") if interrupt_sent else None
+            interrupt_event_id: str | None = persisted_interrupt_id if interrupt_sent else None
             while self.clock() < deadline:
                 control_action = (
                     request.control_check()
@@ -531,6 +533,8 @@ class ManagedAgentsRuntime(AgentRuntime):
                             "Provider accepted an interrupt without returning a reconcilable event ID."
                         )
                     interrupt_event_id = sent_events[0]["id"]
+                    if request.persist_control_event is not None:
+                        request.persist_control_event(interrupt_action, interrupt_event_id)
                     interrupt_sent = True
 
                 session = self._request(
