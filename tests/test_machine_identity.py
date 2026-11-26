@@ -587,7 +587,7 @@ def test_nonfounder_cannot_review_agent_research_draft(security_client):
         db.commit()
     finally:
         db.close()
-    security_client.app.dependency_overrides[get_principal] = lambda: Principal(user=operator)
+    security_client.set_principal(operator)
     base = f"/v1/orgs/{security_client.org_id}/workspaces/{security_client.workspace_id}/lead-research-drafts"
     denied = security_client.post(f"{base}/{draft_id}/review", json={"decision": "approve"})
     assert denied.status_code == 403
