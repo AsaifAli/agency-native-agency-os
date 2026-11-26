@@ -249,6 +249,16 @@ def process_one_execution(
                 )
                 callback_db.commit()
 
+        def persist_control_event(action: str, provider_event_id: str) -> None:
+            from app.execution_controls import persist_execution_control_event
+            with session_factory() as callback_db:
+                persist_execution_control_event(
+                    callback_db, execution_id=execution_id, attempt_id=attempt_id,
+                    worker_id=worker_id, action=action,
+                    provider_event_id=provider_event_id,
+                )
+                callback_db.commit()
+
         def check_execution_control() -> str | None:
             with session_factory() as control_db:
                 return get_execution_control_request(
@@ -260,6 +270,7 @@ def process_one_execution(
 
         request.control_check = check_execution_control
         request.persist_resume_event = persist_resume_event
+        request.persist_control_event = persist_control_event
         runtime_name = execution.runtime
         execution_org_id = execution.org_id
         execution_workspace_id = execution.workspace_id
