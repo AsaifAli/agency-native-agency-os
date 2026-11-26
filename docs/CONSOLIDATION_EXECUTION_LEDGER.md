@@ -259,3 +259,20 @@ Commits:
 - Configuration correction: `04b5f9f078985119ad4b9afe2048e8eba897a7cf`
 
 **Verification:** not run in this environment. The tests are committed as regression coverage but are not yet runtime-verified. This correction does not resolve raw GUC forgery, worker arbitrary-scope selection, or full tenant-isolation acceptance.
+
+
+### Production database login allowlist tightened (2026-11-26)
+
+Follow-up to the worker-role mismatch: the production settings validator previously rejected only one known wrong username for each process type. That meant an unrelated login (including a privileged login) could pass this part of application configuration validation.
+
+Changes on the existing integration branch:
+- API process now requires the exact `agency_os_app` login.
+- Worker process now requires the exact `agency_os_worker` login.
+- Both roles are expected to remain non-owner, non-superuser, **NOBYPASSRLS** roles; database startup role verification remains the independent database-side check.
+- Added tests for the accepted worker login, worker rejection of the API login and an unrelated `postgres` login, and API rejection of the worker login.
+
+Commits:
+- `41d15816f7adc2e93dbc74e8772bddf9af0acc42` — regression tests first
+- `ff9d51ca17c1a886397af30ff14b738c33f7de7a` — exact role allowlist
+
+**Verification:** not executed here. The new regression tests must be run in the repository environment. This narrows production configuration acceptance but does not remove caller-forgeable RLS GUCs or the worker's arbitrary workspace-scope inventory path. Tenant-isolation acceptance remains blocked.
