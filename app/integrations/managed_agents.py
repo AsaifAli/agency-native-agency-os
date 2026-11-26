@@ -20,6 +20,7 @@ from app.integrations.runtime import (
     ExecutionRequest,
     ExecutionResult,
     RuntimeExecutionError,
+    RuntimeCancelled,
     RuntimeManualReviewRequired,
     RuntimeNotConfiguredError,
     RuntimeTransientError,
@@ -457,12 +458,34 @@ class ManagedAgentsRuntime(AgentRuntime):
 
             deadline = self.clock() + self.config.claude_managed_timeout_seconds
             tool_calls_processed = 0
+            interrupt_sent = False
             while self.clock() < deadline:
+                control_action = (
+                    request.control_check()
+                    if request.control_check is not None
+                    else None
+                )
+                if control_action == "cancel" and not interrupt_sent:
+                    # Managed Agents acknowledges interruption asynchronously.
+                    # Do not mark the OS execution cancelled until the provider
+                    # session is idle and every workflow run has ended.
+                    self._request(
+                        client,
+                        "POST",
+                        f"/v1/sessions/{session_id}/events",
+                        json={"events": [{"type": "user.interrupt"}]},
+                    )
+                    interrupt_sent = True
+
                 session = self._request(
                     client, "GET", f"/v1/sessions/{session_id}"
                 )
                 status = session.get("status")
                 if status in {"failed", "error", "archived", "terminated"}:
+                    if interrupt_sent and status == "terminated":
+                        raise RuntimeCancelled(
+                            "Claude Managed Agents acknowledged the cancellation."
+                        )
                     raise RuntimeExecutionError(
                         "Claude Managed Agents session ended unsuccessfully."
                     )
@@ -470,6 +493,13 @@ class ManagedAgentsRuntime(AgentRuntime):
                 # Custom tool events can arrive while a workflow is still running;
                 # process them before waiting for session.status_idle.
                 events = self._list_events(client, session_id)
+                if interrupt_sent:
+                    if status == "idle" and not self._open_workflow_runs(events):
+                        raise RuntimeCancelled(
+                            "Claude Managed Agents acknowledged the cancellation."
+                        )
+                    self.sleep(self.config.claude_managed_poll_interval_seconds)
+                    continue
                 if any(event.get("type") == "session.error" for event in events):
                     raise RuntimeExecutionError(
                         "Claude Managed Agents reported a session error."
