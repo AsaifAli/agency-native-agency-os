@@ -846,9 +846,7 @@ def test_chief_of_staff_draft_requires_founder_assignment_before_plan_creation(
     assert detail.json()["suggested_plan"]["tasks"][0]["department_key"] == "ai_engineering_development"
 
     # A non-founder cannot approve the proposal even after a valid model response.
-    app_client.app.dependency_overrides[get_principal] = (
-        lambda: Principal(user=i["operator"])
-    )
+    app_client.set_principal(i["operator"])
     denied = app_client.post(
         f"/v1/orgs/{i['org'].id}/workforce/plan-drafts/{draft_id}/approve",
         params={"workspace_id": i["workspace"].id},
