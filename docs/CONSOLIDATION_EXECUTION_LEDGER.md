@@ -472,3 +472,29 @@ Verification on integration source through commit `695922142d7dfefccc60f386d236e
 - `python -m compileall -q app tests`: passed.
 
 **PostgreSQL verification is still required** for this new function, notably whether the target PostgreSQL version provides `sha256(bytea)`, SECURITY DEFINER ownership/search path and exact grants. The live forged-GUC regression remains open: RLS policies still trust historical worker GUCs and broad worker table privileges remain. The verifier is not yet called by the worker runtime; capability issuance/claim is not implemented; lifecycle/maintenance contracts are not converted; no RLS policy cutover has occurred. Do not represent this increment as fixing worker tenant isolation.
+
+
+### Specialist profiles and team blueprint adoption (2026-11-26)
+
+Adapted selected ideas from `msitarzewski/agency-agents` (MIT-licensed upstream) into the existing workforce registry without importing its installer, runtime, desktop app or full agent catalogue.
+
+Implemented:
+- `app/workforce_blueprints.py`: versioned, declarative specialist profiles and four scenario blueprints: client onboarding/delivery, enterprise feature delivery, evidence-backed marketing campaign, and incident response/recovery.
+- Ten curated specialist profiles: Multi-Agent Systems Architect, AI Solutions Architect, Backend Architect, Database Reliability Engineer, AI Engineer, AI-Generated Code Security Auditor, Privacy Engineer, UI Finish-Gate Reviewer, Business Discovery Coach, and Content Strategist.
+- Specialist definitions specify mission, responsibilities, inputs, outputs, non-responsibilities and review gate. They explicitly default to disabled and carry no tool grants.
+- Blueprint tasks reference stable specialist keys, department keys, structured input/output contracts and explicit review requirements. Activation groups are limited to `always`, `phase`, `as_needed`, and `post_fix`.
+- Catalogue validation checks unique keys/slugs, valid specialist-to-department references, valid activation modes and mandatory review. Definitions are read-only planning metadata; they cannot create permissions or execute tasks.
+- Workspace-scoped read-only endpoints: `GET /v1/orgs/{org_id}/workforce/specialists?workspace_id=...` and `GET /v1/orgs/{org_id}/workforce/blueprints?workspace_id=...`. Membership and workspace access are checked before returning catalogue data.
+- Founder Console workforce page displays specialist profiles and blueprint task groups.
+- Tests cover catalogue contents, disabled/no-tool defaults, blueprint references, mandatory review, workspace isolation and operator read-only access.
+
+Verification on integration source at `e59febcf7a5b96ff9c97b9778de6f79580657b05`:
+- Focused workforce API tests: **25 passed**.
+- Full Python suite: **456 passed, 13 skipped, 2 warnings**.
+- `python -m compileall -q app tests`: passed.
+- PostgreSQL-only tests were skipped because PostgreSQL test URLs were not configured in this environment.
+- Frontend lint/build not yet run in this environment.
+
+Not implemented by design: automatic activation, tool grants, blueprint execution/instantiation, or automatic external communication. Blueprints are currently read-only plans; the next phase can add founder-approved conversion into persisted OS task plans after worker authorization and execution security are complete.
+
+Upstream attribution: specialist/blueprint concepts adapted from https://github.com/msitarzewski/agency-agents under MIT; no upstream agent files or installer code copied.
