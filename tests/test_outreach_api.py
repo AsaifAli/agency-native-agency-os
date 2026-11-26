@@ -64,18 +64,20 @@ def client():
 
     app = FastAPI()
     app.include_router(router)
+    principal = {"user": founder}
 
     def override_db():
         session = TestingSession()
         try:
-            set_rls_context(session, user_id=founder.id)
+            set_rls_context(session, user_id=principal["user"].id)
             yield session
         finally:
             session.close()
 
     app.dependency_overrides[get_db] = override_db
-    app.dependency_overrides[get_principal] = lambda: Principal(user=founder)
+    app.dependency_overrides[get_principal] = lambda: Principal(user=principal["user"])
     test_client = TestClient(app)
+    test_client.set_principal = lambda selected_user: principal.update(user=selected_user)
     test_client.org_id = org.id
     test_client.ws_id = ws.id
     test_client.other_ws_id = other_ws.id
@@ -299,8 +301,12 @@ def test_sender_rate_limit_workspace_isolation_and_founder_controls(client):
         db.add(operator)
         db.flush()
         db.add(Membership(org_id=client.org_id, user_id=operator.id, role=Role.operator))
+        db.add(WorkspaceGrant(
+            org_id=client.org_id, workspace_id=client.ws_id,
+            user_id=operator.id, granted_by=client.user_id,
+        ))
         db.commit()
-        client.app.dependency_overrides[get_principal] = lambda: Principal(user=operator)
+        client.set_principal(operator)
     finally:
         db.close()
 
