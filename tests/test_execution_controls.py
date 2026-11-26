@@ -11,6 +11,9 @@ from app.models import (
     Organization, Task, User, Workspace,
 )
 import app.workforce_models  # noqa: F401 — register worker service metadata
+from app.integrations.runtime import ExecutionResult
+from app.worker import processor as processor_module
+from app.worker.processor import process_one_execution
 from app.execution_controls import (
     ExecutionNotFound,
     InvalidExecutionState,
