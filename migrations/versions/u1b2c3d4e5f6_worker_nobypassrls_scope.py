@@ -13,6 +13,11 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # This revision manages PostgreSQL roles, RLS policies and SECURITY DEFINER
+    # functions. SQLite is a local/test dialect and must not execute this DDL.
+    if op.get_bind().dialect.name != "postgresql":
+        return
+
     # The worker must be able to evaluate policies that reference this helper,
     # but must never use it as a membership oracle.
     op.execute("""
@@ -222,6 +227,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if op.get_bind().dialect.name != "postgresql":
+        return
+
     op.execute("""
         DROP FUNCTION IF EXISTS agency_os_private.prune_expired_browser_sessions(integer, integer)
     """)
