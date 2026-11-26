@@ -285,9 +285,8 @@ def test_organization_owner_without_founder_authority_cannot_change_workspace_gr
     assert denied_revoke.status_code == 403
 
 
-def test_execution_cancel_api_cancels_queued_execution_and_audits():
-    monkeypatch_settings = settings
-    monkeypatch_settings.mock_runtime_enabled = True
+def test_execution_cancel_api_cancels_queued_execution_and_audits(monkeypatch):
+    monkeypatch.setattr(settings, "mock_runtime_enabled", True)
     org_id, workspace_id, task_id, agent_id = _seed_execution_records("mock")
     client = TestClient(app)
     headers = {"Authorization": "Bearer dev:owner@test.local"}
