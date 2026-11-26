@@ -216,9 +216,9 @@ def validate_catalog() -> None:
                 if task["review_required"] is not True:
                     raise ValueError("Blueprint tasks must require review")
     for specialist in SPECIALISTS:
-        if specialist.get("default_enabled") is not False:
+        if specialist.get("default_enabled", False) is not False:
             raise ValueError("Specialists must remain disabled by default")
-        if specialist.get("tool_grants") != []:
+        if specialist.get("tool_grants", []) != []:
             raise ValueError("Specialist definitions cannot grant tools")
 
 
