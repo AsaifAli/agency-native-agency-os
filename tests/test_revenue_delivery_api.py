@@ -58,6 +58,7 @@ def client():
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_principal] = lambda: Principal(user=principal["user"])
     test_client = TestClient(app)
+    test_client.testing_session_factory = TestingSession
     test_client.set_principal = lambda selected_user: principal.update(user=selected_user)
     test_client.org_id = org.id
     test_client.ws_id = ws.id
@@ -355,36 +356,20 @@ def test_founder_authority_viewer_can_link_opportunity_to_client(client):
         assert session.query(FounderAuthority).filter_by(
             org_id=org, user_id=founder_viewer.id, active=True
         ).one_or_none() is not None
-        # Diagnose the complete join independently before exercising the helper.
-        joined_authority = (
-            session.query(FounderAuthority.id, User.id, Membership.id)
-            .join(User, User.id == FounderAuthority.user_id)
-            .join(
-                Membership,
-                (Membership.user_id == FounderAuthority.user_id)
-                & (Membership.org_id == FounderAuthority.org_id),
-            )
-            .filter(
-                FounderAuthority.org_id == org,
-                FounderAuthority.user_id == founder_viewer.id,
-                FounderAuthority.active.is_(True),
-                User.active.is_(True),
-            )
-            .all()
-        )
-        assert joined_authority, {
-            "org_id": org,
-            "user_id": founder_viewer.id,
-            "user_active_db": session.query(User.active).filter_by(id=founder_viewer.id).scalar(),
-            "membership": session.query(Membership.org_id, Membership.user_id).filter_by(
-                org_id=org, user_id=founder_viewer.id
-            ).all(),
-            "founder_authority": session.query(
-                FounderAuthority.org_id, FounderAuthority.user_id, FounderAuthority.active
-            ).filter_by(org_id=org, user_id=founder_viewer.id).all(),
-        }
-        assert has_founder_authority(session, org, founder_viewer.id)
+        # Commit the grant fixture before opening a separate request session.
         session.commit()
+        verify_session = client.testing_session_factory()
+        try:
+            persisted_user = verify_session.query(User).filter_by(
+                id=founder_viewer.id, active=True
+            ).one_or_none()
+            assert persisted_user is not None, "Founder-viewer user row was not persisted"
+            assert has_founder_authority(verify_session, org, founder_viewer.id), (
+                "Founder authority must be effective only for a persisted active user "
+                "with active membership and an active founder grant"
+            )
+        finally:
+            verify_session.close()
         client.set_principal(founder_viewer)
     finally:
         try:
