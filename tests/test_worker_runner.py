@@ -259,3 +259,38 @@ def test_session_maintenance_commits_expiry_batch(monkeypatch):
     assert len(sessions) == 1
     assert sessions[0].committed and sessions[0].closed
     expired.assert_called_once_with(sessions[0], limit=25)
+
+
+def test_production_worker_verifies_its_nobypassrls_database_role(monkeypatch):
+    verification = Mock()
+    monkeypatch.setattr(runner.settings, "app_env", "production")
+    monkeypatch.setattr(runner.settings, "process_role", "worker")
+    monkeypatch.setattr(runner, "verify_postgres_role", verification)
+
+    runner._verify_worker_database_role()
+
+    verification.assert_called_once_with(
+        runner.worker_engine, expected_bypassrls=False, require_rls=True
+    )
+
+
+def test_production_worker_fails_closed_for_wrong_process_role(monkeypatch):
+    verification = Mock()
+    monkeypatch.setattr(runner.settings, "app_env", "production")
+    monkeypatch.setattr(runner.settings, "process_role", "api")
+    monkeypatch.setattr(runner, "verify_postgres_role", verification)
+
+    with pytest.raises(RuntimeError, match="PROCESS_ROLE=worker"):
+        runner._verify_worker_database_role()
+
+    verification.assert_not_called()
+
+
+def test_nonproduction_worker_skips_production_database_role_verification(monkeypatch):
+    verification = Mock()
+    monkeypatch.setattr(runner.settings, "app_env", "test")
+    monkeypatch.setattr(runner, "verify_postgres_role", verification)
+
+    runner._verify_worker_database_role()
+
+    verification.assert_not_called()
