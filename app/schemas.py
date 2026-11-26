@@ -90,6 +90,8 @@ class EvaluationOut(BaseModel):
     passed: bool
     metrics: dict
     gate_results: dict
+    evidence_trust: str = "self_reported"
+    release_eligible: bool = False
     created_at: datetime
 
 
