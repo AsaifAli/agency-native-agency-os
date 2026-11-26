@@ -39,6 +39,7 @@ class ExecutionStatus(str, enum.Enum):
     succeeded = "succeeded"
     failed = "failed"
     cancelled = "cancelled"
+    paused = "paused"
 
 
 class ExecutionAttemptStatus(str, enum.Enum):
@@ -48,6 +49,7 @@ class ExecutionAttemptStatus(str, enum.Enum):
     succeeded = "succeeded"
     failed = "failed"
     abandoned = "abandoned"
+    paused = "paused"
 
 
 class Organization(Base):
