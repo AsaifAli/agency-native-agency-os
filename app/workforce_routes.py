@@ -35,7 +35,11 @@ def get_specialist_catalog(
     db: Session = Depends(get_db),
     p: Principal = Depends(get_principal),
 ):
-    """Read-only specialist catalogue; profiles never grant runtime capabilities."""
+    """Read-only OS registry of Claude-owned specialist identities.
+
+    Detailed instructions and skills are maintained as Claude integration source
+    material; this endpoint exposes only stable identity and governance metadata.
+    """
     require_membership(org_id, p, db)
     _workspace(db, org_id, workspace_id)
     return list_specialists()
