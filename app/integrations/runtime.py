@@ -19,6 +19,7 @@ class ExecutionRequest:
     task_title: str = ""
     task_description: str = ""
     external_run_id: str | None = None
+    attempt_number: int = 1
     persist_external_run_id: Callable[[str], None] | None = None
     execute_custom_tool: Callable[[str, dict, str], dict] | None = None
     control_check: Callable[[], str | None] | None = None
