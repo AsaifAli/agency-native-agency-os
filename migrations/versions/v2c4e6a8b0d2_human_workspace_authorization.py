@@ -35,20 +35,33 @@ WORKSPACE_TABLES = (
 
 def upgrade() -> None:
     dialect = op.get_bind().dialect.name
-    op.add_column(
-        "workspaces",
-        sa.Column("created_by", sa.String(length=36), nullable=True),
-    )
-    if dialect == "sqlite":
-        with op.batch_alter_table("workspaces") as batch_op:
-            batch_op.create_foreign_key(
-                "fk_workspaces_created_by_users", "users", ["created_by"], ["id"]
-            )
-    else:
-        op.create_foreign_key(
-            "fk_workspaces_created_by_users", "workspaces", "users",
-            ["created_by"], ["id"],
+    # SQLite DDL is not fully transactional. A prior interrupted attempt,
+    # or a database created from a newer baseline, may already contain this
+    # column and/or its FK while Alembic still points at the parent revision.
+    workspace_columns = {
+        column["name"] for column in sa.inspect(op.get_bind()).get_columns("workspaces")
+    }
+    if "created_by" not in workspace_columns:
+        op.add_column(
+            "workspaces",
+            sa.Column("created_by", sa.String(length=36), nullable=True),
         )
+
+    workspace_foreign_keys = {
+        foreign_key.get("name")
+        for foreign_key in sa.inspect(op.get_bind()).get_foreign_keys("workspaces")
+    }
+    if "fk_workspaces_created_by_users" not in workspace_foreign_keys:
+        if dialect == "sqlite":
+            with op.batch_alter_table("workspaces") as batch_op:
+                batch_op.create_foreign_key(
+                    "fk_workspaces_created_by_users", "users", ["created_by"], ["id"]
+                )
+        else:
+            op.create_foreign_key(
+                "fk_workspaces_created_by_users", "workspaces", "users",
+                ["created_by"], ["id"],
+            )
     op.create_table(
         "workspace_grants",
         sa.Column("id", sa.String(length=36), primary_key=True),
