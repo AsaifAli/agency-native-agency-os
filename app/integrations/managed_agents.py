@@ -412,7 +412,18 @@ class ManagedAgentsRuntime(AgentRuntime):
             )
 
         if request.control_check is not None and request.control_check() == "cancel":
-            raise RuntimeCancelled("OS cancellation requested before provider session start.")
+            if request.external_run_id:
+                # Reconcile/interrupt the existing provider session below.
+                pass
+            elif request.attempt_number > 1:
+                # A previous attempt may have created a provider session before
+                # its ID was durably attached. Never claim cancellation while
+                # that external outcome is ambiguous.
+                raise RuntimeManualReviewRequired(
+                    "Cancellation needs provider-session reconciliation; no durable session ID is available."
+                )
+            else:
+                raise RuntimeCancelled("OS cancellation requested before provider session start.")
 
         with self.client_factory() as client:
             # Validate the provider Agent on every attempt, including recovery of a
@@ -546,6 +557,10 @@ class ManagedAgentsRuntime(AgentRuntime):
 
                 self.sleep(self.config.claude_managed_poll_interval_seconds)
 
+        if interrupt_sent:
+            raise RuntimeManualReviewRequired(
+                "Provider interruption was sent but the session/workflow runs did not drain before the deadline."
+            )
         raise RuntimeTransientError(
             "Claude Managed Agents session exceeded the configured execution timeout."
         )
