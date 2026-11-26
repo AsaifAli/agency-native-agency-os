@@ -80,7 +80,7 @@ def upgrade() -> None:
         predicate = f"({human} OR {worker})"
         op.execute(f'CREATE POLICY tenant_isolation ON public."{table}" USING ({predicate}) WITH CHECK ({predicate})')
 
-    op.execute("DROP POLICY IF EXISTS tenant_isolation ON public.execution_attempts")
+    op.execute("DROP POLICY IF EXISTS execution_attempt_tenant_isolation ON public.execution_attempts")
     attempts = """EXISTS (
         SELECT 1 FROM public.executions AS e
         WHERE e.id = execution_attempts.execution_id
@@ -91,7 +91,8 @@ def upgrade() -> None:
     )"""
     op.execute(f"CREATE POLICY execution_attempt_tenant_isolation ON public.execution_attempts USING ({attempts}) WITH CHECK ({attempts})")
 
-    op.execute("DROP POLICY IF EXISTS tenant_isolation ON public.workspaces")
+    for policy in ("tenant_isolation", "workspace_select", "workspace_insert", "workspace_update", "workspace_delete"):
+        op.execute(f"DROP POLICY IF EXISTS {policy} ON public.workspaces")
     workspace_predicate = "(agency_os_private.user_has_org_access(org_id, nullif(current_setting('agency_os.user_id', true), '')) OR (session_user = 'agency_os_worker' AND agency_os_private.worker_has_execution_context(org_id, id, NULL)))"
     op.execute(f"CREATE POLICY tenant_isolation ON public.workspaces USING ({workspace_predicate}) WITH CHECK ({workspace_predicate})")
 
