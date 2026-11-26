@@ -291,3 +291,12 @@ Regression tests were committed before implementation:
 - `ab8e475701083db86e61ea0a99aa69f6e710a61d` — startup enforcement.
 
 **Verification:** not run in this environment. This is defense-in-depth around role misconfiguration; it does not solve raw caller-settable RLS GUCs or replace the planned database-owned worker claim/lease authorization. Tenant-isolation acceptance remains blocked.
+
+
+### Worker fail-closed startup regression (2026-11-26)
+
+Added a regression test proving that a production worker does not call workspace inventory/polling if PostgreSQL role verification fails. The test asserts the startup exception propagates and the scope-enumeration function is never reached.
+
+- `c99bbb0cd6e37b23f49730a4f08b0eace4173128` — regression test.
+
+**Verification:** committed but not executed here. No additional runtime behavior changed in this increment. This protects the existing startup guard; it does not address the deeper arbitrary-workspace worker authorization issue.
