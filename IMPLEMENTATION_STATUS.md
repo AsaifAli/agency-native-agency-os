@@ -299,3 +299,18 @@ Added production fail-closed configuration checks, Redis-backed request throttli
 
 Added Authentik OIDC relying-party integration (Authlib, OIDC discovery, authorization code + PKCE S256, state/nonce), strict pre-provisioned-user linking by verified issuer/subject/email, unique OIDC subject migration, AES-GCM encrypted OIDC transaction cookie, HttpOnly session cookie, double-submit CSRF + Origin checks, CSRF bootstrap/current-user/logout endpoints and frontend credentialed requests. Added `docs/AUTHENTIK_SETUP.md`. Validation: OIDC/CSRF focused tests 35 passed; full backend suite 320 passed / 4 PostgreSQL-only skipped; compileall passed; Alembic single head `r8a2c4e6f901`. Live Authentik configuration, Authentik MFA assurance policy (`acr`), browser topology and PostgreSQL RLS remain unverified. Production remains NO-GO.
 
+
+
+## Integration PR #58 delta — source-reviewed, not yet merged or runtime-verified
+
+This section describes only `integration/consolidated-agency-os-2026-11-26`; it must not be read as a statement about `main`.
+
+- Durable workspace-scoped execution pause/resume/cancel routes, persisted control requests, worker acknowledgement, Managed Agents interruption/reconciliation and Workflow UI controls are present in the PR. Provider/runtime capability differences and lease/retry/cancellation races still require verification.
+- The PR branch also contains an OS Tool Gateway, tool registry, machine identity/session foundations and Data Protection Gateway. Tool grants remain fail-closed; the separate MCP Streamable HTTP/session-credential adapter has **not** been integrated. The candidate MCP branch currently has a missing migration parent and stale service-call arguments, so it requires a deliberate port.
+- The PR branch contains the explicit human workspace-grant migration and expanded `REQUIRED_RLS_TABLES` inventory, including `workspace_grants`. The integration migration has SQLite interrupted-DDL recovery absent from the older candidate copy. PostgreSQL policy coverage, grant backfill, role verification and cross-workspace isolation still require runtime proof.
+- The PR branch contains the tenant outreach integrity migration and DPG tests. These are code-presence findings only; no claim is made that the full provider-boundary coverage or PostgreSQL integrity tests passed on this head.
+- The PR branch contains a subprocess-based worker crash-recovery test in `tests/test_worker_postgres.py`; the process-crash candidate's file is identical. Additional concurrent claim/lease/outbox cases from the lease-recovery candidate must be checked for coverage before adding tests.
+- Revenue/Delivery source pages and models for contracts, onboarding, opportunities, outreach, research outreach and retainers are already present. Outreach currently prepares an approved queue and stop controls; it does not send email. No external dispatch is enabled.
+- The PR adds `docs/CONSOLIDATION_EXECUTION_LEDGER.md`, which is the current phase-by-phase reconciliation and verification ownership record.
+
+**Verification:** this PR head has not had a fresh full local test run in this session. The previously observed backend workflow failed before backend compilation/tests because its disposable PostgreSQL service did not create `agency_os_migrator`. Do not interpret earlier main/other-PR test results above as tests of this integration head.
