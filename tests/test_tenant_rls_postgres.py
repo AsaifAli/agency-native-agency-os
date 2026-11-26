@@ -25,7 +25,7 @@ def test_postgres_rls_blocks_cross_org_reads_writes_and_pool_context_leaks():
     user_a, user_b = User(email=f"rls-a-{suffix}@example.test"), User(email=f"rls-b-{suffix}@example.test")
     session_hash_a, session_hash_b = f"a{suffix}".ljust(64, "a"), f"b{suffix}".ljust(64, "b")
     try:
-        verify_postgres_role(app_engine, expected_bypassrls=False, require_rls=True, expected_role="agency_os_app")
+        verify_postgres_role(app_engine, expected_bypassrls=False, require_rls=True, expected_role="agency_os_test_app")
         with Admin() as db:
             db.add_all([org_a, org_b, user_a, user_b]); db.flush()
             ws_a = Workspace(org_id=org_a.id, name="Workspace A", created_by=user_a.id)
