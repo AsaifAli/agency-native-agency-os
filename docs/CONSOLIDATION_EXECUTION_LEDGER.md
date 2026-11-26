@@ -242,3 +242,20 @@ Additional findings:
 - Treat the existing 61-pass PostgreSQL result as historical evidence for the previous code only. No signed-scope implementation or new PostgreSQL verification has been performed in this follow-up.
 
 **Status update:** source audit refined; implementation remains not started. Tenant-isolation acceptance remains blocked. No runtime tests were run in this environment, and no production configuration or database role was changed.
+
+
+### Worker role configuration correction (2026-11-26)
+
+A small, isolated inconsistency was corrected before beginning the larger scope redesign:
+
+- Production configuration rejected `agency_os_app` for `PROCESS_ROLE=worker`, which is correct because the worker must use its dedicated login.
+- The validation error incorrectly described that dedicated login as `BYPASSRLS`. The database migration and disposable PostgreSQL role setup explicitly require `agency_os_worker NOBYPASSRLS`.
+- Updated the validation message to require the dedicated **NOBYPASSRLS** worker role; the database role itself was not changed.
+- Added production Settings regression tests for acceptance of the dedicated `agency_os_worker` login and rejection of `agency_os_app` with an explicit NOBYPASSRLS contract.
+
+Commits:
+- Test first: `c95abd5e86d8e1cb1d5e9e942302f5de1c7e2f0c`
+- Corrected test hostnames: `c1475a3416a85f022f9bd61f16bd2ee8d88123d8`
+- Configuration correction: `04b5f9f078985119ad4b9afe2048e8eba897a7cf`
+
+**Verification:** not run in this environment. The tests are committed as regression coverage but are not yet runtime-verified. This correction does not resolve raw GUC forgery, worker arbitrary-scope selection, or full tenant-isolation acceptance.
