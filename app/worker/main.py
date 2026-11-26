@@ -22,7 +22,7 @@ def main() -> None:
     if settings.app_env.lower() == "production":
         if settings.process_role != "worker":
             raise RuntimeError("Worker process must use PROCESS_ROLE=worker in production")
-        verify_postgres_role(worker_engine, expected_bypassrls=False, require_rls=True)
+        verify_postgres_role(worker_engine, expected_bypassrls=False, require_rls=True, expected_role="agency_os_worker")
 
     stop_event = threading.Event()
 
