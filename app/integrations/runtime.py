@@ -54,6 +54,10 @@ class RuntimeCancelled(RuntimeExecutionError):
     """The provider acknowledged a durable OS cancellation request."""
 
 
+class RuntimePaused(RuntimeExecutionError):
+    """The provider acknowledged a durable OS pause request and is idle."""
+
+
 class RuntimeToolRejected(Exception):
     """An OS policy or authorization gate explicitly rejected a tool call."""
 
