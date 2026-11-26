@@ -100,7 +100,7 @@ export default function OperationsPage() {
                 <div className="activity-title">{item.title}</div>
                 <div className="activity-meta">{item.kind} · {item.status} · {item.created_at ? new Date(item.created_at).toLocaleString() : "Time unavailable"}</div>
                 {item.error_message && <div className="activity-meta">{item.error_code || "Execution error"}: {item.error_message}</div>}
-                {item.kind === "execution" && item.status === "retry_wait" && <button className="button-secondary" disabled={cancelling === item.id} onClick={() => cancelExecution(item)}>{cancelling === item.id ? "Requesting…" : "Stop execution"}</button>}
+                {item.kind === "execution" && item.status === "retry_wait" && <button className="button secondary" disabled={cancelling === item.id} onClick={() => cancelExecution(item)}>{cancelling === item.id ? "Requesting…" : "Stop execution"}</button>}
               </div>
             </div>
           )}</div> : <div className="empty"><strong>No open exceptions</strong>Pending approvals, blocked tasks and failed or retry-wait executions will appear here.</div>}
