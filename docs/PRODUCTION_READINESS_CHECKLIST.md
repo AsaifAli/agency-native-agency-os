@@ -545,3 +545,14 @@ Additional review controls: identity/session locks follow revocation lock order;
 
 **Release decision: NO-GO.** The PR is a tested code candidate, not production approval. Restore the repository to private visibility now that the temporary public clone requirement is over; PR #47 remains available to authorized collaborators.
 
+
+
+## 2026-11-26 — PostgreSQL execution lease recovery coverage
+
+- [x] Added a PostgreSQL integration assertion that expires a committed execution-attempt lease and invokes the existing recovery service.
+- [x] The test verifies retry scheduling, attempt abandonment, lease clearing, `WORKER_LEASE_EXPIRED` classification, and persisted audit metadata.
+- [x] Cleanup is restricted to the synthetic test organization and removes both execution-scoped and attempt-scoped audit events.
+- [ ] Re-run the focused PostgreSQL test target and full backend suite against the exact candidate commit before merge.
+- [ ] Actual worker process termination/restart, sustained-load behavior, cancellation, and multi-replica recovery remain separate release-verification items.
+
+**Evidence boundary:** the earlier PostgreSQL test results from the superseded PR branch are historical and are not evidence for this branch. No GitHub Actions run is requested; validation will use the repository's Docker Compose PostgreSQL test target and backend test command.
