@@ -338,7 +338,7 @@ def test_founder_authority_viewer_can_link_opportunity_to_client(client):
     db = client.app.dependency_overrides[get_db]()
     session = next(db)
     try:
-        founder_viewer = User(email="founder-domain-viewer@example.test", display_name="Founder Viewer")
+        founder_viewer = User(email="founder-domain-viewer@example.test", display_name="Founder Viewer", active=True)
         session.add(founder_viewer)
         session.flush()
         session.add(Membership(org_id=org, user_id=founder_viewer.id, role=Role.viewer))
@@ -348,6 +348,13 @@ def test_founder_authority_viewer_can_link_opportunity_to_client(client):
         ))
         session.flush()
         from app.auth import has_founder_authority
+        assert founder_viewer.active is True
+        assert session.query(Membership).filter_by(
+            org_id=org, user_id=founder_viewer.id
+        ).one_or_none() is not None
+        assert session.query(FounderAuthority).filter_by(
+            org_id=org, user_id=founder_viewer.id, active=True
+        ).one_or_none() is not None
         assert has_founder_authority(session, org, founder_viewer.id)
         session.commit()
         client.set_principal(founder_viewer)
