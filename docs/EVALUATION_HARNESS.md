@@ -6,7 +6,7 @@ The Evaluation Harness is a separate, versioned quality and safety boundary. It 
 
 - `rag`: retrieval ranking, citation completeness/correctness, answer relevance and groundedness.
 - `agent_workflow`: task completion, required-step recall, tool validity, policy pass rate, approval compliance, execution reliability and fallback rate.
-- `safety_security`: explicit evidence for required controls, required approval actions, forbidden outcomes, tenant isolation and data-policy compliance.
+- `safety_security`: explicit evidence for required controls, required approval actions, forbidden outcomes, tenant isolation and data-policy compliance.\n- `regression`: required API-contract, migration and workflow regression checks; missing or false checks fail the gate.
 
 ## Safety/security evidence contract
 
@@ -58,3 +58,20 @@ The pack only evaluates evidence supplied by a test runner. It does not perform 
 ## Verification status
 
 The deterministic pack and unit tests are source-added on the integration branch. Tests have not yet been executed in the repository environment. PostgreSQL RLS, actual tenant isolation, worker recovery, and release blocking remain runtime verification items.
+
+
+## Regression evidence contract
+
+Submit `regression` with a required test/check list and explicit results:
+
+```json
+{
+  "required_checks": ["api_contract", "migration_compatibility"],
+  "check_results": {
+    "api_contract": true,
+    "migration_compatibility": true
+  }
+}
+```
+
+Every named required check must be explicitly `true`. Missing keys, false values, malformed result objects, and an empty required-check set fail the gate. This evaluates supplied check evidence only; a trusted CI/test-runner attestation and immutable commit/environment binding remain future work.
