@@ -346,6 +346,9 @@ def test_founder_authority_viewer_can_link_opportunity_to_client(client):
         session.add(WorkspaceGrant(
             org_id=org, workspace_id=ws, user_id=founder_viewer.id, granted_by=client_user_id(client),
         ))
+        session.flush()
+        from app.auth import has_founder_authority
+        assert has_founder_authority(session, org, founder_viewer.id)
         session.commit()
         client.set_principal(founder_viewer)
     finally:
