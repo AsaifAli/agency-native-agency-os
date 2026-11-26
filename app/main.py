@@ -88,7 +88,7 @@ async def lifespan(app: FastAPI):
     if settings.app_env.lower() == "production":
         if settings.process_role != "api":
             raise RuntimeError("API process must use PROCESS_ROLE=api in production")
-        verify_postgres_role(engine, expected_bypassrls=False, require_rls=True)
+        verify_postgres_role(engine, expected_bypassrls=False, require_rls=True, expected_role="agency_os_app")
     yield
 
 
