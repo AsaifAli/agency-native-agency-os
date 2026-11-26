@@ -149,13 +149,24 @@ Coverage present on the integration branch:
 - Managed Agents: provider session reuse, tool approval boundaries, policy checks, retries, interrupt/pause/resume and custom-tool execution.
 - Evaluation: RAG/agent workflow and the new safety/security and regression packs.
 
-Remaining acceptance tests before PR can leave draft:
-1. Run the complete Python suite and compileall on the exact PR head.
-2. Run the isolated PostgreSQL stack, including non-superuser app/worker RLS tests, concurrent claims, lease recovery and process-kill recovery.
-3. Add HTTP tests for the new outbox summary route: unauthenticated, non-member, missing workspace grant, org owner without Founder Authority, founder with grant, cross-workspace isolation and payload-free response.
-4. Add race/idempotency tests for pause/resume/cancel vs lease expiry, retry and worker acknowledgement; assert one terminal outcome and complete audit.
-5. Exercise approval consume + protected action under concurrent requests; exactly one transaction may consume the approval.
-6. Add trusted-runner provenance/replay tests before treating Evaluation Harness results as release-grade evidence.
-7. Run frontend workflow controls against API capability differences (pause-after-start only for runtimes that support safe interruption), plus browser E2E for pause/resume/stop and error states.
+## Local verification checkpoint (2026-11-26)
 
-The latest outbox summary unit test was strengthened to prove an event in another workspace is excluded and that pending age is deterministic. It is committed but not yet executed.
+The user ran the following checks against local checkout of integration head
+`4dcd3a99a81977de349712e56919b4a63e82982d` and reported these results:
+
+- Full Python suite: **443 passed, 8 skipped, 2 warnings**.
+- Isolated PostgreSQL Docker harness: **59 passed, 2 warnings**. The harness initialized its dedicated roles and completed its PostgreSQL test target.
+- API suite: **16 passed, 2 warnings**, including outbox summary authorization, Founder Authority, workspace grant, cross-workspace exclusion and payload-free response checks.
+- Approval policy suite: **11 passed**.
+- Python compilation: `python -m compileall -q app tests` completed with no output/errors.
+
+These are user-reported local results, not independently executed in this repository-inspection environment. The SQLite skips are not counted as PostgreSQL passes; the separate Docker harness is the PostgreSQL evidence. Deprecation warnings did not fail the reported test runs.
+
+Remaining acceptance tests before PR can leave draft:
+1. Add race/idempotency tests for pause/resume/cancel vs lease expiry, retry and worker acknowledgement; assert one terminal outcome and complete audit.
+2. Exercise approval consumption and the protected action under concurrent PostgreSQL requests; exactly one transaction may consume the approval and perform the action.
+3. Add trusted-runner provenance/replay tests before treating Evaluation Harness results as release-grade evidence.
+4. Run frontend workflow controls against API capability differences (pause-after-start only for runtimes that support safe interruption), plus browser E2E for pause/resume/stop and error states.
+5. Complete remaining migration/RLS, tenant-isolation, backup/restore and release-readiness checks from the phase ledger.
+
+The outbox summary API authorization and workspace-isolation tests are now executed and passed in the user's local API test run. This does not establish browser/dashboard integration or PostgreSQL-specific route concurrency behavior.
