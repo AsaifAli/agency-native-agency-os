@@ -34,14 +34,21 @@ WORKSPACE_TABLES = (
 
 
 def upgrade() -> None:
+    dialect = op.get_bind().dialect.name
     op.add_column(
         "workspaces",
         sa.Column("created_by", sa.String(length=36), nullable=True),
     )
-    op.create_foreign_key(
-        "fk_workspaces_created_by_users", "workspaces", "users",
-        ["created_by"], ["id"],
-    )
+    if dialect == "sqlite":
+        with op.batch_alter_table("workspaces") as batch_op:
+            batch_op.create_foreign_key(
+                "fk_workspaces_created_by_users", "users", ["created_by"], ["id"]
+            )
+    else:
+        op.create_foreign_key(
+            "fk_workspaces_created_by_users", "workspaces", "users",
+            ["created_by"], ["id"],
+        )
     op.create_table(
         "workspace_grants",
         sa.Column("id", sa.String(length=36), primary_key=True),
@@ -71,6 +78,20 @@ def upgrade() -> None:
     )
 
     # Preserve the exact access users had immediately before this migration.
+    if dialect == "sqlite":
+        op.execute("""
+            INSERT INTO workspace_grants
+                (id, org_id, workspace_id, user_id, granted_by, created_at)
+            SELECT lower(hex(randomblob(16))), w.org_id, w.id, m.user_id,
+                   m.user_id, CURRENT_TIMESTAMP
+            FROM workspaces AS w
+            JOIN memberships AS m ON m.org_id = w.org_id
+            JOIN users AS u ON u.id = m.user_id
+            WHERE u.active = 1
+        """)
+        # PostgreSQL-only functions, roles, grants and RLS policies follow.
+        return
+
     op.execute("""
         INSERT INTO public.workspace_grants
             (id, org_id, workspace_id, user_id, granted_by, created_at)
@@ -447,6 +468,15 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if op.get_bind().dialect.name == "sqlite":
+        op.drop_table("workspace_grants")
+        with op.batch_alter_table("workspaces") as batch_op:
+            batch_op.drop_constraint(
+                "fk_workspaces_created_by_users", type_="foreignkey"
+            )
+            batch_op.drop_column("created_by")
+        return
+
     # Restore the original organization-wide policies before removing the
     # workspace predicate and grant data model.
     op.execute("DROP POLICY IF EXISTS workspace_select ON public.workspaces")
