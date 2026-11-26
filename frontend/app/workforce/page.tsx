@@ -51,7 +51,7 @@ type Position = {
   status: string;
 };
 type Workforce = { units: Unit[]; members: Member[]; capabilities: Capability[]; positions: Position[] };
-type Specialist = { specialist_key: string; title: string; department_key: string; mission: string; responsibilities: string[]; inputs: string[]; outputs: string[]; not_responsible_for: string[]; review_gate: string; default_enabled: false; tool_grants: [] };
+type Specialist = { specialist_key: string; title: string; department_key: string; runtime_owner: "claude"; profile_ref: string; status: "catalogued"; default_enabled: false };
 type BlueprintTask = { specialist_key: string; department_key: string; title: string; objective: string; inputs: string[]; outputs: string[]; review_required: true };
 type TeamBlueprint = { slug: string; title: string; summary: string; duration_hint: string; schema_version: number; groups: { group: string; activation: string; tasks: BlueprintTask[] }[] };
 
@@ -182,8 +182,8 @@ export default function WorkforcePage() {
       <div style={{ height: 16 }} />
       <section className="panel">
         <div className="panel-head">
-          <div className="panel-title">Specialist profiles</div>
-          <span className="panel-note">{specialists.length} curated profiles · disabled by default</span>
+          <div className="panel-title">Specialist registry</div>
+          <span className="panel-note">{specialists.length} Claude-owned profile references · not executable in the OS</span>
         </div>
         <div className="grid dashboard-grid">
           {specialists.map((specialist) => (
@@ -192,9 +192,9 @@ export default function WorkforcePage() {
               <div style={{ minWidth: 0 }}>
                 <div className="activity-title">{specialist.title}</div>
                 <div className="activity-meta">{specialist.department_key} · {specialist.specialist_key}</div>
-                <div className="activity-meta">{specialist.mission}</div>
-                <div className="activity-meta">Review gate: {specialist.review_gate}</div>
-                <div className="activity-meta">No tool grants · Not activated</div>
+                <div className="activity-meta">Runtime owner: Claude · {specialist.status}</div>
+                <div className="activity-meta">Profile source: {specialist.profile_ref}</div>
+                <div className="activity-meta">No OS-side prompt execution or automatic tool grants</div>
               </div>
             </div>
           ))}
