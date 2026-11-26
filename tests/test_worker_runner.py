@@ -294,3 +294,24 @@ def test_nonproduction_worker_skips_production_database_role_verification(monkey
     runner._verify_worker_database_role()
 
     verification.assert_not_called()
+
+
+def test_production_worker_does_not_poll_when_database_role_verification_fails(monkeypatch):
+    monkeypatch.setattr(runner.settings, "app_env", "production")
+    monkeypatch.setattr(runner.settings, "process_role", "worker")
+
+    def reject_role(*args, **kwargs):
+        raise RuntimeError("unsafe PostgreSQL role")
+
+    scopes = Mock()
+    monkeypatch.setattr(runner, "verify_postgres_role", reject_role)
+    monkeypatch.setattr(runner, "list_worker_scopes", scopes)
+
+    with pytest.raises(RuntimeError, match="unsafe PostgreSQL role"):
+        runner.run_worker(
+            stop_event=StopAfterWait(),
+            worker_id="production-worker",
+            session_factory=FakeSession,
+        )
+
+    scopes.assert_not_called()
