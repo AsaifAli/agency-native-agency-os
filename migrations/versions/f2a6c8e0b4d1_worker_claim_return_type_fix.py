@@ -126,6 +126,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Keep the corrected function in place; reverting would reintroduce a
-    # runtime-breaking PostgreSQL type mismatch.
-    pass
+    if op.get_bind().dialect.name != "postgresql":
+        return
+    raise RuntimeError(
+        "Refusing to downgrade worker claim return-type fix; "
+        "the previous function fails at runtime on PostgreSQL."
+    )
