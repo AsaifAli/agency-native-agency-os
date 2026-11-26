@@ -323,7 +323,8 @@ def test_execution_cancel_api_cancels_queued_execution_and_audits(monkeypatch):
         db.close()
 
 
-def test_execution_cancel_api_hides_cross_workspace_execution():
+def test_execution_cancel_api_hides_cross_workspace_execution(monkeypatch):
+    monkeypatch.setattr(settings, "mock_runtime_enabled", True)
     org_id, workspace_id, task_id, agent_id = _seed_execution_records("mock")
     client = TestClient(app)
     headers = {"Authorization": "Bearer dev:owner@test.local"}
