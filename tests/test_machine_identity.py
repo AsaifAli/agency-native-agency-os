@@ -1166,3 +1166,47 @@ def test_agent_tool_discovery_requires_an_active_workforce_capability(security_c
         assert visible.json()["tools"][0]["allowed_data_classes"] == ["public"]
     finally:
         db.close()
+
+
+
+def test_tool_discovery_hides_tools_that_require_unavailable_approval_adapter(
+    security_client, monkeypatch
+):
+    from app.tool_registry import HealthReadInput, HealthReadOutput, ToolSpec
+    import app.tool_gateway_routes as gateway_routes
+
+    issued = _create_identity(
+        security_client,
+        scopes=[
+            "sessions:create",
+            "tools:invoke",
+            "tool:approval.required",
+        ],
+        classes=["public"],
+    )
+    headers = {"Authorization": "Bearer " + issued["token"]}
+    session = security_client.post(
+        "/v1/machine/sessions",
+        headers=headers,
+        json={"purpose": "Inspect approved tool catalog", "data_class": "public", "ttl_seconds": 600},
+    )
+    assert session.status_code == 201, session.text
+
+    approval_only_tool = ToolSpec(
+        key="approval.required",
+        provider_name="approval_required_tool",
+        version="1.0.0",
+        description="A tool requiring an approval adapter.",
+        risk_level="high",
+        allowed_data_classes=("public",),
+        required_action="task.execute",
+        minimum_scope="workspace",
+        requires_approval=True,
+        input_model=HealthReadInput,
+        output_model=HealthReadOutput,
+    )
+    monkeypatch.setattr(gateway_routes, "list_tools", lambda: [approval_only_tool])
+
+    response = security_client.get("/v1/machine/tools", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["tools"] == []
