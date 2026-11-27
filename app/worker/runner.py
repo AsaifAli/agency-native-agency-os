@@ -15,6 +15,7 @@ from app.db import (
 )
 from app.worker.processor import process_one_execution
 from app.machine_identity import expire_due_agent_sessions
+from app.retention import purge_due_retention_data
 from app.outbox_handlers import OUTBOX_HANDLERS
 from app.outbox_service import dispatch_outbox_batch, reconcile_outbox_events
 from app.worker_service import (
