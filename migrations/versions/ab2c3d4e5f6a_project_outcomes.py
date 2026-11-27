@@ -229,7 +229,3 @@ def downgrade() -> None:
     op.drop_index("uq_projects_scope_id", table_name="projects")
     op.drop_index("uq_milestones_scope_id", table_name="milestones")
     op.drop_index("uq_evaluation_runs_scope_id", table_name="evaluation_runs")
-    else:
-        op.drop_constraint("uq_projects_scope_id", "projects", type_="unique")
-        op.drop_constraint("uq_milestones_scope_id", "milestones", type_="unique")
-        op.drop_constraint("uq_evaluation_runs_scope_id", "evaluation_runs", type_="unique")
