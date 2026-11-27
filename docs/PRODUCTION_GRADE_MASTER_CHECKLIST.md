@@ -1,6 +1,6 @@
 # Agency OS — Full Production-Grade Readiness Master Checklist
 
-**Last reconciled:** 2026-11-26  
+**Last reconciled:** 2026-11-27 (PR #58 merged; local/live gates remain open)  
 **Release posture:** **NO-GO — engineering and verification in progress**  
 **Scope:** Founder-controlled internal AI agency operating system. This is not a SaaS product. The public agency website remains a separate trust boundary.
 
@@ -209,7 +209,7 @@ A checkbox is complete only when code/infrastructure, tests, operational evidenc
 - [ ] Add accessible navigation, keyboard support, loading/empty/error states and responsive layouts.
 - [ ] Ensure destructive/high-impact controls require confirmation and show consequences.
 - [ ] Verify frontend authorization mirrors backend policy without treating UI hiding as security.
-- [ ] Run end-to-end browser tests for critical founder journeys. Frontend `npm ci`, ESLint (0 errors; 7 React Hook dependency warnings), TypeScript validation and Next.js production build passed locally on the integration branch; 31 static pages generated and npm reported 0 vulnerabilities. Browser-level interaction tests remain pending.
+- [ ] Run end-to-end browser tests for critical founder journeys. Frontend lint (0 errors; 7 pre-existing React Hook dependency warnings), TypeScript validation and Next.js production build passed before the final Founder Console UI reconciliation. A fresh run against exact merged `main` commit `4541626d6fffc904d8ee3131bb2f408efbe27acf` and browser-level critical-flow tests remain pending.
 
 ### 17. Learning and operational improvement
 - [ ] Capture incidents, corrections, successful playbooks and postmortems as reviewed knowledge.
@@ -264,20 +264,31 @@ A checkbox is complete only when code/infrastructure, tests, operational evidenc
 - [ ] Backup is restored into isolated environment → integrity, migrations and service startup verified.
 - [ ] Evaluation Harness detects a known tenant leak, prompt injection or authorization regression → release is blocked.
 
-## Known open blockers at the 2026-11-26 checkpoint
+## Known open blockers at the 2026-11-27 checkpoint
 
-- [x] PostgreSQL 16 Compose migration and integration suite: 55 passed, 0 failed on 2026-11-26. The stack provisions a `NOBYPASSRLS` worker role and exercises the configured admin/application/worker database URLs; this is test-suite evidence, not proof of deployed production topology.
-- [ ] Complete independent role/grant/ownership and RLS policy review across every tenant-scoped table, SECURITY DEFINER function and deployment role; retain the 55-pass PostgreSQL 16 suite as regression evidence.
-- [ ] Replace broad worker BYPASSRLS with narrowly scoped queue operations.
-- [ ] Human workspace assignment model and complete nested-object authorization matrix.
-- [ ] Actual worker process termination/restart, sustained load, cancellation and deployed multi-replica verification.
-- [ ] Live Authentik MFA/ACR assurance and deployed browser/session verification.
-- [ ] Live Claude/provider validation, parent/child governance and data eligibility review.
-- [ ] Egress/SSRF infrastructure controls, secret-history review and independent security assessment.
-- [ ] Backup restore, measured RPO/RTO, alerting and operational runbooks.
-- [ ] Revenue dispatch/stop-condition and Delivery acceptance/handover/support workflows require end-to-end evidence.
-- [ ] Evaluation Harness release gates and synthetic end-to-end staging acceptance.
-- [ ] External provider, webhook, storage and website-intake configuration.
+- [x] PR #58 merged to `main` at `4541626d6fffc904d8ee3131bb2f408efbe27acf`; the consolidation branch is no longer the release candidate.
+- [x] Worker database role no longer relies on broad `BYPASSRLS`; the production worker role is verified as `NOBYPASSRLS`, and worker execution/maintenance uses database-verified capability-bound scope.
+- [x] Human workspace-grant authorization was restored after the worker RLS cutover; exact cross-workspace and API/files/cache/artifact coverage still needs a complete independent inventory and runtime validation.
+- [x] PostgreSQL 16 isolated Compose suite: **105 passed, 2 warnings** on the merged candidate. This is disposable test-environment evidence, not a production migration rehearsal.
+- [x] Backend suite: **483 passed, 19 skipped, 2 warnings** on the merged candidate. Skips include environment-dependent PostgreSQL tests; the dedicated PostgreSQL suite is reported separately.
+- [ ] Fresh frontend lint, TypeScript check and production build against the exact merged `main` head after final Founder Console UI reconciliation.
+- [ ] Complete independent role/grant/ownership and RLS policy review across every tenant-scoped table, SECURITY DEFINER function and deployment role; test pooled-connection context and cross-boundary API/file/object/cache/session/artifact access.
+- [ ] Complete nested-object BOLA/IDOR review and verify workspace grants for every human access path.
+- [ ] Complete Data Protection Gateway coverage across uploads, extraction, RAG, provider callbacks, tool dispatch, logs, caches and artifacts; prove runtime eligibility before external provider disclosure.
+- [ ] Complete artifact/object-storage lifecycle, encryption, malware-safe processing, signed access and tenant isolation.
+- [ ] Validate worker crash/restart, lease recovery, concurrent claims, cancellation races, outbox replay and multi-replica behavior against the intended deployment topology.
+- [ ] Implement and test the OS MCP/tool adapter against the current Tool Gateway; tool grants remain disabled until every call is authorized, budgeted, data-checked and audited by the OS.
+- [ ] Validate live Authentik OIDC/JWKS/MFA assurance and deployed browser/session behavior.
+- [ ] Validate Claude Managed Agents account/runtime compatibility, environment sandbox/egress, provisioning reconciliation and synthetic-data eligibility; no live client-data use is approved.
+- [ ] Implement governed outbound dispatch with approved sender identity, consent/suppression, idempotency, delivery receipts and immediate reply/opt-out/bounce stop handling. No external message dispatch is enabled.
+- [ ] Complete Revenue provenance/deduplication/merge review, attribution and client-safe proposal delivery.
+- [ ] Complete Delivery requirement-to-test traceability, independent QA/rework, release approval, handover, support/SLA and renewal workflows.
+- [ ] Add trusted Evaluation Harness runner attestation, immutable test/commit/environment manifests and a release-blocking decision path; caller-supplied evidence is not proof.
+- [ ] Add provider routing/resilience, per-execution cost/usage accounting, enforceable budgets and founder emergency controls.
+- [ ] Add operational metrics, alert routing, dashboards, SBOM/scans, incident runbooks and periodic access review.
+- [ ] Complete encrypted backup/object-artifact backup and isolated restore drill; measure and document RPO/RTO.
+- [ ] Complete staging synthetic end-to-end acceptance, external provider/webhook/storage configuration and explicit founder production go/no-go.
+
 
 ## Worker architecture decision
 
