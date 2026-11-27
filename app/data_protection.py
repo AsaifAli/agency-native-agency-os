@@ -114,10 +114,10 @@ def _is_sensitive_metadata_key(
 
 
 _EMAIL = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
-_AADHAAR = re.compile(r"(?<!\d)(?:\d{4}[ -]?){2}\d{4}(?!\d)")
+_AADHAAR = re.compile(r"(?<!\d)(?:\d{4}[ -]?){2}\d{4}(?!\d)(?!-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-)")
 _PAN = re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b", re.IGNORECASE)
 _CARD = re.compile(r"(?<!\d)(?:\d[ -]?){13,19}(?!\d)")
-_PHONE = re.compile(r"(?<!\w)\+?\d[\d().\s-]{8,17}\d(?!\w)")
+_PHONE = re.compile(r"(?<!\w)\+?\d[\d().\s-]{8,17}\d(?!\w)(?!-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-)")
 
 
 def _luhn_valid(value: str) -> bool:
