@@ -3,7 +3,7 @@
 **Last reconciled:** 2026-11-27  
 **Source of truth:** `main` at `c5ec7b462835f592edb0db1a31564401423e3467`
 **Latest merged PR:** [#65 — System, Light and Dark dashboard themes](https://github.com/AsaifAli/agency-native-agency-os/pull/65).
-**Consolidated security work:** replacement PR includes #64 tool-session bounds and #66 Data Protection Gateway hardening; full Python/PostgreSQL verification remains pending.
+**Consolidated security work:** PR #68 combines bounded tool-session policy and Data Protection Gateway hardening. Founder-reported verification on the earlier code/test head: 530 Python tests passed (20 environment-gated skips, 2 warnings); expanded isolated PostgreSQL 16 suite passed (106 tests, 2 warnings). Subsequent independent-review fixes on PR #68 require focused and full reruns.
 **Release posture:** **NO-GO for production.** Implementation and isolated tests do not establish production readiness.
 
 This file is the current status summary. Historical branch comparisons, test logs and superseded PR checkpoints should not be treated as current blockers. See `docs/CONSOLIDATION_EXECUTION_LEDGER.md` for the active sequence and `docs/PRODUCTION_GRADE_MASTER_CHECKLIST.md` for the full release gates.
@@ -18,8 +18,8 @@ This file is the current status summary. Historical branch comparisons, test log
 | Frontend TypeScript | Passed | Fresh run after PR #65. |
 | Next.js production build | Passed; 32 static pages generated | Fresh run after PR #65. |
 | Dashboard theme browser checks | Passed | System/light/dark selection, persistence across reload, live OS light↔dark changes and 320px overflow check. |
-| PR #66 targeted DPG harnesses | Passed | Provider credential patterns, callback IDs, structured credential/PII fields, audit payloads and structured logs; these are focused harnesses, not the repository pytest suite. |
-| Consolidated security full Python pytest suite | **Not run** | The coding sandbox has no project Python dependencies/pytest. Focused, full and PostgreSQL suites must pass before merge. |
+| PR #68 security regressions | Partial | Earlier DPG harnesses passed; latest audit-token and mandatory tool-session policy regressions were added after that run and still require execution. |
+| Consolidated security full Python pytest suite | **530 passed, 20 skipped, 2 warnings** (founder-reported on earlier code/test head) | PR #68 has since received independent-review fixes; rerun focused and full suites on the final head before merge. |
 | GitHub Actions | Not run | Intentionally ignored per founder direction. |
 
 No production database migration, production deployment, external provider activation, client-data operation or compliance assessment is claimed.
@@ -57,7 +57,7 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 - Workspace-scoped execution history and execution trace APIs; Founder Console Processes and Monitoring views.
 
 ### Audit, privacy and retention
-- Audit payloads reject invalid/oversized structures, detect known credential-bearing fields fail-closed and redact supported free-text/structured PII. PR #66 extends provider token detection, structured field handling and provider callback validation; full pytest verification remains pending.
+- Audit payloads reject invalid/oversized structures, detect known credential-bearing fields fail-closed and redact supported free-text/structured PII. PR #68 removes the generic audit exemption for `resume_token`; resume identifiers remain validated only in the narrowly scoped execution-control boundary. Latest regression is added but awaits rerun.
 - PostgreSQL audit events reject UPDATE/DELETE by application and worker roles. This is append-only protection, **not cryptographic tamper-evidence**; hash chaining or externally anchored integrity checkpoints are not implemented.
 - Browser sessions store a digest of the JWT identifier, support server-side revocation and rotation, and are pruned in bounded batches.
 - Agent sessions are constrained by machine identity data-class grants and cannot outlive the identity.
@@ -76,7 +76,7 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 
 ### Tool Gateway
 - OS-owned machine identities use one-time displayed credentials stored as digests, bounded expiry, revocation and workspace/data-class scopes.
-- Agent sessions are persisted and bounded. Tool calls pass machine/session checks, data-class policy, input/output protection, typed schema validation, workforce capability checks, idempotency, durable invocation records and audit.
+- Agent sessions are persisted and bounded. Every Tool Gateway entry point now derives its tool allowlist from OS-issued machine scopes and enforces a 100-successful-call session ceiling; adapter-provided allowlists/limits can only narrow that policy. Tool calls also pass machine/session checks, data-class policy, input/output protection, typed schema validation, workforce capability checks, idempotency, durable invocation records and audit.
 - Code-owned registry currently includes read-only health and public lead-research draft capture. Research capture validates bounded public HTTPS source references and stores a founder-review draft; it does not create a CRM contact/lead or send outreach.
 - Tool Gateway is an authorization foundation, not a general-purpose agent tool platform. No full Streamable HTTP MCP adapter has been integrated. The old `feature/managed-agents-mcp-bridge` branch is 31 commits ahead and 486 behind current `main`; do not merge/cherry-pick it wholesale. Its migration references missing parent `p6d8e2a4f913`, and its MCP dispatcher passes `max_calls_per_session` and `allowed_tool_keys` arguments unsupported by the current gateway signature. Current main also has no MCP SDK dependency, MCP configuration, or mounted MCP route. Port the transport/auth/session concepts against current main with a reviewed dependency, new migration ancestry and matching service contract. Tool grants for broader client-data or side-effecting operations remain disabled. The workforce capability model stores `budget_minor`, but the current Tool Gateway and Managed Agents callback do not reserve or settle spend against it; it is not yet an enforceable runtime spending cap. The MCP adapter must remain a protocol façade over OS-owned authorization, budget reservation/settlement, audit and durable state.
 
