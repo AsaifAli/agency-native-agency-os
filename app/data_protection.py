@@ -114,10 +114,11 @@ def _is_sensitive_metadata_key(
 
 
 _EMAIL = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
-_AADHAAR = re.compile(r"(?<!\d)(?:\d{4}[ -]?){2}\d{4}(?!\d)(?!-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-)")
+_UUID = re.compile(r"\b[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}\b")
+_AADHAAR = re.compile(r"(?<!\d)(?:\d{4}[ -]?){2}\d{4}(?!\d)")
 _PAN = re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b", re.IGNORECASE)
 _CARD = re.compile(r"(?<!\d)(?:\d[ -]?){13,19}(?!\d)")
-_PHONE = re.compile(r"(?<!\w)\+?\d[\d().\s-]{8,17}\d(?!\w)(?!-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-)")
+_PHONE = re.compile(r"(?<!\w)\+?\d[\d().\s-]{8,17}\d(?!\w)")
 
 
 def _luhn_valid(value: str) -> bool:
@@ -141,7 +142,13 @@ def sanitize_text(value: str) -> tuple[str, dict[str, int]]:
     if any(pattern.search(value) for pattern in _SECRET_PATTERNS):
         raise DataProtectionBlocked("SECRET_DETECTED")
 
-    text = value
+    protected_uuids: list[str] = []
+
+    def protect_uuid(match: re.Match[str]) -> str:
+        protected_uuids.append(match.group(0))
+        return f"__AOS_UUID_{len(protected_uuids) - 1}__"
+
+    text = _UUID.sub(protect_uuid, value)
     counts: dict[str, int] = {}
 
     def redact(pattern: re.Pattern[str], label: str) -> None:
@@ -172,6 +179,8 @@ def sanitize_text(value: str) -> tuple[str, dict[str, int]]:
         return raw
 
     text = _PHONE.sub(redact_phone, text)
+    for index, original_uuid in enumerate(protected_uuids):
+        text = text.replace(f"__AOS_UUID_{index}__", original_uuid)
     return text, counts
 
 
