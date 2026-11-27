@@ -359,6 +359,25 @@ def test_tool_gateway_idempotent_replay_and_session_binding(security_client):
     assert replay.json()["id"] == first.json()["id"]
     assert replay.json()["replayed"] is True
 
+    # Once payload retention expires, the tombstone must reject replay rather
+    # than re-execute a tool whose original result has been scrubbed.
+    db = security_client.factory()
+    try:
+        invocation = db.query(ToolInvocation).filter_by(id=first.json()["id"]).one()
+        invocation.request_payload = {}
+        invocation.result = None
+        invocation.payload_purged_at = datetime.now(timezone.utc) - timedelta(days=181)
+        db.commit()
+    finally:
+        db.close()
+    expired_replay = security_client.post(
+        "/v1/machine/tools/system.health.read/invoke",
+        headers={**headers, "Idempotency-Key": "health-read-replay-01"},
+        json={"session_id": first_session, "input": {}},
+    )
+    assert expired_replay.status_code == 410
+    assert expired_replay.json()["detail"] == "IDEMPOTENCY_RESULT_EXPIRED"
+
     second_session_response = security_client.post(
         "/v1/machine/sessions",
         headers=headers,
