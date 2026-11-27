@@ -636,4 +636,4 @@ def test_project_outcome_rejects_cross_workspace_parent_and_mismatched_acceptanc
             "note": "This must not silently accept an unknown criterion.",
         },
     )
-    assert mismatch.status_code == 403
+    assert mismatch.status_code == 422
