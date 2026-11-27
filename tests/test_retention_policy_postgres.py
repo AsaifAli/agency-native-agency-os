@@ -52,7 +52,9 @@ def test_retention_scrubbing_runs_only_with_exact_workspace_capability():
             after_workspace_id = db.execute(
                 text("SELECT max(id) FROM public.workspaces")
             ).scalar_one_or_none()
-            workspace_id = f"{after_workspace_id or ''}z-retention-{suffix}"
+            # Workspace IDs are varchar(36); a z-prefixed 36-character ID
+            # sorts after the existing worker-e2e-* fixtures in this test DB.
+            workspace_id = f"z{suffix}".ljust(36, "0")
             workspace = Workspace(
                 id=workspace_id,
                 org_id=org.id,
