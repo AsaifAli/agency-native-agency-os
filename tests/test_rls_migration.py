@@ -51,9 +51,14 @@ def test_machine_rls_context_is_workspace_scoped():
     assert "id = nullif(current_setting('agency_os.machine_workspace_id', true), '')" in source
 
 
-def test_existing_database_role_bootstrap_transfers_old_object_ownership():
+def test_fresh_database_role_bootstrap_transfers_database_and_schema_ownership_safely():
     source = (PATH.parents[2] / "docker/postgres/01-roles.sh").read_text()
-    assert "REASSIGN OWNED BY agency_os TO agency_os_migrator" in source
+    assert "ALTER DATABASE agency_os OWNER TO agency_os_migrator" in source
+    assert "ALTER SCHEMA public OWNER TO agency_os_migrator" in source
+    assert "GRANT USAGE, CREATE ON SCHEMA public TO agency_os_migrator" in source
+    # REASSIGN OWNED also processes shared/system-owned objects and breaks
+    # initialization on a fresh PostgreSQL cluster; keep bootstrap narrowly scoped.
+    assert "REASSIGN OWNED BY agency_os TO agency_os_migrator" not in source
 
 
 
