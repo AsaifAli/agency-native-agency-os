@@ -159,11 +159,17 @@ def test_run_worker_runs_startup_maintenance_and_waits_when_idle(
     assert runner.claim_worker_maintenance_scope.call_args_list[0].kwargs["after_workspace_id"] is None
     assert runner.claim_worker_maintenance_scope.call_args_list[1].kwargs["after_workspace_id"] == "workspace-1"
     release_scope.assert_called_once()
-    assert len(sessions) == 7
+    assert len(sessions) == 8
     assert all(session.committed for session in sessions)
     expire_sessions.assert_called_once_with(sessions[3], limit=10)
-    assert sessions[4].committed  # outbox reconciliation
-    assert sessions[6].committed  # bounded SECURITY DEFINER browser-session retention
+    purge_retention.assert_called_once_with(
+        sessions[4],
+        limit=10,
+        agent_session_days=runner.settings.agent_session_metadata_retention_days,
+        tool_invocation_payload_days=runner.settings.tool_invocation_payload_retention_days,
+    )
+    assert sessions[5].committed  # outbox reconciliation
+    assert sessions[7].committed  # bounded SECURITY DEFINER browser-session retention
 
 
 def test_run_worker_propagates_processor_failure(monkeypatch):
