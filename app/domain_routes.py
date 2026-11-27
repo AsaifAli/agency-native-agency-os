@@ -646,8 +646,12 @@ def create_outcome_measurement(
         if evaluation is None:
             raise HTTPException(404, "Supporting evaluation run not found in this workspace")
     if body.milestone_id:
-        _scoped_parent(db, Milestone, object_id=body.milestone_id, org_id=org_id,
-                       workspace_id=body.workspace_id, label="Milestone")
+        milestone = _scoped_parent(
+            db, Milestone, object_id=body.milestone_id, org_id=org_id,
+            workspace_id=body.workspace_id, label="Milestone",
+        )
+        if milestone.project_id != outcome.project_id:
+            raise HTTPException(404, "Milestone not found in this project")
     source_reference, source_redactions = _protect_outcome_text(body.source_reference.strip())
     evidence_summary, evidence_redactions = _protect_outcome_text(body.evidence_summary.strip())
     if not source_reference or not evidence_summary:
