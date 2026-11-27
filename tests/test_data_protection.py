@@ -491,12 +491,14 @@ def test_execution_metadata_blocks_structured_credentials_but_allows_resume_cont
 
 
 def test_trusted_internal_metadata_keys_are_case_sensitive():
-    with pytest.raises(DataProtectionBlocked) as error:
-        protect_untrusted_payload(
-            {"ResumeToken": "resume-token-123"},
-            trusted_internal_id_keys={"resume_token"},
-        )
-    assert error.value.code == "SECRET_FIELD_DETECTED"
+    protected, report = protect_untrusted_payload(
+        {"Draft_ID": "owner@example.test"},
+        trusted_internal_id_keys={"draft_id"},
+    )
+    # The allowlist is exact-key matched: casing variants do not receive the
+    # internal-ID exemption and their values still pass through PII redaction.
+    assert protected["Draft_ID"] == "[REDACTED_EMAIL]"
+    assert report.redaction_counts == {"EMAIL": 1}
 
 
 def test_redaction_counters_survive_audit_payload_protection_without_exempting_pii_fields():
