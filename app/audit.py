@@ -19,7 +19,7 @@ def record_event(
     if payload is not None and not isinstance(payload, dict):
         raise DataProtectionBlocked("INVALID_UNTRUSTED_PAYLOAD")
     safe_payload, _report = protect_untrusted_payload(
-        payload or {}, trusted_internal_id_keys={"resume_token"},
+        payload or {},
     )
     event = AuditEvent(
         org_id=org_id,
