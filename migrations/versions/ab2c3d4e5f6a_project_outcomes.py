@@ -15,31 +15,9 @@ depends_on = None
 
 
 def upgrade() -> None:
-    if op.get_bind().dialect.name == "sqlite":
-        with op.batch_alter_table("projects") as batch_op:
-            batch_op.create_unique_constraint(
-                "uq_projects_scope_id", ["org_id", "workspace_id", "id"]
-            )
-    else:
-        op.create_unique_constraint(
-            "uq_projects_scope_id", "projects", ["org_id", "workspace_id", "id"]
-        )
-    if op.get_bind().dialect.name == "sqlite":
-        with op.batch_alter_table("milestones") as batch_op:
-            batch_op.create_unique_constraint(
-                "uq_milestones_scope_id", ["org_id", "workspace_id", "id"]
-            )
-        with op.batch_alter_table("evaluation_runs") as batch_op:
-            batch_op.create_unique_constraint(
-                "uq_evaluation_runs_scope_id", ["org_id", "workspace_id", "id"]
-            )
-    else:
-        op.create_unique_constraint(
-            "uq_milestones_scope_id", "milestones", ["org_id", "workspace_id", "id"]
-        )
-        op.create_unique_constraint(
-            "uq_evaluation_runs_scope_id", "evaluation_runs", ["org_id", "workspace_id", "id"]
-        )
+    op.create_index("uq_projects_scope_id", "projects", ["org_id", "workspace_id", "id"], unique=True)
+    op.create_index("uq_milestones_scope_id", "milestones", ["org_id", "workspace_id", "id"], unique=True)
+    op.create_index("uq_evaluation_runs_scope_id", "evaluation_runs", ["org_id", "workspace_id", "id"], unique=True)
     op.create_table(
         "project_outcomes",
         sa.Column("id", sa.String(length=36), primary_key=True),
@@ -248,13 +226,9 @@ def downgrade() -> None:
         op.execute("ALTER TABLE public.project_outcomes DISABLE ROW LEVEL SECURITY")
     op.drop_table("outcome_measurements")
     op.drop_table("project_outcomes")
-    if op.get_bind().dialect.name == "sqlite":
-        with op.batch_alter_table("projects") as batch_op:
-            batch_op.drop_constraint("uq_projects_scope_id", type_="unique")
-        with op.batch_alter_table("milestones") as batch_op:
-            batch_op.drop_constraint("uq_milestones_scope_id", type_="unique")
-        with op.batch_alter_table("evaluation_runs") as batch_op:
-            batch_op.drop_constraint("uq_evaluation_runs_scope_id", type_="unique")
+    op.drop_index("uq_projects_scope_id", table_name="projects")
+    op.drop_index("uq_milestones_scope_id", table_name="milestones")
+    op.drop_index("uq_evaluation_runs_scope_id", table_name="evaluation_runs")
     else:
         op.drop_constraint("uq_projects_scope_id", "projects", type_="unique")
         op.drop_constraint("uq_milestones_scope_id", "milestones", type_="unique")
