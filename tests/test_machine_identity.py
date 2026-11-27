@@ -1164,5 +1164,6 @@ def test_agent_tool_discovery_requires_an_active_workforce_capability(security_c
         assert [item["key"] for item in visible.json()["tools"]] == [
             "revenue.lead.research.capture"
         ]
+        assert visible.json()["tools"][0]["allowed_data_classes"] == ["public"]
     finally:
         db.close()
