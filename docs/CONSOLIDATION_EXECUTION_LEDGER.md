@@ -32,7 +32,7 @@ This document supersedes the pre-merge integration ledger below. PR #58 is the p
 | Phase | Current status | Evidence / remaining acceptance |
 |---|---|---|
 | 0. Architecture and consolidation | **Merged; baseline established** | Modular monolith and OS-owned state are retained. Refresh architecture/threat model and migration inventory against current main; no second control plane or queue engine. |
-| 1. Database, APIs and worker infrastructure | **Implemented; tested in disposable PostgreSQL** | PostgreSQL 16 isolated suite 105 passed. Still need empty-volume and existing-volume rehearsal, role/grant/function inventory, performance budgets and deployed topology verification. |
+| 1. Database, APIs and worker infrastructure | **Implemented; tested in disposable PostgreSQL** | PostgreSQL 16 isolated suite 106 passed on the earlier PR #68 test head. Still need empty-volume and existing-volume rehearsal, role/grant/function inventory, performance budgets and deployed topology verification. |
 | 2. Authentication and tenant isolation | **Partial** | OIDC/session lifecycle and exact workspace-grant authorization exist with route/PostgreSQL regression coverage. Live Authentik MFA/JWKS assurance, exhaustive BOLA review and isolation across future file/object-storage/RAG/artifact paths remain open. |
 | 3. Organization and Agent Registry | **Partial** | 16 departments, workforce/position catalog, curated skills and founder-gated capability/member lifecycle exist. Provider Agent provisioning, skill assignment, immutable runtime version promotion/rollback and delegated machine identities remain incomplete. |
 | 4. Revenue Engine | **Partial** | CRM, activity history, suppression records, opportunities, proposal drafts and founder pricing approval exist. Research/provenance at scale, dedupe/merge review, approved outbound dispatch, sender authorization, delivery receipts, reply/opt-out/bounce stops and attribution remain incomplete. |
@@ -59,7 +59,7 @@ This document supersedes the pre-merge integration ledger below. PR #58 is the p
 
 ## Immediate engineering sequence
 
-1. **Exact-main stabilization:** frontend lint, typecheck and production build are complete after PR #65. Review migrations, role grants and the full RLS/function inventory; rerun backend/PostgreSQL suites after PR #66.
+1. **Exact-main stabilization:** frontend lint, typecheck and production build are complete after PR #65. Review migrations, role grants and the full RLS/function inventory; rerun backend/PostgreSQL suites on the latest PR #68 head.
 2. **Isolation and DPG completion:** The consolidated security PR covers provider request/result/callback IDs, structured credential keys, structured PII fields, audit payloads, structured logs, machine-scope tool allowlists, the 100-successful-call session ceiling, and narrowly scoped resume-control metadata. Enumerate every tenant-bearing model, route, function, future file/object, cache, session, RAG and artifact path; add negative cross-workspace tests and fail-closed policy at each new boundary.
 3. **OS Tool Gateway / MCP:** port a protocol-only MCP adapter against the current Tool Gateway; OS remains authority for identity, scope, policy, budgets, invocation, audit and durable state. Keep grants disabled until tests prove the boundary.
 4. **Execution and outbox recovery:** prove kill/restart, leases, heartbeats, retry, DLQ, cancellation, replay and reconciliation under multiple workers.
