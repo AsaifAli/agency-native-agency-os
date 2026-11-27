@@ -143,10 +143,13 @@ def sanitize_text(value: str) -> tuple[str, dict[str, int]]:
         raise DataProtectionBlocked("SECRET_DETECTED")
 
     protected_uuids: list[str] = []
+    uuid_sentinel = "\\x00AOS_UUID_"
+    while uuid_sentinel in value:
+        uuid_sentinel += "_"
 
     def protect_uuid(match: re.Match[str]) -> str:
         protected_uuids.append(match.group(0))
-        return f"__AOS_UUID_{len(protected_uuids) - 1}__"
+        return f"{uuid_sentinel}{len(protected_uuids) - 1}\\x00"
 
     text = _UUID.sub(protect_uuid, value)
     counts: dict[str, int] = {}
@@ -180,7 +183,7 @@ def sanitize_text(value: str) -> tuple[str, dict[str, int]]:
 
     text = _PHONE.sub(redact_phone, text)
     for index, original_uuid in enumerate(protected_uuids):
-        text = text.replace(f"__AOS_UUID_{index}__", original_uuid)
+        text = text.replace(f"{uuid_sentinel}{index}\\x00", original_uuid)
     return text, counts
 
 
