@@ -393,7 +393,7 @@ def test_tool_gateway_idempotent_replay_and_session_binding(security_client):
 
 
 def test_tool_gateway_rejects_missing_grants_unregistered_tools_and_bad_payloads(security_client):
-    issued = _create_identity(security_client, scopes=["sessions:create"])
+    issued = _create_identity(security_client, scopes=["sessions:create", "tools:invoke", "tool:system.shell.exec"])
     headers = {"Authorization": "Bearer " + issued["token"]}
     created = security_client.post(
         "/v1/machine/sessions",
