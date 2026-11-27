@@ -86,7 +86,7 @@ def test_record_event_rejects_oversized_or_non_object_payloads():
     assert db.added == []
 
 
-def test_record_event_rejects_resume_tokens_but_preserves_safe_machine_prefix():
+def test_record_event_rejects_resume_tokens_without_persisting_the_event():
     db = RecordingSession()
 
     with pytest.raises(DataProtectionBlocked) as error:
