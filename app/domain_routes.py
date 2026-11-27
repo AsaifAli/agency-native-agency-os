@@ -521,7 +521,7 @@ def _outcome_payload(db: Session, item: ProjectOutcome) -> dict:
         "delivery_acceptance_status": item.delivery_acceptance_status,
         "acceptance_results": item.acceptance_results,
         "acceptance_note": item.acceptance_note,
-        "accepted_by_user_id": item.accepted_by_user_id, "accepted_at": item.accepted_at,
+        "decided_by_user_id": item.decided_by_user_id, "decided_at": item.decided_at,
         "latest_value": latest.value if latest else None,
         "latest_measured_at": latest.measured_at if latest else None,
         "measurement_count": count, "impact_status": impact_status,
@@ -657,8 +657,8 @@ def decide_outcome_delivery_acceptance(
     item.delivery_acceptance_status = body.decision
     item.acceptance_results = body.criteria_results
     item.acceptance_note = body.note.strip()
-    item.accepted_by_user_id = p.user.id
-    item.accepted_at = datetime.now(timezone.utc)
+    item.decided_by_user_id = p.user.id
+    item.decided_at = datetime.now(timezone.utc)
     _event(db, org_id, p.user.id, "delivery.outcome_" + body.decision,
            "project_outcome", item.id, body.workspace_id,
            {"criteria_results": body.criteria_results})
