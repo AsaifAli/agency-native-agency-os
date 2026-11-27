@@ -13,7 +13,7 @@ This file is the current status summary. Historical branch comparisons, test log
 | Check | Recorded result | Qualification |
 |---|---|---|
 | Backend pytest suite | **483 passed, 19 skipped, 2 warnings** | PR #58 baseline; PR #65 was frontend-only. PR #68 changes backend security code, so this result must be rerun before merging #68. |
-| Isolated PostgreSQL 16 Compose suite | **105 passed, 2 warnings** | PR #58 baseline in a disposable isolated stack; rerun after PR #66 before treating it as current evidence. |
+| Isolated PostgreSQL 16 Compose suite | **105 passed, 2 warnings** | PR #58 baseline in a disposable isolated stack; rerun on the latest PR #68 head before treating it as current evidence. |
 | Frontend ESLint | 0 errors; 7 existing React Hook dependency warnings | Fresh run after PR #65; no warnings were suppressed. |
 | Frontend TypeScript | Passed | Fresh run after PR #65. |
 | Next.js production build | Passed; 32 static pages generated | Fresh run after PR #65. |
@@ -126,7 +126,7 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 
 ## Immediate work order
 
-1. Exact-main stabilization and frontend checks: **complete for PR #65**. Re-run backend and PostgreSQL suites after PR #66 because it changes security code.
+1. Exact-main stabilization and frontend checks: **complete for PR #65**. Re-run backend and PostgreSQL suites after PR #68 because it changes security code.
 2. Complete tenant/RLS and Data Protection Gateway inventory and negative tests; PR #68 is the current draft hardening bundle.
 3. Artifact/object storage isolation and retention lifecycle.
 4. OS MCP adapter over the Tool Gateway, with all grants fail-closed.
