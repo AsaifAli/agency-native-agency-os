@@ -290,3 +290,41 @@ def test_tool_result_cannot_exempt_arbitrary_fields_from_pii_redaction():
             trusted_internal_id_keys={"notes"},
         )
     assert error.value.code == "INVALID_TRUSTED_IDENTIFIER_POLICY"
+
+
+@pytest.mark.parametrize("secret", [
+    "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+    "github_pat_11AA22BB33CC44DD55_abcdefghijklmnopqrstuvwxyz0123456789",
+    "xoxb-" + "1234567890-abcdefghijklmnop",
+    "AIzaSyA1234567890abcdefghijklmnopqrstuv",
+    "sk_live_" + "1234567890abcdefghijklmnop",
+    "rk_test_1234567890abcdefghijklmnop",
+    "whsec_1234567890abcdefghijklmnop",
+    "SG.1234567890abcdefghijklmnop.1234567890abcdefghijklmnop",
+    "sk-or-v1-1234567890abcdefghijklmnopqrstuv",
+    "re_1234567890abcdefghijklmnopqrstuv",
+    "sb_secret_1234567890abcdefghijklmnopqrstuv",
+    "hf_1234567890abcdefghijklmnopqrstuv",
+])
+def test_sanitize_text_blocks_common_provider_credentials(secret):
+    with pytest.raises(DataProtectionBlocked) as error:
+        sanitize_text(f"Do not forward this credential: {secret}")
+    assert error.value.code == "SECRET_DETECTED"
+    assert secret not in str(error.value)
+
+
+def test_sanitize_text_does_not_block_provider_names_or_security_discussion():
+    cleaned, counts = sanitize_text(
+        "Discuss GitHub PAT rotation, OpenRouter, Resend, Supabase, and Hugging Face integrations."
+    )
+    assert cleaned == (
+        "Discuss GitHub PAT rotation, OpenRouter, Resend, Supabase, and Hugging Face integrations."
+    )
+    assert counts == {}
+
+
+def test_sanitize_text_blocks_generic_secret_and_token_assignments():
+    for value in ("secret=abcdefgh12345678", "refresh_token: abcdefgh12345678"):
+        with pytest.raises(DataProtectionBlocked) as error:
+            sanitize_text(value)
+        assert error.value.code == "SECRET_DETECTED"
