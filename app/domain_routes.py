@@ -608,6 +608,28 @@ def create_project_outcome(
     return _outcome_payload(db, item)
 
 
+@router.get("/projects/{project_id}/outcome-measurements", response_model=list[OutcomeMeasurementOut])
+def list_project_outcome_measurements(
+    org_id: str, project_id: str,
+    workspace_id: str = Query(min_length=1),
+    limit: int = Query(default=500, ge=1, le=1000),
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    require_membership(org_id, p, db)
+    _workspace(db, org_id, workspace_id)
+    _scoped_parent(db, Project, object_id=project_id, org_id=org_id,
+                   workspace_id=workspace_id, label="Project")
+    outcome_ids = db.query(ProjectOutcome.id).filter_by(
+        org_id=org_id, workspace_id=workspace_id, project_id=project_id,
+    ).subquery()
+    return (db.query(OutcomeMeasurement).filter(
+        OutcomeMeasurement.org_id == org_id,
+        OutcomeMeasurement.workspace_id == workspace_id,
+        OutcomeMeasurement.outcome_id.in_(outcome_ids),
+    ).order_by(OutcomeMeasurement.measured_at.desc(), OutcomeMeasurement.created_at.desc())
+     .limit(limit).all())
+
+
 @router.get("/outcomes/{outcome_id}/measurements", response_model=list[OutcomeMeasurementOut])
 def list_outcome_measurements(
     org_id: str, outcome_id: str,
