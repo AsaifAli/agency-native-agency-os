@@ -290,3 +290,208 @@ def test_tool_result_cannot_exempt_arbitrary_fields_from_pii_redaction():
             trusted_internal_id_keys={"notes"},
         )
     assert error.value.code == "INVALID_TRUSTED_IDENTIFIER_POLICY"
+
+
+@pytest.mark.parametrize("secret", [
+    "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+    "github_pat_11AA22BB33CC44DD55_abcdefghijklmnopqrstuvwxyz0123456789",
+    "xoxb-" + "1234567890-abcdefghijklmnop",
+    "AIzaSyA1234567890abcdefghijklmnopqrstuv",
+    "sk_live_" + "1234567890abcdefghijklmnop",
+    "rk_test_1234567890abcdefghijklmnop",
+    "whsec_1234567890abcdefghijklmnop",
+    "SG.1234567890abcdefghijklmnop.1234567890abcdefghijklmnop",
+    "sk-or-v1-1234567890abcdefghijklmnopqrstuv",
+    "re_1234567890abcdefghijklmnopqrstuv",
+    "sb_secret_1234567890abcdefghijklmnopqrstuv",
+    "hf_1234567890abcdefghijklmnopqrstuv",
+])
+def test_sanitize_text_blocks_common_provider_credentials(secret):
+    with pytest.raises(DataProtectionBlocked) as error:
+        sanitize_text(f"Do not forward this credential: {secret}")
+    assert error.value.code == "SECRET_DETECTED"
+    assert secret not in str(error.value)
+
+
+def test_sanitize_text_does_not_block_provider_names_or_security_discussion():
+    cleaned, counts = sanitize_text(
+        "Discuss GitHub PAT rotation, OpenRouter, Resend, Supabase, and Hugging Face integrations."
+    )
+    assert cleaned == (
+        "Discuss GitHub PAT rotation, OpenRouter, Resend, Supabase, and Hugging Face integrations."
+    )
+    assert counts == {}
+
+
+def test_sanitize_text_blocks_generic_secret_and_token_assignments():
+    for value in ("secret=abcdefgh12345678", "refresh_token: abcdefgh12345678"):
+        with pytest.raises(DataProtectionBlocked) as error:
+            sanitize_text(value)
+        assert error.value.code == "SECRET_DETECTED"
+
+
+def test_trusted_internal_id_keys_are_preserved_inside_nested_arrays():
+    protected, report = protect_untrusted_payload(
+        {"results": [{"draft_id": "draft-1234567890"}]},
+        trusted_internal_id_keys={"draft_id"},
+    )
+    assert protected["results"][0]["draft_id"] == "draft-1234567890"
+    assert report.total_redactions == 0
+
+
+def test_protect_execution_request_wraps_provider_event_persistence_callbacks():
+    persisted = []
+    request = _request(
+        persist_resume_event=lambda token, event_id: persisted.append(("resume", token, event_id)),
+        persist_control_event=lambda action, event_id: persisted.append((action, event_id)),
+    )
+    protected, _ = protect_execution_request(request)
+
+    protected.persist_resume_event("resume-token-123", "provider-event-123")
+    protected.persist_control_event("pause", "provider-event-456")
+
+    assert persisted == [
+        ("resume", "resume-token-123", "provider-event-123"),
+        ("pause", "provider-event-456"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "provider_event_id",
+    ["owner@example.test", "sk-or-v1-1234567890abcdefghijklmnopqrstuv", "e" * 201],
+)
+def test_protect_execution_request_blocks_unsafe_provider_event_ids(provider_event_id):
+    persisted = []
+    request = _request(
+        persist_control_event=lambda action, event_id: persisted.append((action, event_id)),
+    )
+    protected, _ = protect_execution_request(request)
+
+    with pytest.raises(DataProtectionBlocked):
+        protected.persist_control_event("pause", provider_event_id)
+    assert persisted == []
+
+
+def test_protect_execution_request_validates_persisted_provider_event_ids_in_metadata():
+    request = _request(request_metadata={
+        "control_request": {
+            "action": "resume",
+            "resume_token": "resume-token-123",
+            "resume_event_id": "owner@example.test",
+        },
+    })
+    with pytest.raises(DataProtectionBlocked) as error:
+        protect_execution_request(request)
+    assert error.value.code == "SENSITIVE_RUNTIME_IDENTIFIER"
+
+
+def test_protect_execution_request_rejects_invalid_control_metadata():
+    request = _request(request_metadata={
+        "control_request": {"action": "run_anything", "resume_token": "resume-token-123"},
+    })
+    with pytest.raises(DataProtectionBlocked) as error:
+        protect_execution_request(request)
+    assert error.value.code == "INVALID_CONTROL_METADATA"
+
+
+def test_protect_execution_request_blocks_unsupported_control_callback_actions():
+    persisted = []
+    request = _request(
+        persist_control_event=lambda action, event_id: persisted.append((action, event_id)),
+    )
+    protected, _ = protect_execution_request(request)
+
+    with pytest.raises(DataProtectionBlocked) as error:
+        protected.persist_control_event("resume", "provider-event-123")
+    assert error.value.code == "INVALID_CONTROL_ACTION"
+    assert persisted == []
+
+
+@pytest.mark.parametrize(
+    "credential_key",
+    ["token", "api_key", "ApiKey", "provider.accessToken", "provider_access_token", "client_secret", "private_key", "password", "authorization"],
+)
+def test_protect_untrusted_payload_blocks_structured_credential_fields(credential_key):
+    with pytest.raises(DataProtectionBlocked) as error:
+        protect_untrusted_payload({credential_key: "opaque-credential-fixture"})
+    assert error.value.code == "SECRET_FIELD_DETECTED"
+
+
+def test_protect_untrusted_payload_allows_explicit_nonsecret_token_metadata():
+    protected, _ = protect_untrusted_payload({
+        "token_prefix": "aos_mi_test.",
+        "token_count": 12,
+        "input_tokens": 100,
+        "output_tokens": 50,
+    })
+    assert protected == {
+        "token_prefix": "aos_mi_test.",
+        "token_count": 12,
+        "input_tokens": 100,
+        "output_tokens": 50,
+    }
+
+
+def test_resume_tokens_are_only_allowed_as_validated_internal_identifiers():
+    with pytest.raises(DataProtectionBlocked) as error:
+        protect_untrusted_payload({"resume_token": "resume-token-123"})
+    assert error.value.code == "SECRET_FIELD_DETECTED"
+
+    protected, _ = protect_untrusted_payload(
+        {"resume_token": "resume-token-123"},
+        trusted_internal_id_keys={"resume_token"},
+    )
+    assert protected["resume_token"] == "resume-token-123"
+
+
+def test_execution_metadata_blocks_structured_credentials_but_allows_resume_control_token():
+    unsafe = _request(request_metadata={"provider": {"api_key": "opaque-credential-fixture"}})
+    with pytest.raises(DataProtectionBlocked) as error:
+        protect_execution_request(unsafe)
+    assert error.value.code == "SECRET_FIELD_DETECTED"
+
+    safe = _request(request_metadata={
+        "control_request": {"action": "resume", "resume_token": "resume-token-123"},
+    })
+    protected, _ = protect_execution_request(safe)
+    assert protected.request_metadata["control_request"]["resume_token"] == "resume-token-123"
+
+
+def test_trusted_internal_metadata_keys_are_case_sensitive():
+    with pytest.raises(DataProtectionBlocked) as error:
+        protect_untrusted_payload(
+            {"ResumeToken": "resume-token-123"},
+            trusted_internal_id_keys={"resume_token"},
+        )
+    assert error.value.code == "SECRET_FIELD_DETECTED"
+
+
+def test_nonsecret_token_metadata_is_type_checked():
+    with pytest.raises(DataProtectionBlocked) as error:
+        protect_untrusted_payload({"token_prefix": "full-token-fixture"})
+    assert error.value.code == "INVALID_TOKEN_PREFIX"
+
+    for invalid_count in ("opaque-token-fixture", -1, 1_000_000_001):
+        with pytest.raises(DataProtectionBlocked) as error:
+            protect_untrusted_payload({"token_count": invalid_count})
+        assert error.value.code == "INVALID_TOKEN_USAGE"
+
+
+def test_protect_untrusted_payload_redacts_structured_personal_fields_recursively():
+    protected, report = protect_untrusted_payload({
+        "contacts": [{
+            "first_name": "test-person-fixture",
+            "email": "test-email-fixture",
+            "phone_number": "test-phone-fixture",
+            "address": "test-address-fixture",
+        }],
+        "company_name": "Example Company",
+    })
+
+    contact = protected["contacts"][0]
+    assert contact["first_name"] == "[REDACTED_PII_FIELD]"
+    assert contact["email"] == "[REDACTED_PII_FIELD]"
+    assert contact["phone_number"] == "[REDACTED_PII_FIELD]"
+    assert contact["address"] == "[REDACTED_PII_FIELD]"
+    assert protected["company_name"] == "Example Company"
+    assert report.redaction_counts["STRUCTURED_PII"] == 4

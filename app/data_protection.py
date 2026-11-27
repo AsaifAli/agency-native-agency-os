@@ -17,6 +17,7 @@ from app.models import DataClass
 MAX_METADATA_BYTES = 32_768
 MAX_EXECUTION_REQUEST_BYTES = 65_536
 MAX_RUNTIME_DETAIL_CHARS = 16_000
+MAX_RUNTIME_IDENTIFIER_CHARS = 200
 MAX_METADATA_DEPTH = 6
 MAX_CONTAINER_ITEMS = 100
 
@@ -44,12 +45,72 @@ _SECRET_PATTERNS = (
     re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
     re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{20,}", re.IGNORECASE),
     re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
+    # Common provider token formats. These are high-confidence prefixes; keep
+    # this list explicit rather than broadly blocking arbitrary opaque IDs.
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
+    re.compile(r"\bAIza[0-9A-Za-z_-]{30,}\b"),
+    re.compile(r"\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}\b"),
+    re.compile(r"\bsk-or-v1-[A-Za-z0-9]{20,}\b"),
+    re.compile(r"\bre_[A-Za-z0-9_]{20,}\b"),
+    re.compile(r"\bsb_secret_[A-Za-z0-9_-]{20,}\b"),
+    re.compile(r"\bhf_[A-Za-z0-9]{20,}\b"),
+    re.compile(r"\bwhsec_[A-Za-z0-9+/=_-]{16,}\b"),
+    re.compile(r"\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\b"),
+    re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}\b"),
+    re.compile(r"\bkey-[0-9a-f]{32}\b", re.IGNORECASE),
     re.compile(
-        r"\b(?:api[_ -]?key|access[_ -]?token|client[_ -]?secret|password)\s*[:=]\s*"
+        r"\b(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|"
+        r"secret|token|password|private[_ -]?key|signing[_ -]?key)\s*[:=]\s*"
         r"[\"']?[^\s\"',;]{8,}",
         re.IGNORECASE,
     ),
 )
+_SENSITIVE_METADATA_KEY = re.compile(
+    r"(?:^|_)(?:authorization|api_key|api_token|access_token|refresh_token|"
+    r"id_token|auth_token|session_token|provider_token|client_secret|secret|"
+    r"secret_key|private_key|signing_key|encryption_key|password|passwd|"
+    r"credential|credentials|cookie|bearer|jwt|token)(?:$|_)",
+    re.IGNORECASE,
+)
+_PII_METADATA_KEY = re.compile(
+    r"(?:^|_)(?:email|phone|mobile|telephone|first_name|last_name|full_name|"
+    r"contact_name|customer_name|person_name|user_name|address|street_address|"
+    r"postal_address|home_address|billing_address|shipping_address|postal_code|"
+    r"zip_code|date_of_birth|birth_date|dob|aadhaar|pan|ssn|national_id|"
+    r"passport|passport_number|driver_license|driving_license|account_number|"
+    r"bank_account|iban|card_number|cvv|ip_address|geolocation|latitude|longitude)"
+    r"(?:$|_)",
+    re.IGNORECASE,
+)
+_SAFE_NONSECRET_METADATA_KEYS = frozenset({
+    "token_prefix", "token_count", "input_token_count", "output_token_count",
+    "input_tokens", "output_tokens", "tokens_used",
+})
+_TOKEN_USAGE_KEYS = _SAFE_NONSECRET_METADATA_KEYS - {"token_prefix"}
+_MACHINE_TOKEN_PREFIX = re.compile(r"^aos_mi_[A-Za-z0-9_-]{1,36}\.$")
+
+
+def _normalize_metadata_key(key: str) -> str:
+    normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", key)
+    normalized = re.sub(r"([A-Z])([A-Z][a-z])", r"\1_\2", normalized)
+    return normalized.lower().replace("-", "_").replace(".", "_").replace(" ", "_")
+
+
+def _is_structured_pii_key(key: str) -> bool:
+    return bool(_PII_METADATA_KEY.search(_normalize_metadata_key(key)))
+
+
+def _is_sensitive_metadata_key(
+    key: str, trusted_internal_id_keys: frozenset[str],
+) -> bool:
+    normalized = _normalize_metadata_key(key)
+    if normalized in _SAFE_NONSECRET_METADATA_KEYS or key in trusted_internal_id_keys:
+        return False
+    return bool(_SENSITIVE_METADATA_KEY.search(normalized))
+
+
 _EMAIL = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 _AADHAAR = re.compile(r"(?<!\d)(?:\d{4}[ -]?){2}\d{4}(?!\d)")
 _PAN = re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b", re.IGNORECASE)
@@ -136,7 +197,10 @@ def _sanitize_value(
     if isinstance(value, list):
         if len(value) > MAX_CONTAINER_ITEMS:
             raise DataProtectionBlocked("METADATA_TOO_LARGE")
-        return [_sanitize_value(item, counts, depth + 1) for item in value]
+        return [
+            _sanitize_value(item, counts, depth + 1, trusted_internal_id_keys)
+            for item in value
+        ]
     if isinstance(value, dict):
         if len(value) > MAX_CONTAINER_ITEMS:
             raise DataProtectionBlocked("METADATA_TOO_LARGE")
@@ -144,11 +208,27 @@ def _sanitize_value(
         for key, item in value.items():
             if not isinstance(key, str):
                 raise DataProtectionBlocked("INVALID_METADATA_KEY")
+            normalized_key = _normalize_metadata_key(key)
+            if _is_sensitive_metadata_key(key, trusted_internal_id_keys):
+                raise DataProtectionBlocked("SECRET_FIELD_DETECTED")
+            if normalized_key == "token_prefix":
+                if not isinstance(item, str) or not _MACHINE_TOKEN_PREFIX.fullmatch(item):
+                    raise DataProtectionBlocked("INVALID_TOKEN_PREFIX")
+            if normalized_key in _TOKEN_USAGE_KEYS and (
+                isinstance(item, bool)
+                or not isinstance(item, (int, float))
+                or not math.isfinite(item)
+            ):
+                raise DataProtectionBlocked("INVALID_TOKEN_USAGE")
             safe_key, found = sanitize_text(key)
             for label, count in found.items():
                 counts[label] = counts.get(label, 0) + count
             if safe_key in cleaned:
                 raise DataProtectionBlocked("DUPLICATE_SANITIZED_METADATA_KEY")
+            if _is_structured_pii_key(key):
+                counts["STRUCTURED_PII"] = counts.get("STRUCTURED_PII", 0) + 1
+                cleaned[safe_key] = "[REDACTED_PII_FIELD]"
+                continue
             if safe_key in trusted_internal_id_keys:
                 if not isinstance(item, str):
                     raise DataProtectionBlocked("INVALID_RUNTIME_IDENTIFIER")
@@ -176,7 +256,7 @@ def _validate_runtime_identifier(
     """Validate opaque database IDs separately from provider-returned identifiers."""
     if value is None:
         return None
-    if not isinstance(value, str):
+    if not isinstance(value, str) or len(value) > MAX_RUNTIME_IDENTIFIER_CHARS:
         raise DataProtectionBlocked("INVALID_RUNTIME_IDENTIFIER")
     if any(pattern.search(value) for pattern in _SECRET_PATTERNS):
         raise DataProtectionBlocked("SECRET_DETECTED")
@@ -203,7 +283,9 @@ def protect_untrusted_payload(
     if _bounded_json_size(payload) > MAX_EXECUTION_REQUEST_BYTES:
         raise DataProtectionBlocked("UNTRUSTED_PAYLOAD_TOO_LARGE")
     counts: dict[str, int] = {}
-    allowed_internal_id_keys = {"draft_id", "lead_id", "research_record_id"}
+    allowed_internal_id_keys = {
+        "draft_id", "lead_id", "research_record_id", "resume_token",
+    }
     if not set(trusted_internal_id_keys).issubset(allowed_internal_id_keys):
         raise DataProtectionBlocked("INVALID_TRUSTED_IDENTIFIER_POLICY")
     protected = _sanitize_value(payload, counts, trusted_internal_id_keys=frozenset(trusted_internal_id_keys))
@@ -251,6 +333,26 @@ def protect_execution_request(
     if _bounded_json_size(metadata) > MAX_METADATA_BYTES:
         raise DataProtectionBlocked("METADATA_TOO_LARGE")
 
+    control_request = metadata.get("control_request")
+    if control_request is not None:
+        if not isinstance(control_request, dict):
+            raise DataProtectionBlocked("INVALID_CONTROL_METADATA")
+        action = control_request.get("action")
+        if not isinstance(action, str) or action not in {"resume", "pause", "cancel"}:
+            raise DataProtectionBlocked("INVALID_CONTROL_METADATA")
+        for identifier_key in (
+            "resume_token", "resume_event_id", "interrupt_event_id",
+        ):
+            identifier = control_request.get(identifier_key)
+            if identifier is not None:
+                _validate_runtime_identifier(identifier)
+        interrupt_action = control_request.get("interrupt_action")
+        if interrupt_action is not None and (
+            not isinstance(interrupt_action, str)
+            or interrupt_action not in {"pause", "cancel"}
+        ):
+            raise DataProtectionBlocked("INVALID_CONTROL_METADATA")
+
     counts: dict[str, int] = {}
     identifier_fields = {
         "org_id": request.org_id,
@@ -280,7 +382,9 @@ def protect_execution_request(
     raw_payload = {**safe_identifiers, **values, "request_metadata": metadata}
     if _bounded_json_size(raw_payload) > MAX_EXECUTION_REQUEST_BYTES:
         raise DataProtectionBlocked("EXECUTION_REQUEST_TOO_LARGE")
-    safe_metadata = _sanitize_value(metadata, counts)
+    safe_metadata = _sanitize_value(
+        metadata, counts, trusted_internal_id_keys=frozenset({"resume_token"}),
+    )
     if _bounded_json_size(safe_metadata) > MAX_METADATA_BYTES:
         raise DataProtectionBlocked("METADATA_TOO_LARGE")
     cleaned = {
@@ -292,13 +396,26 @@ def protect_execution_request(
         raise DataProtectionBlocked("EXECUTION_REQUEST_TOO_LARGE")
 
     original_persist_callback = request.persist_external_run_id
+    original_persist_resume_event = request.persist_resume_event
+    original_persist_control_event = request.persist_control_event
 
     def persist_protected_external_run_id(external_run_id: str) -> None:
-        if not isinstance(external_run_id, str) or not external_run_id:
-            raise DataProtectionBlocked("INVALID_RUNTIME_IDENTIFIER")
         safe_external_run_id = _validate_runtime_identifier(external_run_id)
         if original_persist_callback is not None:
             original_persist_callback(safe_external_run_id)
+
+    def persist_protected_resume_event(resume_token: str, provider_event_id: str) -> None:
+        safe_resume_token = _validate_runtime_identifier(resume_token)
+        safe_provider_event_id = _validate_runtime_identifier(provider_event_id)
+        if original_persist_resume_event is not None:
+            original_persist_resume_event(safe_resume_token, safe_provider_event_id)
+
+    def persist_protected_control_event(action: str, provider_event_id: str) -> None:
+        if not isinstance(action, str) or action not in {"pause", "cancel"}:
+            raise DataProtectionBlocked("INVALID_CONTROL_ACTION")
+        safe_provider_event_id = _validate_runtime_identifier(provider_event_id)
+        if original_persist_control_event is not None:
+            original_persist_control_event(action, safe_provider_event_id)
 
     protected = replace(
         request,
@@ -312,6 +429,14 @@ def protect_execution_request(
         persist_external_run_id=(
             persist_protected_external_run_id
             if original_persist_callback is not None else None
+        ),
+        persist_resume_event=(
+            persist_protected_resume_event
+            if original_persist_resume_event is not None else None
+        ),
+        persist_control_event=(
+            persist_protected_control_event
+            if original_persist_control_event is not None else None
         ),
     )
     return protected, DataProtectionReport(redaction_counts=dict(counts))

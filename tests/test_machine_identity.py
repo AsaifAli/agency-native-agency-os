@@ -1210,3 +1210,84 @@ def test_tool_discovery_hides_tools_that_require_unavailable_approval_adapter(
     assert response.status_code == 200
     assert response.json()["tools"] == []
 
+def test_tool_gateway_enforces_session_call_limit_allowlist_and_idempotent_replay(
+    security_client,
+):
+    from fastapi import HTTPException
+    from app.machine_identity import authenticate_machine_token, create_agent_session
+    from app.tool_gateway import invoke_registered_tool
+
+    issued = _create_identity(
+        security_client,
+        scopes=[
+            "sessions:create",
+            "tools:invoke",
+            "tool:system.health.read",
+        ],
+        classes=["public"],
+    )
+    db = security_client.factory()
+    try:
+        principal = authenticate_machine_token(
+            "Bearer " + issued["token"], db
+        )
+        session = create_agent_session(
+            db,
+            principal,
+            purpose="Bounded tool session",
+            data_class="public",
+            ttl_seconds=600,
+        )
+        db.commit()
+
+        first = invoke_registered_tool(
+            db,
+            principal,
+            session_id=session.id,
+            tool_key="system.health.read",
+            payload={},
+            idempotency_key="health-session-call-01",
+            allowed_tool_keys={"system.health.read"},
+            max_calls_per_session=1,
+        )
+        assert first["status"] == "succeeded"
+
+        replay = invoke_registered_tool(
+            db,
+            principal,
+            session_id=session.id,
+            tool_key="system.health.read",
+            payload={},
+            idempotency_key="health-session-call-01",
+            allowed_tool_keys={"system.health.read"},
+            max_calls_per_session=1,
+        )
+        assert replay["replayed"] is True
+
+        with pytest.raises(HTTPException) as limited:
+            invoke_registered_tool(
+                db,
+                principal,
+                session_id=session.id,
+                tool_key="system.health.read",
+                payload={},
+                idempotency_key="health-session-call-02",
+                allowed_tool_keys={"system.health.read"},
+                max_calls_per_session=1,
+            )
+        assert limited.value.status_code == 429
+
+        with pytest.raises(HTTPException) as disallowed:
+            invoke_registered_tool(
+                db,
+                principal,
+                session_id=session.id,
+                tool_key="system.health.read",
+                payload={},
+                idempotency_key="health-session-call-03",
+                allowed_tool_keys={"revenue.lead.research.capture"},
+                max_calls_per_session=10,
+            )
+        assert disallowed.value.status_code == 403
+    finally:
+        db.close()

@@ -15,8 +15,13 @@ from app.data_protection import DataProtectionBlocked, sanitize_text
 
 _SENSITIVE_FIELD = re.compile(
     r"(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|"
-    r"client[_-]?secret|password|passwd|credential|cookie|session[_-]?id|"
-    r"email|phone|mobile|address|aadhaar|pan|ssn|card[_-]?number)",
+    r"id[_-]?token|auth[_-]?token|token|client[_-]?secret|secret|secret[_-]?key|"
+    r"private[_-]?key|signing[_-]?key|encryption[_-]?key|jwt|bearer|password|"
+    r"passwd|credential|cookie|session[_-]?id|email|phone|mobile|address|"
+    r"first[_-]?name|last[_-]?name|full[_-]?name|contact[_-]?name|"
+    r"customer[_-]?name|user[_-]?name|date[_-]?of[_-]?birth|birth[_-]?date|dob|"
+    r"aadhaar|pan|ssn|national[_-]?id|passport|card[_-]?number|cvv|"
+    r"account[_-]?number|bank[_-]?account|iban|postal[_-]?code|zip[_-]?code)",
     re.IGNORECASE,
 )
 _REDACTED = "[REDACTED]"

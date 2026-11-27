@@ -18,7 +18,9 @@ def record_event(
     # accidentally persist raw contact details or credentials.
     if payload is not None and not isinstance(payload, dict):
         raise DataProtectionBlocked("INVALID_UNTRUSTED_PAYLOAD")
-    safe_payload, _report = protect_untrusted_payload(payload or {})
+    safe_payload, _report = protect_untrusted_payload(
+        payload or {}, trusted_internal_id_keys={"resume_token"},
+    )
     event = AuditEvent(
         org_id=org_id,
         workspace_id=workspace_id,
