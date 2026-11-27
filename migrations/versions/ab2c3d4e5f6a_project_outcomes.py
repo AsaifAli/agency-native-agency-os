@@ -183,13 +183,13 @@ def upgrade() -> None:
                     RETURN NEW;
                 END IF;
                 IF ROW(
-                    NEW.org_id, NEW.workspace_id, NEW.project_id, NEW.title,
+                    NEW.id, NEW.org_id, NEW.workspace_id, NEW.project_id, NEW.title,
                     NEW.problem_statement, NEW.desired_outcome, NEW.metric_name,
                     NEW.metric_unit, NEW.direction, NEW.baseline_value,
                     NEW.target_value, NEW.target_date, NEW.measurement_method,
                     NEW.acceptance_criteria::text, NEW.owner_user_id, NEW.created_at
                 ) IS DISTINCT FROM ROW(
-                    OLD.org_id, OLD.workspace_id, OLD.project_id, OLD.title,
+                    OLD.id, OLD.org_id, OLD.workspace_id, OLD.project_id, OLD.title,
                     OLD.problem_statement, OLD.desired_outcome, OLD.metric_name,
                     OLD.metric_unit, OLD.direction, OLD.baseline_value,
                     OLD.target_value, OLD.target_date, OLD.measurement_method,
