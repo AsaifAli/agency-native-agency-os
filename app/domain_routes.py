@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import get_principal, has_founder_authority, require_membership, require_role, require_founder_authority, require_workspace_access_from_context, Principal
@@ -619,9 +620,11 @@ def list_project_outcome_measurements(
     _workspace(db, org_id, workspace_id)
     _scoped_parent(db, Project, object_id=project_id, org_id=org_id,
                    workspace_id=workspace_id, label="Project")
-    outcome_ids = db.query(ProjectOutcome.id).filter_by(
-        org_id=org_id, workspace_id=workspace_id, project_id=project_id,
-    ).subquery()
+    outcome_ids = select(ProjectOutcome.id).where(
+        ProjectOutcome.org_id == org_id,
+        ProjectOutcome.workspace_id == workspace_id,
+        ProjectOutcome.project_id == project_id,
+    )
     return (db.query(OutcomeMeasurement).filter(
         OutcomeMeasurement.org_id == org_id,
         OutcomeMeasurement.workspace_id == workspace_id,
