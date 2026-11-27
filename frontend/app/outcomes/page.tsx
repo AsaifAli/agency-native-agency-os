@@ -208,7 +208,7 @@ export default function OutcomesPage() {
     try {
       await api(`/v1/orgs/${orgId()}/outcomes/${id}/acceptance`, { method: "POST", body: JSON.stringify({ workspace_id: workspaceId, decision, criteria_results, note }) });
       setNotice(`Delivery ${decision}; decision recorded in the audit trail.`); await refresh();
-    } catch (e) { setError((e as Error).message); throw e; }
+    } catch (e) { setError((e as Error).message); }
   }
 
   return <Page eyebrow="RESULTS AS A SERVICE" title="Client Outcomes" description="Track agreed business results separately from delivery completion and QA evidence.">
