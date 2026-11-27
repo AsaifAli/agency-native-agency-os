@@ -137,6 +137,16 @@ def test_resume_paused_execution_queues_same_provider_session_and_rotates_token(
         workspace_id=ctx["workspace_id"], actor_user_id=ctx["user_id"],
     )
     ctx["db"].commit()
+    from app.models import AuditEvent
+    audit_event = (
+        ctx["db"].query(AuditEvent)
+        .filter_by(event_type="execution.resume_requested", resource_id=execution.id)
+        .order_by(AuditEvent.created_at.desc())
+        .first()
+    )
+    assert audit_event is not None
+    assert audit_event.payload == {"provider_session_reuse_required": True}
+    assert "resume_token" not in audit_event.payload
     control = resumed.request_metadata["control_request"]
     assert resumed.status == ExecutionStatus.queued
     assert control["action"] == "resume"
