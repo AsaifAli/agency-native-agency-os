@@ -59,3 +59,12 @@ Pricing, contracts, scope commitments, sensitive communications and production r
 - Not replacing security, reliability, engineering discipline or client accountability with autonomous agents.
 
 **Our standard:** deliver the right AI solution to achieve an agreed, measurable result—and remain accountable for the quality, safety and operation of the solution within the agreed engagement.
+
+
+## Outcome tracking in the Agency OS
+
+The OS represents each engagement's intended result as a project outcome with a problem statement, desired outcome, metric, unit, baseline, target, direction, measurement method and explicit acceptance criteria. Outcome measurements are separate, source-backed observations. The latest observation is compared deterministically with the agreed target; no task, milestone, agent execution or synthetic evaluation can silently stand in for measured client impact.
+
+Delivery acceptance is a separate founder-only decision. Each agreed criterion must receive an explicit result and the decision is audited. A delivery can be accepted while business impact is still being measured, and an accepted delivery can later miss its impact target. Measurement records are append-only and workspace-scoped. Supporting evaluation runs and delivery milestones can be linked as context, not misrepresented as business-impact measurements.
+
+This is the first native outcome-tracking slice. It does not yet provide automatic KPI ingestion, client portal sign-off, baseline discovery, cohort/statistical analysis, or verified external impact attestations.
