@@ -7,7 +7,12 @@ import Notice from "@/components/notice";
 import { api, orgId, type Workspace } from "@/lib/api";
 
 type Project = { id: string; workspace_id: string; name: string; status: string };
+type Measurement = {
+  id: string; value: string; measured_at: string; source_type: string;
+  source_reference: string; evidence_summary: string;
+};
 type Outcome = {
+  measurements: Measurement[];
   id: string; workspace_id: string; project_id: string; title: string;
   problem_statement: string; desired_outcome: string; metric_name: string;
   metric_unit: string; direction: "increase" | "decrease";
@@ -86,6 +91,18 @@ function OutcomeCard({ outcome, onMeasure, onDecide }: {
       </div>
     </section>}
     <details style={{ marginTop: 14 }}>
+      <summary className="panel-title">Measurement history ({outcome.measurements.length})</summary>
+      {outcome.measurements.length ? <div className="activity" style={{ marginTop: 12 }}>{outcome.measurements.map(row =>
+        <div className="activity-row" key={row.id}>
+          <span className="activity-dot"/>
+          <div><div className="activity-title">{row.value} · {row.source_type.replaceAll("_", " ")}</div>
+            <div className="activity-meta">{new Date(row.measured_at).toLocaleString()} · {row.source_reference}</div>
+            <div className="activity-meta">{row.evidence_summary}</div>
+          </div>
+        </div>
+      )}</div> : <div className="empty">No measurement evidence recorded yet.</div>}
+    </details>
+    <details style={{ marginTop: 14 }}>
       <summary className="panel-title">Record a business-impact measurement</summary>
       <form onSubmit={measure} className="form-grid" style={{ marginTop: 12 }}>
         <label className="field">Measured value<input type="number" step="any" required value={value} onChange={e => setValue(e.target.value)} /></label>
@@ -112,13 +129,22 @@ export default function OutcomesPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
+  async function loadOutcomeRows(selectedProject: string, selectedWorkspace: string) {
+    const rows = await api<Outcome[]>(`/v1/orgs/${orgId()}/projects/${selectedProject}/outcomes?workspace_id=${encodeURIComponent(selectedWorkspace)}`);
+    const expanded = await Promise.all(rows.map(async outcome => ({
+      ...outcome,
+      measurements: await api<Measurement[]>(`/v1/orgs/${orgId()}/outcomes/${outcome.id}/measurements?workspace_id=${encodeURIComponent(selectedWorkspace)}`),
+    })));
+    setOutcomes(expanded);
+  }
+
   async function loadProjects(selectedWorkspace = workspaceId) {
     if (!selectedWorkspace) return;
     const rows = await api<Project[]>(`/v1/orgs/${orgId()}/projects?workspace_id=${encodeURIComponent(selectedWorkspace)}`);
     setProjects(rows);
     const chosen = rows.some(row => row.id === projectId) ? projectId : rows[0]?.id || "";
     setProjectId(chosen);
-    if (chosen) setOutcomes(await api<Outcome[]>(`/v1/orgs/${orgId()}/projects/${chosen}/outcomes?workspace_id=${encodeURIComponent(selectedWorkspace)}`));
+    if (chosen) await loadOutcomeRows(chosen, selectedWorkspace);
     else setOutcomes([]);
   }
 
@@ -135,7 +161,7 @@ export default function OutcomesPage() {
           setProjects(items);
           const selected = items[0]?.id || "";
           setProjectId(selected);
-          if (selected) setOutcomes(await api<Outcome[]>(`/v1/orgs/${orgId()}/projects/${selected}/outcomes?workspace_id=${encodeURIComponent(chosen)}`));
+          if (selected) await loadOutcomeRows(selected, chosen);
         }
       } catch (e) { setError((e as Error).message); }
     }
@@ -143,7 +169,7 @@ export default function OutcomesPage() {
   }, []);
 
   async function refresh() {
-    if (projectId && workspaceId) setOutcomes(await api<Outcome[]>(`/v1/orgs/${orgId()}/projects/${projectId}/outcomes?workspace_id=${encodeURIComponent(workspaceId)}`));
+    if (projectId && workspaceId) await loadOutcomeRows(projectId, workspaceId);
   }
 
   async function createProject(e: FormEvent) {
@@ -192,7 +218,7 @@ export default function OutcomesPage() {
       <div className="panel-head"><div className="panel-title">Workspace and project</div></div>
       <div className="two-col">
         <label className="field">Workspace<select value={workspaceId} onChange={async e => { const id = e.target.value; setWorkspaceId(id); setProjectId(""); setOutcomes([]); try { await loadProjects(id); } catch (err) { setError((err as Error).message); } }}>{workspaces.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
-        <label className="field">Project<select value={projectId} onChange={async e => { const id = e.target.value; setProjectId(id); try { setOutcomes(id ? await api<Outcome[]>(`/v1/orgs/${orgId()}/projects/${id}/outcomes?workspace_id=${encodeURIComponent(workspaceId)}`) : []); } catch (err) { setError((err as Error).message); } }}>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+        <label className="field">Project<select value={projectId} onChange={async e => { const id = e.target.value; setProjectId(id); try { if (id) await loadOutcomeRows(id, workspaceId); else setOutcomes([]); } catch (err) { setError((err as Error).message); } }}>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
       </div>
       <form onSubmit={createProject} className="inline-form">
         <label className="field">New project<input required minLength={2} maxLength={240} value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="e.g. Customer support automation" /></label>
