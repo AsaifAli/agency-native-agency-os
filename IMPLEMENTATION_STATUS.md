@@ -73,7 +73,7 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 - OS-owned machine identities use one-time displayed credentials stored as digests, bounded expiry, revocation and workspace/data-class scopes.
 - Agent sessions are persisted and bounded. Tool calls pass machine/session checks, data-class policy, input/output protection, typed schema validation, workforce capability checks, idempotency, durable invocation records and audit.
 - Code-owned registry currently includes read-only health and public lead-research draft capture. Research capture validates bounded public HTTPS source references and stores a founder-review draft; it does not create a CRM contact/lead or send outreach.
-- Tool Gateway is an authorization foundation, not a general-purpose agent tool platform. No full Streamable HTTP MCP adapter has been integrated. Tool grants for broader client-data or side-effecting operations remain disabled. The MCP adapter must remain a protocol façade over OS-owned authorization, budgets, audit and durable state.
+- Tool Gateway is an authorization foundation, not a general-purpose agent tool platform. No full Streamable HTTP MCP adapter has been integrated. Tool grants for broader client-data or side-effecting operations remain disabled. The workforce capability model stores `budget_minor`, but the current Tool Gateway and Managed Agents callback do not reserve or settle spend against it; it is not yet an enforceable runtime spending cap. The MCP adapter must remain a protocol façade over OS-owned authorization, budget reservation/settlement, audit and durable state.
 
 ### Revenue, Delivery and RAAS
 - CRM includes client/contact/lead/opportunity records, append-only contact activity timeline, source/qualification notes and suppression reasons.
@@ -99,7 +99,7 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 
 ### P1 — runtime, Revenue and Delivery
 - Implement a protocol-only OS MCP adapter against the current Tool Gateway; enforce OS policy at every tool invocation and keep grants disabled until negative tests pass.
-- Add delegated machine identities, per-agent budgets, tool-level budget enforcement, versioned agent runtime configuration, controlled promotion and rollback.
+- Add delegated machine identities, per-agent budget reservation/settlement and tool-level enforcement (the current `budget_minor` field is configuration metadata only), versioned agent runtime configuration, controlled promotion and rollback.
 - Verify worker crash/restart, concurrent claims, lease expiry, retry/DLQ, cancellation races, duplicate outbox delivery and provider timeout reconciliation under multi-worker execution.
 - Register only approved, idempotent outbox handlers; no production external handlers are currently enabled.
 - Implement prospect research/enrichment with source provenance, dedupe/merge review, attribution and confidence.
