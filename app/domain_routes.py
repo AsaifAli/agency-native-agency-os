@@ -595,7 +595,7 @@ def create_project_outcome(
         desired_outcome=protected_text["desired_outcome"], metric_name=protected_text["metric_name"],
         metric_unit=protected_text["metric_unit"], direction=body.direction,
         baseline_value=body.baseline_value, target_value=body.target_value,
-        target_date=body.target_date, measurement_method=body.measurement_method.strip(),
+        target_date=body.target_date, measurement_method=protected_text["measurement_method"],
         acceptance_criteria=criteria, owner_user_id=p.user.id,
     )
     db.add(item)
@@ -667,7 +667,8 @@ def create_outcome_measurement(
                "outcome_id": outcome.id, "source_type": item.source_type,
                "supporting_evaluation_run_id": item.supporting_evaluation_run_id,
                "redaction_counts": {
-                   **source_redactions, **evidence_redactions,
+                   key: source_redactions.get(key, 0) + evidence_redactions.get(key, 0)
+                   for key in set(source_redactions) | set(evidence_redactions)
                },
            })
     db.commit()
@@ -683,8 +684,11 @@ def decide_outcome_delivery_acceptance(
     require_membership(org_id, p, db)
     require_founder_authority(db, org_id, p.user.id)
     _workspace(db, org_id, body.workspace_id)
-    item = _scoped_parent(db, ProjectOutcome, object_id=outcome_id, org_id=org_id,
-                          workspace_id=body.workspace_id, label="Project outcome")
+    item = db.query(ProjectOutcome).filter_by(
+        id=outcome_id, org_id=org_id, workspace_id=body.workspace_id,
+    ).with_for_update().first()
+    if item is None:
+        raise HTTPException(404, "Project outcome not found")
     if item.delivery_acceptance_status != "pending":
         raise HTTPException(409, "Delivery acceptance has already been decided")
     expected = set(item.acceptance_criteria)
