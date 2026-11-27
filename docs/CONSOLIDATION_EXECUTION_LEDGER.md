@@ -3,7 +3,7 @@
 **Last reconciled:** 2026-11-27  
 **Release candidate:** `main` at `c5ec7b462835f592edb0db1a31564401423e3467`
 **Latest merged work:** PR #65 — [System, Light and Dark dashboard themes](https://github.com/AsaifAli/agency-native-agency-os/pull/65); PR #58 remains the prior backend consolidation baseline.
-**Consolidated security work:** PR #68 combines tool-session bounds and Data Protection Gateway hardening. Founder-environment suites passed on the earlier code/test head (530 Python tests passed, 20 skipped; isolated PostgreSQL 16 suite 106 passed). Independent review subsequently removed generic audit persistence of resume tokens and made machine-scope allowlists plus a 100-successful-call session ceiling mandatory at every Tool Gateway entry point. Those newest regressions still require rerun.
+**Consolidated security work:** PR #68 combines tool-session bounds and Data Protection Gateway hardening. Founder-environment suites passed on the earlier code/test head (530 Python tests passed, 20 skipped; isolated PostgreSQL 16 suite 106 passed). Independent review subsequently removed generic audit persistence of resume tokens, made machine-scope allowlists plus a 100-successful-call session ceiling mandatory at every Tool Gateway entry point, and added a regression for the worker's revoked global workspace enumerator and one-workspace maintenance claim. Those newest regressions still require rerun.
 **Release posture:** **NO-GO for production** — implementation and disposable-environment tests are not production acceptance.
 
 This document supersedes the pre-merge integration ledger below. PR #58 is the prior backend consolidation baseline and PR #65 is the latest merged dashboard change. Their old candidate-branch queues, merge blockers and workflow bootstrap failures are historical, not current merge tasks. GitHub Actions are intentionally excluded from this workstream per founder direction.
@@ -47,7 +47,7 @@ This document supersedes the pre-merge integration ledger below. PR #58 is the p
 
 ## Security controls on main and active hardening
 
-- Worker database role is intended to be `NOBYPASSRLS`; production startup verifies the role and process role.
+- Worker database role is intended to be `NOBYPASSRLS`; production startup verifies the role and process role. The legacy `worker_workspace_scopes()` SECURITY DEFINER function is explicitly revoked from `PUBLIC` and `agency_os_worker` at the RLS cutover; the later maintenance path uses a 15–300 second, hash-bound, single-workspace claim and transaction-bound context. A new static migration regression asserts the revoke, bounded claim, context/release functions and ACL-preserving return-type fix; execution remains pending.
 - Worker execution and maintenance scope is established by database-verified, capability-bound claim/renewal operations, not caller-forgeable machine GUCs.
 - Human workspace grants are restored after the worker RLS cutover.
 - Orchestration plan/delegation links are now workspace-scoped with composite FKs to both parents and forced RLS. The migration backfills from the parent plan and refuses existing orphan/cross-workspace rows.
