@@ -1210,12 +1210,15 @@ def test_tool_discovery_hides_tools_that_require_unavailable_approval_adapter(
     assert response.status_code == 200
     assert response.json()["tools"] == []
 
-def test_tool_gateway_enforces_session_call_limit_allowlist_and_idempotent_replay(
-    security_client,
+def test_tool_gateway_enforces_machine_scope_allowlist_default_limit_and_idempotent_replay(
+    security_client, monkeypatch,
 ):
     from fastapi import HTTPException
     from app.machine_identity import authenticate_machine_token, create_agent_session
     from app.tool_gateway import invoke_registered_tool
+    import app.tool_gateway as gateway
+
+    monkeypatch.setattr(gateway, "DEFAULT_MAX_TOOL_CALLS_PER_SESSION", 1)
 
     issued = _create_identity(
         security_client,
@@ -1247,8 +1250,6 @@ def test_tool_gateway_enforces_session_call_limit_allowlist_and_idempotent_repla
             tool_key="system.health.read",
             payload={},
             idempotency_key="health-session-call-01",
-            allowed_tool_keys={"system.health.read"},
-            max_calls_per_session=1,
         )
         assert first["status"] == "succeeded"
 
@@ -1259,8 +1260,6 @@ def test_tool_gateway_enforces_session_call_limit_allowlist_and_idempotent_repla
             tool_key="system.health.read",
             payload={},
             idempotency_key="health-session-call-01",
-            allowed_tool_keys={"system.health.read"},
-            max_calls_per_session=1,
         )
         assert replay["replayed"] is True
 
@@ -1272,8 +1271,6 @@ def test_tool_gateway_enforces_session_call_limit_allowlist_and_idempotent_repla
                 tool_key="system.health.read",
                 payload={},
                 idempotency_key="health-session-call-02",
-                allowed_tool_keys={"system.health.read"},
-                max_calls_per_session=1,
             )
         assert limited.value.status_code == 429
 
@@ -1282,11 +1279,9 @@ def test_tool_gateway_enforces_session_call_limit_allowlist_and_idempotent_repla
                 db,
                 principal,
                 session_id=session.id,
-                tool_key="system.health.read",
+                tool_key="revenue.lead.research.capture",
                 payload={},
                 idempotency_key="health-session-call-03",
-                allowed_tool_keys={"revenue.lead.research.capture"},
-                max_calls_per_session=10,
             )
         assert disallowed.value.status_code == 403
     finally:
