@@ -1078,3 +1078,91 @@ def test_denied_tool_invocation_is_audited_without_raw_input(security_client):
         assert "sensitive.owner@example.test" not in str(event.payload)
     finally:
         db.close()
+
+
+
+def test_agent_tool_discovery_requires_an_active_workforce_capability(security_client):
+    from app.machine_identity import issue_machine_credential
+    from app.models import Agent, DataClass
+    from app.security_models import MachineIdentity
+    from app.workforce_models import WorkforceCapability, WorkforceMember
+
+    now = datetime.now(timezone.utc)
+    agent = Agent(
+        id="agent-tool-discovery",
+        org_id=security_client.org_id,
+        workspace_id=security_client.workspace_id,
+        name="Tool Discovery Agent",
+        department="Business Development",
+        instructions="Discover only explicitly granted OS tools.",
+        runtime="claude_managed_agents",
+        data_class=DataClass.public,
+        enabled=True,
+    )
+    secret, token_hash, token_prefix = issue_machine_credential()
+    identity = MachineIdentity(
+        org_id=security_client.org_id,
+        workspace_id=security_client.workspace_id,
+        name="Tool Discovery Runtime",
+        subject_type="agent",
+        subject_id=agent.id,
+        token_hash=token_hash,
+        token_prefix=token_prefix,
+        scopes=[
+            "sessions:create",
+            "tools:invoke",
+            "tool:revenue.lead.research.capture",
+        ],
+        allowed_data_classes=["public"],
+        expires_at=now + timedelta(days=1),
+        created_by_user_id=security_client.founder.id,
+    )
+    db = security_client.factory()
+    try:
+        db.add_all([agent, identity])
+        db.commit()
+        headers = {"Authorization": f"Bearer aos_mi_{identity.id}.{secret}"}
+
+        # Machine scopes alone must not advertise an agent tool. The call path
+        # independently rechecks this same workforce capability before dispatch.
+        hidden = security_client.get("/v1/machine/tools", headers=headers)
+        assert hidden.status_code == 200
+        assert hidden.json()["tools"] == []
+
+        member = WorkforceMember(
+            org_id=security_client.org_id,
+            workspace_id=security_client.workspace_id,
+            agent_id=agent.id,
+            member_type="agent",
+            name="Tool Discovery Agent",
+            title="Lead Research Specialist",
+            department_key="business_development_sales",
+            responsibilities=["Capture public research"],
+            autonomy_level=1,
+            status="active",
+            is_founder_reserved=False,
+        )
+        db.add(member)
+        db.flush()
+        db.add(WorkforceCapability(
+            org_id=security_client.org_id,
+            workspace_id=security_client.workspace_id,
+            member_id=member.id,
+            capability_key="public_lead_research",
+            scope="workspace",
+            allowed_data_classes=["public"],
+            allowed_actions=["research.execute"],
+            tool_allowlist=["revenue.lead.research.capture"],
+            budget_minor=0,
+            currency="INR",
+            enabled=True,
+        ))
+        db.commit()
+
+        visible = security_client.get("/v1/machine/tools", headers=headers)
+        assert visible.status_code == 200
+        assert [item["key"] for item in visible.json()["tools"]] == [
+            "revenue.lead.research.capture"
+        ]
+    finally:
+        db.close()
