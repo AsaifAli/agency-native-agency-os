@@ -329,7 +329,7 @@ class ProjectOutcomeOut(BaseModel):
 
 class OutcomeMeasurementCreate(BaseModel):
     workspace_id: str
-    value: Decimal = Field(max_digits=20, decimal_places=6)
+    value: Decimal = Field(max_digits=20, decimal_places=6, allow_inf_nan=False)
     measured_at: datetime | None = None
     source_type: str = Field(pattern="^(agency_measured|client_reported|system_measured)$")
     source_reference: str = Field(min_length=2, max_length=240)
