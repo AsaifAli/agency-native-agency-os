@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_principal, has_founder_authority, require_membership, require_role, require_founder_authority, require_workspace_access_from_context, Principal
 from app.db import get_db
+from app.data_protection import DataProtectionBlocked, sanitize_text
 from app.models import Role, EvaluationRun
 from app.audit import record_event
 from app.telephony.models import OutboxEvent
@@ -494,6 +495,15 @@ def update_opportunity_stage(
     return item
 
 
+
+def _protect_outcome_text(value: str) -> tuple[str, dict[str, int]]:
+    try:
+        return sanitize_text(value)
+    except DataProtectionBlocked as exc:
+        raise HTTPException(422, "Text rejected by data-protection policy") from exc
+
+
+
 def _outcome_payload(db: Session, item: ProjectOutcome) -> dict:
     latest = db.query(OutcomeMeasurement).filter_by(
         org_id=item.org_id, workspace_id=item.workspace_id, outcome_id=item.id,
@@ -553,9 +563,25 @@ def create_project_outcome(
     _write_access(org_id, p, db, body.workspace_id)
     _scoped_parent(db, Project, object_id=project_id, org_id=org_id,
                    workspace_id=body.workspace_id, label="Project")
-    criteria = [value.strip() for value in body.acceptance_criteria]
+    protected_fields = {
+        "title": body.title, "problem_statement": body.problem_statement,
+        "desired_outcome": body.desired_outcome, "metric_name": body.metric_name,
+        "metric_unit": body.metric_unit, "measurement_method": body.measurement_method,
+    }
+    protected_text = {}
+    redactions = {}
+    for key, value in protected_fields.items():
+        protected_text[key], found = _protect_outcome_text(value.strip())
+        redactions.update({name: redactions.get(name, 0) + count for name, count in found.items()})
+    criteria = []
+    for value in body.acceptance_criteria:
+        cleaned, found = _protect_outcome_text(value.strip())
+        criteria.append(cleaned)
+        redactions.update({name: redactions.get(name, 0) + count for name, count in found.items()})
     if any(not value for value in criteria) or len({value.casefold() for value in criteria}) != len(criteria):
         raise HTTPException(422, "Acceptance criteria must be non-empty and unique")
+    if any(not value for value in protected_text.values()):
+        raise HTTPException(422, "Outcome text fields must not be blank")
     if body.baseline_value is not None:
         if body.baseline_value == body.target_value:
             raise HTTPException(422, "Baseline and target must differ")
@@ -565,9 +591,9 @@ def create_project_outcome(
             raise HTTPException(422, "A decrease target must be below its baseline")
     item = ProjectOutcome(
         org_id=org_id, workspace_id=body.workspace_id, project_id=project_id,
-        title=body.title.strip(), problem_statement=body.problem_statement.strip(),
-        desired_outcome=body.desired_outcome.strip(), metric_name=body.metric_name.strip(),
-        metric_unit=body.metric_unit.strip(), direction=body.direction,
+        title=protected_text["title"], problem_statement=protected_text["problem_statement"],
+        desired_outcome=protected_text["desired_outcome"], metric_name=protected_text["metric_name"],
+        metric_unit=protected_text["metric_unit"], direction=body.direction,
         baseline_value=body.baseline_value, target_value=body.target_value,
         target_date=body.target_date, measurement_method=body.measurement_method.strip(),
         acceptance_criteria=criteria, owner_user_id=p.user.id,
@@ -575,7 +601,8 @@ def create_project_outcome(
     db.add(item)
     db.flush()
     _event(db, org_id, p.user.id, "delivery.outcome_defined", "project_outcome",
-           item.id, body.workspace_id, {"project_id": project_id, "metric_name": item.metric_name})
+           item.id, body.workspace_id, {"project_id": project_id, "metric_name": item.metric_name,
+                                       "redaction_counts": redactions})
     db.commit()
     db.refresh(item)
     return _outcome_payload(db, item)
@@ -621,11 +648,15 @@ def create_outcome_measurement(
     if body.milestone_id:
         _scoped_parent(db, Milestone, object_id=body.milestone_id, org_id=org_id,
                        workspace_id=body.workspace_id, label="Milestone")
+    source_reference, source_redactions = _protect_outcome_text(body.source_reference.strip())
+    evidence_summary, evidence_redactions = _protect_outcome_text(body.evidence_summary.strip())
+    if not source_reference or not evidence_summary:
+        raise HTTPException(422, "Measurement source and evidence summary must not be blank")
     item = OutcomeMeasurement(
         org_id=org_id, workspace_id=body.workspace_id, outcome_id=outcome.id,
         value=body.value, measured_at=measured_at, source_type=body.source_type,
-        source_reference=body.source_reference.strip(),
-        evidence_summary=body.evidence_summary.strip(),
+        source_reference=source_reference,
+        evidence_summary=evidence_summary,
         supporting_evaluation_run_id=body.supporting_evaluation_run_id,
         milestone_id=body.milestone_id, created_by=p.user.id,
     )
@@ -635,6 +666,9 @@ def create_outcome_measurement(
            item.id, body.workspace_id, {
                "outcome_id": outcome.id, "source_type": item.source_type,
                "supporting_evaluation_run_id": item.supporting_evaluation_run_id,
+               "redaction_counts": {
+                   **source_redactions, **evidence_redactions,
+               },
            })
     db.commit()
     db.refresh(item)
@@ -661,14 +695,17 @@ def decide_outcome_delivery_acceptance(
         raise HTTPException(409, "Delivery cannot be accepted while an agreed criterion is unmet")
     if body.decision == "rejected" and all(body.criteria_results.values()):
         raise HTTPException(422, "A rejected delivery must identify at least one unmet criterion")
+    acceptance_note, note_redactions = _protect_outcome_text(body.note.strip())
+    if not acceptance_note:
+        raise HTTPException(422, "Acceptance note must not be blank")
     item.delivery_acceptance_status = body.decision
     item.acceptance_results = body.criteria_results
-    item.acceptance_note = body.note.strip()
+    item.acceptance_note = acceptance_note
     item.decided_by_user_id = p.user.id
     item.decided_at = datetime.now(timezone.utc)
     _event(db, org_id, p.user.id, "delivery.outcome_" + body.decision,
            "project_outcome", item.id, body.workspace_id,
-           {"criteria_results": body.criteria_results})
+           {"criteria_results": body.criteria_results, "redaction_counts": note_redactions})
     db.commit()
     db.refresh(item)
     return _outcome_payload(db, item)
