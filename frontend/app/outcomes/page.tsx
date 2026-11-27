@@ -45,7 +45,7 @@ function OutcomeCard({ outcome, onMeasure, onDecide }: {
   const [sourceReference, setSourceReference] = useState("");
   const [evidence, setEvidence] = useState("");
   const [criteria, setCriteria] = useState<Record<string, boolean>>(
-    Object.fromEntries(outcome.acceptance_criteria.map(item => [item, outcome.acceptance_results[item] ?? true]))
+    Object.fromEntries(outcome.acceptance_criteria.map(item => [item, outcome.acceptance_results[item] ?? false]))
   );
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
