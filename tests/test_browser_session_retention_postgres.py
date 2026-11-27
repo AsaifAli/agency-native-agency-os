@@ -45,15 +45,32 @@ def test_browser_session_retention_rpc_is_worker_only_bounded_and_audited():
     old_revoked = BrowserSession(user_id="pending", token_hash=uuid.uuid4().hex + uuid.uuid4().hex,
         expires_at=now + timedelta(days=10), revoked_at=now - timedelta(days=31))
 
+    org_id = None
+    user_id = None
+    session_ids = {}
+
     try:
         with Session(admin_engine) as db:
             db.add_all([org, user])
             db.flush()
-            db.add(Membership(org_id=org.id, user_id=user.id, role=Role.owner))
+            org_id = org.id
+            user_id = user.id
+            db.add(Membership(org_id=org_id, user_id=user_id, role=Role.owner))
+            for label, row in (
+                ("old_expired", old_expired),
+                ("recent_expired", recent_expired),
+                ("active", active),
+                ("old_revoked", old_revoked),
+            ):
+                row.user_id = user_id
+                db.add(row)
             db.flush()
-            for row in (old_expired, recent_expired, active, old_revoked):
-                row.user_id = user.id
-            db.add_all([old_expired, recent_expired, active, old_revoked])
+            session_ids = {
+                "old_expired": old_expired.id,
+                "recent_expired": recent_expired.id,
+                "active": active.id,
+                "old_revoked": old_revoked.id,
+            }
             db.commit()
 
         with app_engine.connect() as connection:
@@ -89,12 +106,17 @@ def test_browser_session_retention_rpc_is_worker_only_bounded_and_audited():
             assert deleted == 2
 
         with Session(admin_engine) as db:
-            remaining = {row.id for row in db.query(BrowserSession).filter_by(user_id=user.id).all()}
-            assert remaining == {recent_expired.id, active.id}
+            remaining = {
+                row.id
+                for row in db.query(BrowserSession).filter_by(user_id=user_id).all()
+            }
+            assert remaining == {session_ids["recent_expired"], session_ids["active"]}
             events = db.query(AuditEvent).filter_by(
-                org_id=org.id, event_type="auth.browser_session_pruned"
+                org_id=org_id, event_type="auth.browser_session_pruned"
             ).all()
-            assert {event.resource_id for event in events} == {old_expired.id, old_revoked.id}
+            assert {event.resource_id for event in events} == {
+                session_ids["old_expired"], session_ids["old_revoked"]
+            }
             assert all(event.payload["reason_code"] == "SESSION_RETENTION_ELAPSED" for event in events)
 
         with pytest.raises(DBAPIError):
@@ -105,10 +127,10 @@ def test_browser_session_retention_rpc_is_worker_only_bounded_and_audited():
     finally:
         # Isolated test admin is the trusted superuser used for cleanup.
         with admin_engine.begin() as connection:
-            if org.id:
-                connection.execute(text("DELETE FROM public.audit_events WHERE org_id = :org"), {"org": org.id})
-                connection.execute(text("DELETE FROM public.browser_sessions WHERE user_id = :user"), {"user": user.id})
-                connection.execute(text("DELETE FROM public.organizations WHERE id = :org"), {"org": org.id})
-                connection.execute(text("DELETE FROM public.users WHERE id = :user"), {"user": user.id})
+            if org_id is not None:
+                connection.execute(text("DELETE FROM public.audit_events WHERE org_id = :org"), {"org": org_id})
+                connection.execute(text("DELETE FROM public.browser_sessions WHERE user_id = :user"), {"user": user_id})
+                connection.execute(text("DELETE FROM public.organizations WHERE id = :org"), {"org": org_id})
+                connection.execute(text("DELETE FROM public.users WHERE id = :user"), {"user": user_id})
         for engine in (admin_engine, app_engine, worker_engine):
             engine.dispose()
