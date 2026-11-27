@@ -62,7 +62,7 @@ function OutcomeCard({ outcome, onMeasure, onDecide }: {
   return <article className="panel">
     <div className="panel-head">
       <div><div className="panel-title">{outcome.title}</div><div className="activity-meta">{outcome.metric_name} · {outcome.metric_unit}</div></div>
-      <span className={`status ${outcome.impact_status === "target_met" ? "success" : "pending"}`}>{status}</span>
+      <span className={`status ${outcome.impact_status === "target_met" ? "approved" : "pending"}`}>{status}</span>
     </div>
     <p>{outcome.desired_outcome}</p>
     <div className="grid stats">
