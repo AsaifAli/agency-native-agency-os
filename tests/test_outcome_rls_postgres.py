@@ -84,6 +84,7 @@ def test_outcome_rows_are_workspace_isolated_and_measurements_are_append_only():
             with pytest.raises(DBAPIError):
                 db.flush()
             db.rollback()
+            set_rls_context(db, user_id=user.id)
             row = db.query(OutcomeMeasurement).filter_by(id=measurement_id).one()
             row.value = 8
             with pytest.raises(DBAPIError):
