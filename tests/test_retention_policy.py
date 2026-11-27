@@ -37,7 +37,7 @@ def test_retention_scrubs_old_session_metadata_and_tool_payloads_but_keeps_tombs
                 org_id=org.id, workspace_id=workspace.id, name="Synthetic agent",
                 subject_type="agent", subject_id="agent-1", token_hash="a" * 64,
                 token_prefix="aos_mi_test", scopes=[], allowed_data_classes=["synthetic"],
-                expires_at=now + timedelta(days=365), created_by_user_id=None,
+                expires_at=now + timedelta(days=365),
             )
             # Machine identities require a creator FK; use a minimal user fixture.
             user = User(email="retention@example.test")
@@ -113,7 +113,7 @@ def test_retention_scrubs_old_session_metadata_and_tool_payloads_but_keeps_tombs
             assert recent_invocation.payload_purged_at is None
 
             events = db.query(AuditEvent).filter(
-                AuditEvent.event_type.in_(( 
+                AuditEvent.event_type.in_((
                     "agent_session.metadata_purged",
                     "tool.invocation.payload_purged",
                 ))
