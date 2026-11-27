@@ -293,8 +293,8 @@ class ProjectOutcomeCreate(BaseModel):
     metric_name: str = Field(min_length=2, max_length=160)
     metric_unit: str = Field(min_length=1, max_length=64)
     direction: str = Field(pattern="^(increase|decrease)$")
-    baseline_value: Decimal | None = Field(default=None, max_digits=20, decimal_places=6)
-    target_value: Decimal = Field(max_digits=20, decimal_places=6)
+    baseline_value: Decimal | None = Field(default=None, max_digits=20, decimal_places=6, allow_inf_nan=False)
+    target_value: Decimal = Field(max_digits=20, decimal_places=6, allow_inf_nan=False)
     target_date: datetime | None = None
     measurement_method: str = Field(min_length=10, max_length=10000)
     acceptance_criteria: list[str] = Field(min_length=1, max_length=20)
