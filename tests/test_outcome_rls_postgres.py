@@ -79,6 +79,11 @@ def test_outcome_rows_are_workspace_isolated_and_measurements_are_append_only():
             set_rls_context(db, user_id=user.id)
             assert db.query(ProjectOutcome).count() == 1
             assert db.query(OutcomeMeasurement).count() == 1
+            outcome_row = db.query(ProjectOutcome).one()
+            outcome_row.target_value = 99
+            with pytest.raises(DBAPIError):
+                db.flush()
+            db.rollback()
             row = db.query(OutcomeMeasurement).filter_by(id=measurement_id).one()
             row.value = 8
             with pytest.raises(DBAPIError):
