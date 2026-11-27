@@ -122,7 +122,7 @@ def upgrade() -> None:
         ),
         sa.UniqueConstraint("org_id", "workspace_id", "id", name="uq_outcome_measurements_scope_id"),
         sa.CheckConstraint(
-            "source_type IN ('agency_measured','client_reported','system_measured','independently_verified')",
+            "source_type IN ('agency_measured','client_reported','system_measured')",
             name="ck_outcome_measurement_source_type",
         ),
     )
@@ -151,7 +151,14 @@ def upgrade() -> None:
                 f'USING {predicate} WITH CHECK {predicate}'
             )
         op.execute("REVOKE ALL ON TABLE public.project_outcomes, public.outcome_measurements FROM agency_os_worker")
-        op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.project_outcomes TO agency_os_app")
+        op.execute("GRANT SELECT, INSERT ON TABLE public.project_outcomes TO agency_os_app")
+        op.execute("REVOKE UPDATE, DELETE ON TABLE public.project_outcomes FROM agency_os_app")
+        op.execute("""
+            GRANT UPDATE (
+                delivery_acceptance_status, acceptance_results, acceptance_note,
+                decided_by_user_id, decided_at, updated_at
+            ) ON TABLE public.project_outcomes TO agency_os_app
+        """)
         op.execute("GRANT SELECT, INSERT ON TABLE public.outcome_measurements TO agency_os_app")
 
         op.execute("""
@@ -183,11 +190,54 @@ def upgrade() -> None:
             BEFORE UPDATE OR DELETE ON public.outcome_measurements
             FOR EACH ROW EXECUTE FUNCTION agency_os_private.reject_outcome_measurement_mutation()
         """)
+        op.execute("""
+            CREATE OR REPLACE FUNCTION agency_os_private.protect_project_outcome_contract()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            SECURITY DEFINER
+            SET search_path = pg_catalog, public
+            AS $function$
+            DECLARE is_superuser boolean;
+            BEGIN
+                SELECT r.rolsuper INTO is_superuser
+                FROM pg_catalog.pg_roles AS r WHERE r.rolname = session_user;
+                IF COALESCE(is_superuser, false) THEN
+                    RETURN NEW;
+                END IF;
+                IF ROW(
+                    NEW.org_id, NEW.workspace_id, NEW.project_id, NEW.title,
+                    NEW.problem_statement, NEW.desired_outcome, NEW.metric_name,
+                    NEW.metric_unit, NEW.direction, NEW.baseline_value,
+                    NEW.target_value, NEW.target_date, NEW.measurement_method,
+                    NEW.acceptance_criteria, NEW.owner_user_id, NEW.created_at
+                ) IS DISTINCT FROM ROW(
+                    OLD.org_id, OLD.workspace_id, OLD.project_id, OLD.title,
+                    OLD.problem_statement, OLD.desired_outcome, OLD.metric_name,
+                    OLD.metric_unit, OLD.direction, OLD.baseline_value,
+                    OLD.target_value, OLD.target_date, OLD.measurement_method,
+                    OLD.acceptance_criteria, OLD.owner_user_id, OLD.created_at
+                ) THEN
+                    RAISE EXCEPTION 'agreed project outcome terms are immutable'
+                        USING ERRCODE = '55000';
+                END IF;
+                RETURN NEW;
+            END;
+            $function$
+        """)
+        op.execute("ALTER FUNCTION agency_os_private.protect_project_outcome_contract() OWNER TO agency_os_migrator")
+        op.execute("REVOKE ALL ON FUNCTION agency_os_private.protect_project_outcome_contract() FROM PUBLIC")
+        op.execute("""
+            CREATE TRIGGER project_outcome_contract_immutable
+            BEFORE UPDATE ON public.project_outcomes
+            FOR EACH ROW EXECUTE FUNCTION agency_os_private.protect_project_outcome_contract()
+        """)
         op.execute("REVOKE UPDATE, DELETE ON TABLE public.outcome_measurements FROM agency_os_app")
 
 
 def downgrade() -> None:
     if op.get_bind().dialect.name == "postgresql":
+        op.execute("DROP TRIGGER IF EXISTS project_outcome_contract_immutable ON public.project_outcomes")
+        op.execute("DROP FUNCTION IF EXISTS agency_os_private.protect_project_outcome_contract()")
         op.execute("DROP TRIGGER IF EXISTS outcome_measurements_append_only ON public.outcome_measurements")
         op.execute("DROP FUNCTION IF EXISTS agency_os_private.reject_outcome_measurement_mutation()")
         op.execute("DROP POLICY IF EXISTS tenant_isolation ON public.outcome_measurements")
