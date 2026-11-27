@@ -2,6 +2,14 @@
 
 A private, founder-controlled operating system for running an AI solutions agency. This is an internal operating environment, **not a SaaS product**. The public agency website remains a separate application and communicates with the OS only through the signed, idempotent lead-intake boundary.
 
+## Agency philosophy: Results as a Service (RAAS)
+
+We are a **Results as a Service (RAAS) AI solutions agency**: the product is the result, and AI is the means. We solve agreed business problems with fit-for-purpose AI and software, and deliver measurable, usable outcomes—not agent counts, prompts, dashboards, tokens or activity for their own sake.
+
+Every engagement should connect the client's problem to measurable outcomes, requirements, acceptance criteria, end-to-end delivery, evaluation evidence and post-delivery impact measurement. We remain accountable for engineering quality, security, reliability, honest reporting and agreed operational support. We do not guarantee outcomes outside our control or claim success without evidence.
+
+The Agency OS exists to govern and coordinate this outcome-delivery system internally. See [Agency Philosophy — RAAS](docs/AGENCY_PHILOSOPHY_RAAS.md).
+
 ## Operating model
 
 The agency workforce is represented inside the OS: Founder, Chief of Staff, Executive Office, functional-group leaders, department heads, teams, human members, agents, supervisors and sub-agents. The workforce catalogue describes the organisation; it does not imply that every profile is already a live autonomous runtime.
