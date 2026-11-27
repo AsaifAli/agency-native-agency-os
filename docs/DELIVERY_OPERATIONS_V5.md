@@ -44,7 +44,7 @@ The read-only operations inbox aggregates:
 It does not approve requests, retry work or reassign tasks. Those actions remain explicit operations with their own authorization and audit path.
 
 ### Agent execution reliability
-The agent performance endpoint reports execution counts, succeeded/failed/active counts and attempt totals by registered agent. These are reliability indicators, not a quality score. QA acceptance, rework and client outcome metrics require a separate verified evaluation workflow.
+The agent performance endpoint reports execution counts, succeeded/failed/active counts and attempt totals by registered agent. These are reliability indicators, not a quality score. QA acceptance remains separate from business impact. Client outcomes are now tracked through the RAAS project-outcome records and source-backed measurements; source metadata is not an independent attestation, and automated impact verification remains future work.
 
 ## API surface
 
