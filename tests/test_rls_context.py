@@ -46,7 +46,10 @@ def test_postgres_role_verification_fails_closed_for_non_postgres_engine():
 def test_required_rls_inventory_covers_every_tenant_table_and_execution_attempts():
     from app.db import REQUIRED_RLS_TABLES
 
-    assert len(REQUIRED_RLS_TABLES) == 53
+    # Keep this aligned with the current explicit inventory. Outcome tables
+    # were added in the RAAS capability migration.
+    assert len(REQUIRED_RLS_TABLES) == 55
+    assert {"project_outcomes", "outcome_measurements"}.issubset(REQUIRED_RLS_TABLES)
     assert {
         "organizations",
         "workspaces",
