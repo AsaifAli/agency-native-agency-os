@@ -227,6 +227,13 @@ def upgrade() -> None:
         ["org_id", "workspace_id", "plan_id"],
         unique=False,
     )
+    _ensure_index(
+        bind,
+        "orchestration_plan_delegations",
+        "ix_orchestration_plan_delegations_scope_delegation",
+        ["org_id", "workspace_id", "delegation_id"],
+        unique=False,
+    )
 
     if bind.dialect.name == "postgresql":
         _install_postgres_rls()
