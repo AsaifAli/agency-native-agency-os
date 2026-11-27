@@ -1,6 +1,6 @@
 import logging
 import time
-from threading import Event
+from threading import Event, Thread
 from typing import Callable
 
 from sqlalchemy import text
@@ -9,23 +9,42 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db import (
     WorkerSessionLocal,
-    list_worker_scopes,
-    scoped_worker_session_factory,
+    worker_engine,
+    verify_postgres_role,
+    scoped_worker_workspace_session_factory,
 )
 from app.worker.processor import process_one_execution
 from app.machine_identity import expire_due_agent_sessions
+from app.retention import purge_due_retention_data
 from app.outbox_handlers import OUTBOX_HANDLERS
 from app.outbox_service import dispatch_outbox_batch, reconcile_outbox_events
 from app.worker_service import (
     promote_due_retries,
     recover_expired_execution_leases,
     queue_ready_delegations,
+    claim_worker_maintenance_scope,
 )
 
 logger = logging.getLogger(__name__)
 
 SessionFactory = Callable[[], Session]
 ExecutionProcessor = Callable[..., str | None]
+
+
+def _verify_worker_database_role() -> None:
+    """Verify the dedicated NOBYPASSRLS role before production worker startup."""
+    if settings.app_env.lower() != "production":
+        return
+    if settings.process_role != "worker":
+        raise RuntimeError("Worker process must use PROCESS_ROLE=worker in production")
+    if worker_engine.dialect.name != "postgresql":
+        raise RuntimeError("Production worker execution requires PostgreSQL")
+    verify_postgres_role(
+        worker_engine,
+        expected_bypassrls=False,
+        require_rls=True,
+        expected_role="agency_os_worker",
+    )
 
 
 def _run_maintenance(
@@ -54,6 +73,22 @@ def _run_session_maintenance(
         expired_count = expire_due_agent_sessions(db, limit=batch_size)
         db.commit()
     return expired_count
+
+
+def _run_retention_maintenance(
+    session_factory: SessionFactory,
+    batch_size: int,
+) -> dict[str, int]:
+    """Scrub eligible session descriptions and tool payloads in one workspace."""
+    with session_factory() as db:
+        result = purge_due_retention_data(
+            db,
+            limit=min(batch_size, 1000),
+            agent_session_days=settings.agent_session_metadata_retention_days,
+            tool_invocation_payload_days=settings.tool_invocation_payload_retention_days,
+        )
+        db.commit()
+    return result
 
 
 def _run_browser_session_retention(
@@ -102,6 +137,61 @@ def _run_outbox_maintenance(
     return published, retried, dead_lettered + dispatched_dead, requeued
 
 
+class MaintenanceLeaseHeartbeat:
+    """Keep a workspace capability alive while bounded maintenance runs."""
+
+    def __init__(self, session_factory: SessionFactory, lease_seconds: int) -> None:
+        self.session_factory = session_factory
+        self.lease_seconds = lease_seconds
+        self.interval_seconds = min(30.0, lease_seconds / 3)
+        self._stop = Event()
+        self._thread: Thread | None = None
+        self._error: Exception | None = None
+
+    def start(self) -> None:
+        self._thread = Thread(
+            target=self._run, name="worker-maintenance-lease-heartbeat", daemon=True,
+        )
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval_seconds):
+            try:
+                with self.session_factory() as db:
+                    renewed = db.execute(text(
+                        "SELECT agency_os_private.renew_worker_maintenance_scope(:lease_seconds)"
+                    ), {"lease_seconds": self.lease_seconds}).scalar_one()
+                    if renewed is not True:
+                        raise RuntimeError("Worker maintenance capability could not be renewed")
+                    db.commit()
+            except Exception as exc:
+                self._error = exc
+                self._stop.set()
+                return
+
+    def assert_healthy(self) -> None:
+        if self._error is not None:
+            raise RuntimeError("Worker maintenance lease renewal failed") from self._error
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=max(5.0, self.interval_seconds))
+            if self._thread.is_alive():
+                raise RuntimeError("Worker maintenance heartbeat did not stop cleanly")
+
+
+def _release_maintenance_scope(session_factory: SessionFactory) -> None:
+    """Release the current workspace lease after all bounded maintenance work."""
+    with session_factory() as db:
+        released = db.execute(text(
+            "SELECT agency_os_private.release_worker_maintenance_scope()"
+        )).scalar_one()
+        if released is not True:
+            raise RuntimeError("Worker maintenance lease could not be released")
+        db.commit()
+
+
 def run_worker(
     stop_event: Event,
     worker_id: str,
@@ -113,7 +203,7 @@ def run_worker(
     maintenance_batch_size: int | None = None,
     clock: Callable[[], float] = time.monotonic,
 ) -> None:
-    """Poll every workspace through short-lived NOBYPASSRLS-scoped sessions."""
+    """Process executions globally; maintenance uses one leased workspace at a time."""
     if not isinstance(worker_id, str) or not worker_id.strip():
         raise ValueError("worker_id must be a non-empty string")
     if len(worker_id) > 160:
@@ -133,31 +223,64 @@ def run_worker(
     if not 1 <= maintenance_batch_size <= 1000:
         raise ValueError("maintenance_batch_size must be between 1 and 1000")
 
+    _verify_worker_database_role()
+
     next_maintenance_at = 0.0
     logger.info("Worker started: worker_id=%s", worker_id)
 
     while not stop_event.is_set():
-        scopes = list_worker_scopes(session_factory)
         did_work = False
         now = clock()
 
         if now >= next_maintenance_at:
-            totals = [0, 0, 0, 0, 0, 0, 0]
-            for org_id, workspace_id in scopes:
-                scoped_factory = scoped_worker_session_factory(
-                    org_id, workspace_id, session_factory
+            cursor_workspace_id = None
+            totals = [0, 0, 0, 0, 0, 0, 0, 0, 0]
+            while not stop_event.is_set():
+                # The database chooses exactly one workspace. The worker never
+                # receives an unscoped tenant inventory or chooses a tenant ID.
+                with session_factory() as claim_db:
+                    capability = claim_worker_maintenance_scope(
+                        claim_db, worker_id=worker_id,
+                        after_workspace_id=cursor_workspace_id,
+                    )
+                    claim_db.commit()
+                if capability is None:
+                    break
+
+                scoped_factory = scoped_worker_workspace_session_factory(
+                    capability, session_factory,
                 )
-                promoted, recovered, queued = _run_maintenance(
-                    scoped_factory, maintenance_batch_size
+                lease_heartbeat = MaintenanceLeaseHeartbeat(
+                    scoped_factory, capability.lease_seconds,
                 )
-                expired_sessions = _run_session_maintenance(
-                    scoped_factory, maintenance_batch_size
-                )
-                published, retried, dead, requeued = _run_outbox_maintenance(
-                    scoped_factory,
-                    worker_id=worker_id,
-                    batch_size=maintenance_batch_size,
-                )
+                lease_heartbeat.start()
+                try:
+                    promoted, recovered, queued = _run_maintenance(
+                        scoped_factory, maintenance_batch_size,
+                    )
+                    expired_sessions = _run_session_maintenance(
+                        scoped_factory, maintenance_batch_size,
+                    )
+                    retention = _run_retention_maintenance(
+                        scoped_factory, maintenance_batch_size,
+                    )
+                    published, retried, dead, requeued = _run_outbox_maintenance(
+                        scoped_factory,
+                        worker_id=worker_id,
+                        batch_size=maintenance_batch_size,
+                    )
+                    lease_heartbeat.assert_healthy()
+                finally:
+                    try:
+                        lease_heartbeat.stop()
+                    finally:
+                        try:
+                            _release_maintenance_scope(scoped_factory)
+                        except Exception:
+                            logger.exception(
+                                "Could not explicitly release maintenance scope; lease expiry will recover it"
+                            )
+
                 totals[0] += promoted
                 totals[1] += recovered
                 totals[2] += queued
@@ -165,14 +288,24 @@ def run_worker(
                 totals[4] += published
                 totals[5] += retried
                 totals[6] += dead + requeued
+                totals[7] += retention["agent_sessions_scrubbed"]
+                totals[8] += retention["tool_payloads_purged"]
+                cursor_workspace_id = capability.workspace_id
+                did_work = did_work or any((
+                    promoted, recovered, queued, expired_sessions,
+                    published, retried, dead, requeued,
+                    retention["agent_sessions_scrubbed"], retention["tool_payloads_purged"],
+                ))
+
             pruned_browser_sessions = _run_browser_session_retention(
-                session_factory, maintenance_batch_size
+                session_factory, maintenance_batch_size,
             )
             if any(totals) or pruned_browser_sessions:
                 logger.info(
-                    "Scoped worker maintenance completed: promoted=%s recovered=%s "
+                    "Capability-scoped worker maintenance completed: promoted=%s recovered=%s "
                     "delegated_queued=%s sessions_expired=%s outbox_published=%s "
-                    "outbox_retried=%s outbox_reconciled=%s browser_sessions_pruned=%s",
+                    "outbox_retried=%s outbox_reconciled=%s agent_session_metadata_scrubbed=%s "
+                    "tool_payloads_purged=%s browser_sessions_pruned=%s",
                     *totals, pruned_browser_sessions,
                 )
             next_maintenance_at = clock() + maintenance_interval_seconds
@@ -180,19 +313,13 @@ def run_worker(
         if stop_event.is_set():
             break
 
-        for org_id, workspace_id in scopes:
-            scoped_factory = scoped_worker_session_factory(
-                org_id, workspace_id, session_factory
-            )
-            execution_id = processor(
-                worker_id=worker_id,
-                lease_seconds=lease_seconds,
-                session_factory=scoped_factory,
-            )
-            if execution_id is not None:
-                did_work = True
-            if stop_event.is_set():
-                break
+        execution_id = processor(
+            worker_id=worker_id,
+            lease_seconds=lease_seconds,
+            session_factory=session_factory,
+        )
+        if execution_id is not None:
+            did_work = True
 
         if not did_work and not stop_event.is_set():
             stop_event.wait(poll_interval_seconds)

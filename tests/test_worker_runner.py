@@ -1,5 +1,6 @@
 
 from unittest.mock import Mock
+from types import SimpleNamespace
 
 import pytest
 
@@ -90,8 +91,26 @@ def test_run_worker_runs_startup_maintenance_and_waits_when_idle(
     recover = Mock(return_value=0)
     queue = Mock(return_value=0)
 
-    monkeypatch.setattr(runner, "list_worker_scopes", Mock(return_value=[("org-1", "workspace-1")]))
-    monkeypatch.setattr(runner, "scoped_worker_session_factory", lambda org_id, workspace_id, factory: factory)
+    from types import SimpleNamespace
+    capability = SimpleNamespace(
+        org_id="org-1", workspace_id="workspace-1", token=b"x" * 32,
+        worker_id="test-worker", lease_seconds=120,
+    )
+    class NoopMaintenanceHeartbeat:
+        def __init__(self, session_factory, lease_seconds):
+            self.session_factory = session_factory
+            self.lease_seconds = lease_seconds
+        def start(self):
+            return None
+        def assert_healthy(self):
+            return None
+        def stop(self):
+            return None
+    monkeypatch.setattr(runner, "MaintenanceLeaseHeartbeat", NoopMaintenanceHeartbeat)
+    monkeypatch.setattr(runner, "claim_worker_maintenance_scope", Mock(side_effect=[capability, None]))
+    monkeypatch.setattr(runner, "scoped_worker_workspace_session_factory", lambda capability, factory: factory)
+    release_scope = Mock()
+    monkeypatch.setattr(runner, "_release_maintenance_scope", release_scope)
     monkeypatch.setattr(runner, "promote_due_retries", promote)
     monkeypatch.setattr(
         runner,
@@ -101,6 +120,11 @@ def test_run_worker_runs_startup_maintenance_and_waits_when_idle(
     monkeypatch.setattr(runner, "queue_ready_delegations", queue)
     expire_sessions = Mock(return_value=0)
     monkeypatch.setattr(runner, "expire_due_agent_sessions", expire_sessions)
+    purge_retention = Mock(return_value={
+        "agent_sessions_scrubbed": 0,
+        "tool_payloads_purged": 0,
+    })
+    monkeypatch.setattr(runner, "purge_due_retention_data", purge_retention)
 
     monkeypatch.setattr(
         runner,
@@ -131,16 +155,25 @@ def test_run_worker_runs_startup_maintenance_and_waits_when_idle(
         session_factory=session_factory,
     )
     assert stop_event.waited_for == [0.5]
-    assert len(sessions) == 5
+    assert runner.claim_worker_maintenance_scope.call_count == 2
+    assert runner.claim_worker_maintenance_scope.call_args_list[0].kwargs["after_workspace_id"] is None
+    assert runner.claim_worker_maintenance_scope.call_args_list[1].kwargs["after_workspace_id"] == "workspace-1"
+    release_scope.assert_called_once()
+    assert len(sessions) == 8
     assert all(session.committed for session in sessions)
-    expire_sessions.assert_called_once_with(sessions[2], limit=10)
-    assert sessions[3].committed  # outbox reconciliation
-    assert sessions[4].committed  # bounded SECURITY DEFINER browser-session retention
+    expire_sessions.assert_called_once_with(sessions[3], limit=10)
+    purge_retention.assert_called_once_with(
+        sessions[4],
+        limit=10,
+        agent_session_days=runner.settings.agent_session_metadata_retention_days,
+        tool_invocation_payload_days=runner.settings.tool_invocation_payload_retention_days,
+    )
+    assert sessions[5].committed  # outbox reconciliation
+    assert sessions[7].committed  # bounded SECURITY DEFINER browser-session retention
 
 
 def test_run_worker_propagates_processor_failure(monkeypatch):
-    monkeypatch.setattr(runner, "list_worker_scopes", Mock(return_value=[("org-1", "workspace-1")]))
-    monkeypatch.setattr(runner, "scoped_worker_session_factory", lambda org_id, workspace_id, factory: factory)
+    monkeypatch.setattr(runner, "claim_worker_maintenance_scope", Mock(return_value=None))
     monkeypatch.setattr(
         runner,
         "promote_due_retries",
@@ -259,3 +292,67 @@ def test_session_maintenance_commits_expiry_batch(monkeypatch):
     assert len(sessions) == 1
     assert sessions[0].committed and sessions[0].closed
     expired.assert_called_once_with(sessions[0], limit=25)
+
+
+def test_production_worker_verifies_its_nobypassrls_database_role(monkeypatch):
+    verification = Mock()
+    monkeypatch.setattr(runner.settings, "app_env", "production")
+    monkeypatch.setattr(runner.settings, "process_role", "worker")
+    monkeypatch.setattr(runner, "worker_engine", SimpleNamespace(dialect=SimpleNamespace(name="postgresql")))
+    monkeypatch.setattr(runner, "verify_postgres_role", verification)
+
+    runner._verify_worker_database_role()
+
+    verification.assert_called_once_with(
+        runner.worker_engine, expected_bypassrls=False, require_rls=True,
+        expected_role="agency_os_worker",
+    )
+
+
+def test_production_worker_fails_closed_for_wrong_process_role(monkeypatch):
+    verification = Mock()
+    monkeypatch.setattr(runner.settings, "app_env", "production")
+    monkeypatch.setattr(runner.settings, "process_role", "api")
+    monkeypatch.setattr(runner, "verify_postgres_role", verification)
+
+    with pytest.raises(RuntimeError, match="PROCESS_ROLE=worker"):
+        runner._verify_worker_database_role()
+
+    verification.assert_not_called()
+
+
+def test_nonproduction_worker_skips_production_database_role_verification(monkeypatch):
+    verification = Mock()
+    monkeypatch.setattr(runner.settings, "app_env", "test")
+    monkeypatch.setattr(
+        runner,
+        "worker_engine",
+        SimpleNamespace(dialect=SimpleNamespace(name="postgresql")),
+    )
+    monkeypatch.setattr(runner, "verify_postgres_role", verification)
+
+    runner._verify_worker_database_role()
+
+    verification.assert_not_called()
+
+
+def test_production_worker_does_not_poll_when_database_role_verification_fails(monkeypatch):
+    monkeypatch.setattr(runner.settings, "app_env", "production")
+    monkeypatch.setattr(runner.settings, "process_role", "worker")
+
+    def reject_role(*args, **kwargs):
+        raise RuntimeError("unsafe PostgreSQL role")
+
+    scopes = Mock()
+    monkeypatch.setattr(runner, "worker_engine", SimpleNamespace(dialect=SimpleNamespace(name="postgresql")))
+    monkeypatch.setattr(runner, "verify_postgres_role", reject_role)
+    monkeypatch.setattr(runner, "claim_worker_maintenance_scope", scopes)
+
+    with pytest.raises(RuntimeError, match="unsafe PostgreSQL role"):
+        runner.run_worker(
+            stop_event=StopAfterWait(),
+            worker_id="production-worker",
+            session_factory=FakeSession,
+        )
+
+    scopes.assert_not_called()

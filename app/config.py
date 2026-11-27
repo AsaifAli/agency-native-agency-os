@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     oidc_csrf_cookie_name: str = "agency_os_csrf"
     oidc_session_ttl_seconds: int = Field(default=1800, ge=300, le=43200)
     browser_session_retention_days: int = Field(default=30, ge=1, le=3650)
+    agent_session_metadata_retention_days: int = Field(default=90, ge=1, le=3650)
+    tool_invocation_payload_retention_days: int = Field(default=180, ge=1, le=3650)
 
     db_connect_timeout_seconds: int = Field(default=5, ge=1, le=60)
     db_pool_timeout_seconds: int = Field(default=5, ge=1, le=300)
@@ -105,10 +107,11 @@ class Settings(BaseSettings):
             if not self.database_url.startswith(("postgresql://", "postgresql+psycopg://")):
                 errors.append("DATABASE_URL must use PostgreSQL in production")
             db_password = urlparse(self.database_url).password
-            if self.process_role == "api" and urlparse(self.database_url).username == "agency_os_worker":
-                errors.append("API PROCESS_ROLE cannot use the BYPASSRLS worker database role")
-            if self.process_role == "worker" and urlparse(self.database_url).username == "agency_os_app":
-                errors.append("Worker PROCESS_ROLE must use the dedicated BYPASSRLS worker database role")
+            database_role = urlparse(self.database_url).username
+            if self.process_role == "api" and database_role != "agency_os_app":
+                errors.append("API PROCESS_ROLE must use the dedicated NOBYPASSRLS agency_os_app database role")
+            if self.process_role == "worker" and database_role != "agency_os_worker":
+                errors.append("Worker PROCESS_ROLE must use the dedicated NOBYPASSRLS agency_os_worker database role")
             if not db_password or len(db_password) < 32 or db_password.lower() in {"change-me", "password", "postgres", "local-only-change-me"}:
                 errors.append("DATABASE_URL must contain a strong, unique database password in production")
             if not self.redis_url.startswith("rediss://"):

@@ -1086,3 +1086,54 @@ def test_founder_cannot_enable_tool_grant_with_insufficient_scope(app_client, mo
         params={"workspace_id": i["workspace"].id},
     )
     assert enabled.status_code == 403
+
+
+def test_specialist_catalog_and_team_blueprints_are_workspace_scoped(app_client):
+    i = app_client.identity
+    base = f"/v1/orgs/{i['org'].id}/workforce"
+    specialists = app_client.get(f"{base}/specialists", params={"workspace_id": i["workspace"].id})
+    assert specialists.status_code == 200, specialists.text
+    payload = specialists.json()
+    ids = {item["specialist_key"] for item in payload["specialists"]}
+    assert {"multi_agent_architect", "database_reliability_engineer", "privacy_engineer",
+            "ai_code_security_auditor", "ui_finish_gate_reviewer", "discovery_coach"} <= ids
+    assert all(item["runtime_owner"] == "claude" for item in payload["specialists"])
+    assert all(item["status"] == "catalogued" for item in payload["specialists"])
+    assert all(item["default_enabled"] is False for item in payload["specialists"])
+    assert all("mission" not in item and "responsibilities" not in item for item in payload["specialists"])
+    from agents.specialists.catalog import SPECIALIST_PROFILES
+    assert {item["specialist_key"] for item in SPECIALIST_PROFILES} == ids
+    assert all(item["review_gate"] for item in SPECIALIST_PROFILES)
+
+    blueprints = app_client.get(f"{base}/blueprints", params={"workspace_id": i["workspace"].id})
+    assert blueprints.status_code == 200, blueprints.text
+    assert blueprints.json()["schema_version"] == 1
+    runs = blueprints.json()["blueprints"]
+    assert {"client_onboarding_delivery", "enterprise_feature_delivery",
+            "marketing_campaign", "incident_response"} <= {item["slug"] for item in runs}
+    for blueprint in runs:
+        assert blueprint["groups"]
+        assert all(group["activation"] in {"always", "phase", "as_needed", "post_fix"}
+                   for group in blueprint["groups"])
+        assert all(task["review_required"] is True
+                   for group in blueprint["groups"] for task in group["tasks"])
+        assert all(task["specialist_key"] in ids
+                   for group in blueprint["groups"] for task in group["tasks"])
+
+
+def test_specialist_and_blueprint_catalogs_reject_inaccessible_workspace(app_client):
+    i = app_client.identity
+    base = f"/v1/orgs/{i['org'].id}/workforce"
+    for suffix in ("specialists", "blueprints"):
+        response = app_client.get(f"{base}/{suffix}", params={"workspace_id": "not-granted"})
+        assert response.status_code == 404
+
+
+def test_operator_can_read_catalog_but_cannot_change_founder_authority(app_client):
+    i = app_client.identity
+    app_client.set_principal(i["operator"])
+    base = f"/v1/orgs/{i['org'].id}/workforce"
+    response = app_client.get(f"{base}/specialists", params={"workspace_id": i["workspace"].id})
+    assert response.status_code == 200
+    # The catalogue exposes no activation or grant mutation endpoint.
+    assert not any("/specialists/activate" in path for path in app_client.app.openapi()["paths"])

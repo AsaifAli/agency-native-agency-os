@@ -31,7 +31,7 @@ def test_worker_is_nobypassrls_and_scoped_to_one_workspace():
     org_b = Organization(name=f"Worker RLS B {suffix}")
     old_session = None
     try:
-        verify_postgres_role(worker_engine, expected_bypassrls=False, require_rls=True)
+        verify_postgres_role(worker_engine, expected_bypassrls=False, require_rls=True, expected_role="agency_os_worker")
         with Admin() as db:
             db.add_all([user, org_a, org_b])
             db.flush()
@@ -54,15 +54,13 @@ def test_worker_is_nobypassrls_and_scoped_to_one_workspace():
             db.commit()
 
         with Worker() as db:
-            scopes = {
-                (row.org_id, row.workspace_id)
-                for row in db.execute(text(
+            # The former global scope enumerator disclosed every tenant/workspace.
+            # It is no longer an authorized worker entry point.
+            with pytest.raises(DBAPIError):
+                db.execute(text(
                     "SELECT org_id, workspace_id FROM agency_os_private.worker_workspace_scopes()"
-                )).mappings()
-            }
-            assert (org_a.id, ws_a.id) in scopes
-            assert (org_a.id, ws_a_other.id) in scopes
-            assert (org_b.id, ws_b.id) in scopes
+                )).all()
+            db.rollback()
             assert db.execute(
                 text("SELECT agency_os_private.user_has_org_access(:org_id, :user_id)"),
                 {"org_id": org_a.id, "user_id": user.id},
@@ -71,7 +69,8 @@ def test_worker_is_nobypassrls_and_scoped_to_one_workspace():
 
         with Worker() as db:
             set_rls_context(db, machine_org_id=org_a.id, machine_workspace_id=ws_a.id)
-            assert [row.title for row in db.query(Task).all()] == ["A visible"]
+            # Forged machine GUCs cannot authorize a worker tenant read.
+            assert db.query(Task).all() == []
             db.commit()
 
         with Worker() as db:

@@ -34,14 +34,34 @@ WORKSPACE_TABLES = (
 
 
 def upgrade() -> None:
-    op.add_column(
-        "workspaces",
-        sa.Column("created_by", sa.String(length=36), nullable=True),
-    )
-    op.create_foreign_key(
-        "fk_workspaces_created_by_users", "workspaces", "users",
-        ["created_by"], ["id"],
-    )
+    dialect = op.get_bind().dialect.name
+    # SQLite DDL is not fully transactional. A prior interrupted attempt,
+    # or a database created from a newer baseline, may already contain this
+    # column and/or its FK while Alembic still points at the parent revision.
+    workspace_columns = {
+        column["name"] for column in sa.inspect(op.get_bind()).get_columns("workspaces")
+    }
+    if "created_by" not in workspace_columns:
+        op.add_column(
+            "workspaces",
+            sa.Column("created_by", sa.String(length=36), nullable=True),
+        )
+
+    workspace_foreign_keys = {
+        foreign_key.get("name")
+        for foreign_key in sa.inspect(op.get_bind()).get_foreign_keys("workspaces")
+    }
+    if "fk_workspaces_created_by_users" not in workspace_foreign_keys:
+        if dialect == "sqlite":
+            with op.batch_alter_table("workspaces") as batch_op:
+                batch_op.create_foreign_key(
+                    "fk_workspaces_created_by_users", "users", ["created_by"], ["id"]
+                )
+        else:
+            op.create_foreign_key(
+                "fk_workspaces_created_by_users", "workspaces", "users",
+                ["created_by"], ["id"],
+            )
     op.create_table(
         "workspace_grants",
         sa.Column("id", sa.String(length=36), primary_key=True),
@@ -71,6 +91,20 @@ def upgrade() -> None:
     )
 
     # Preserve the exact access users had immediately before this migration.
+    if dialect == "sqlite":
+        op.execute("""
+            INSERT INTO workspace_grants
+                (id, org_id, workspace_id, user_id, granted_by, created_at)
+            SELECT lower(hex(randomblob(16))), w.org_id, w.id, m.user_id,
+                   m.user_id, CURRENT_TIMESTAMP
+            FROM workspaces AS w
+            JOIN memberships AS m ON m.org_id = w.org_id
+            JOIN users AS u ON u.id = m.user_id
+            WHERE u.active = 1
+        """)
+        # PostgreSQL-only functions, roles, grants and RLS policies follow.
+        return
+
     op.execute("""
         INSERT INTO public.workspace_grants
             (id, org_id, workspace_id, user_id, granted_by, created_at)
@@ -447,6 +481,15 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if op.get_bind().dialect.name == "sqlite":
+        op.drop_table("workspace_grants")
+        with op.batch_alter_table("workspaces") as batch_op:
+            batch_op.drop_constraint(
+                "fk_workspaces_created_by_users", type_="foreignkey"
+            )
+            batch_op.drop_column("created_by")
+        return
+
     # Restore the original organization-wide policies before removing the
     # workspace predicate and grant data model.
     op.execute("DROP POLICY IF EXISTS workspace_select ON public.workspaces")

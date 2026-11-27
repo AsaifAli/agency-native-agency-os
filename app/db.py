@@ -34,6 +34,50 @@ _RLS_KEYS = ("user_id", "machine_org_id", "machine_workspace_id", "machine_ident
 
 
 def _apply_rls_context(session: Session, transaction, connection) -> None:
+    workspace_capability = session.info.get("agency_os_worker_workspace_capability")
+    if workspace_capability is not None:
+        if connection.dialect.name != "postgresql":
+            raise RuntimeError("Worker workspace capabilities require PostgreSQL")
+        accepted = connection.execute(
+            text("""
+                SELECT agency_os_private.establish_worker_workspace_context(
+                    :token, :org_id, :workspace_id, :worker_id
+                )
+            """),
+            {
+                "token": workspace_capability.token,
+                "org_id": workspace_capability.org_id,
+                "workspace_id": workspace_capability.workspace_id,
+                "worker_id": workspace_capability.worker_id,
+            },
+        ).scalar_one()
+        if accepted is not True:
+            raise PermissionError("Worker maintenance capability is expired, revoked, or invalid")
+        return
+
+    capability = session.info.get("agency_os_worker_capability")
+    if capability is not None:
+        if connection.dialect.name != "postgresql":
+            raise RuntimeError("Worker execution capabilities require PostgreSQL")
+        accepted = connection.execute(
+            text("""
+                SELECT agency_os_private.establish_worker_execution_context(
+                    :token, :execution_id, :attempt_id, :worker_id,
+                    :lease_generation
+                )
+            """),
+            {
+                "token": capability.token,
+                "execution_id": capability.execution_id,
+                "attempt_id": capability.attempt_id,
+                "worker_id": capability.worker_id,
+                "lease_generation": capability.lease_generation,
+            },
+        ).scalar_one()
+        if accepted is not True:
+            raise PermissionError("Worker execution capability is expired, revoked, or invalid")
+        return
+
     context = session.info.get("agency_os_rls_context")
     if not context or connection.dialect.name != "postgresql":
         return
@@ -63,40 +107,6 @@ def set_rls_context(db: Session, *, user_id: str | None = None,
                 {"name": f"agency_os.{key}", "value": value})
 
 
-def list_worker_scopes(session_factory=WorkerSessionLocal) -> list[tuple[str, str]]:
-    """Return the minimal org/workspace inventory required for fair worker polling.
-
-    PostgreSQL exposes this through a narrowly granted SECURITY DEFINER function;
-    the worker cannot list arbitrary tenant records through this operation.
-    """
-    with session_factory() as db:
-        rows = db.execute(text(
-            "SELECT org_id, workspace_id "
-            "FROM agency_os_private.worker_workspace_scopes()"
-        )).all()
-        db.commit()
-    return [(str(row[0]), str(row[1])) for row in rows]
-
-
-def scoped_worker_session_factory(
-    org_id: str,
-    workspace_id: str,
-    session_factory=WorkerSessionLocal,
-):
-    """Create sessions that reapply one exact workspace context per transaction."""
-    if not org_id or not workspace_id:
-        raise ValueError("Worker organization and workspace scope are required")
-
-    def create_scoped_session():
-        db = session_factory()
-        set_rls_context(
-            db, machine_org_id=org_id, machine_workspace_id=workspace_id
-        )
-        return db
-
-    return create_scoped_session
-
-
 # Keep this inventory aligned with the tenant RLS migrations. A startup check
 # that samples only a few tables can silently miss a newly added unprotected
 # tenant table, so API and worker processes verify the complete set.
@@ -110,8 +120,8 @@ REQUIRED_RLS_TABLES = frozenset({
     "machine_identities", "memberships", "milestones",
     "onboarding_checklist_items", "opportunities", "orchestration_plan_drafts",
     "orchestration_plans", "outbound_message_events", "outbound_messages",
-    "outbound_senders", "outbox_events", "outreach_drafts", "payment_receipts",
-    "project_costs", "projects", "proposals", "retainer_service_periods",
+    "outbound_senders", "outbox_events", "outreach_drafts", "outcome_measurements", "payment_receipts",
+    "project_costs", "project_outcomes", "projects", "proposals", "retainer_service_periods",
     "scope_change_requests", "service_offerings", "service_playbooks", "tasks",
     "time_entries", "tool_invocations", "workforce_capabilities",
     "workforce_members", "workforce_positions", "workforce_units", "workspaces",
@@ -120,20 +130,34 @@ REQUIRED_RLS_TABLES = frozenset({
 })
 
 
-def verify_postgres_role(database_engine, *, expected_bypassrls: bool, require_rls: bool) -> None:
-    """Fail closed unless the connection role and complete tenant RLS inventory are safe."""
+def verify_postgres_role(
+    database_engine, *, expected_bypassrls: bool, require_rls: bool,
+    expected_role: str,
+) -> None:
+    """Fail closed unless the exact connection role and complete tenant RLS inventory are safe."""
+    if not isinstance(expected_role, str) or not expected_role.strip():
+        raise ValueError("expected_role must be a non-empty PostgreSQL role name")
     if database_engine.dialect.name != "postgresql":
         raise RuntimeError("Production database role verification requires PostgreSQL")
     with database_engine.connect() as connection:
         role = connection.execute(text("""
-            SELECT r.rolsuper, r.rolbypassrls,
+            SELECT r.rolname AS role_name, r.rolsuper, r.rolbypassrls,
                 EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
                     WHERE n.nspname='public' AND c.relrowsecurity AND c.relowner=r.oid) owns_rls_tables
             FROM pg_roles r WHERE r.rolname=current_user
         """)).mappings().one_or_none()
-        if role is None or role["rolsuper"] or bool(role["rolbypassrls"]) != expected_bypassrls or role["owns_rls_tables"]:
-            expected = "non-owner BYPASSRLS role" if expected_bypassrls else "non-owner NOBYPASSRLS API/worker"
-            raise RuntimeError(f"PostgreSQL connection must use a {expected} role")
+        if (
+            role is None
+            or role["role_name"] != expected_role
+            or role["rolsuper"]
+            or bool(role["rolbypassrls"]) != expected_bypassrls
+            or role["owns_rls_tables"]
+        ):
+            expected = "non-owner BYPASSRLS role" if expected_bypassrls else "non-owner NOBYPASSRLS role"
+            raise RuntimeError(
+                f"PostgreSQL connection must use the exact {expected_role} "
+                f"({expected}) role"
+            )
         if require_rls:
             required = sorted(REQUIRED_RLS_TABLES)
             inventory = connection.execute(text("""
@@ -178,3 +202,34 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def scoped_worker_capability_session_factory(capability, session_factory=WorkerSessionLocal):
+    """Create transaction-scoped sessions authorized by one live execution lease."""
+    required = (
+        "token", "execution_id", "attempt_id", "worker_id", "lease_generation",
+    )
+    if any(not getattr(capability, name, None) for name in required):
+        raise ValueError("A complete worker execution capability is required")
+
+    def create_capability_session():
+        db = session_factory()
+        db.info["agency_os_worker_capability"] = capability
+        return db
+
+    return create_capability_session
+
+
+
+def scoped_worker_workspace_session_factory(capability, session_factory=WorkerSessionLocal):
+    """Create sessions authorized for one short-lived maintenance workspace lease."""
+    required = ("token", "org_id", "workspace_id", "worker_id")
+    if any(not getattr(capability, name, None) for name in required):
+        raise ValueError("A complete worker workspace capability is required")
+
+    def create_workspace_session():
+        db = session_factory()
+        db.info["agency_os_worker_workspace_capability"] = capability
+        return db
+
+    return create_workspace_session

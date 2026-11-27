@@ -3,19 +3,22 @@ from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import get_principal, has_founder_authority, require_membership, require_role, require_founder_authority, require_workspace_access_from_context, Principal
 from app.db import get_db
-from app.models import Role
+from app.data_protection import DataProtectionBlocked, sanitize_text
+from app.models import Role, EvaluationRun
 from app.audit import record_event
 from app.telephony.models import OutboxEvent
-from app.domain_models import Client, Contact, ContactActivity, Lead, LeadResearchRecord, OutreachDraft, Opportunity, Project, Milestone
+from app.domain_models import Client, Contact, ContactActivity, Lead, LeadResearchRecord, OutreachDraft, Opportunity, Project, Milestone, ProjectOutcome, OutcomeMeasurement
 from app.domain_schemas import (
     ClientCreate, ClientOut, ContactCreate, ContactOut, ContactActivityCreate, ContactActivityOut, LeadCreate, LeadOut, LeadResearchCreate, LeadResearchOut, OutreachDraftCreate, OutreachDraftReview, OutreachDraftOut,
     LeadStageUpdate, OpportunityCreate, OpportunityOut, OpportunityStageUpdate,
     ProjectCreate, ProjectOut, ProjectStatusUpdate, MilestoneCreate,
-    MilestoneOut, MilestoneStatusUpdate,
+    MilestoneOut, MilestoneStatusUpdate, ProjectOutcomeCreate, ProjectOutcomeOut,
+    OutcomeMeasurementCreate, OutcomeMeasurementOut, OutcomeAcceptanceDecision,
 )
 
 router = APIRouter(prefix="/v1/orgs/{org_id}", tags=["revenue-delivery"])
@@ -491,6 +494,254 @@ def update_opportunity_stage(
     db.commit()
     db.refresh(item)
     return item
+
+
+
+def _protect_outcome_text(value: str) -> tuple[str, dict[str, int]]:
+    try:
+        return sanitize_text(value)
+    except DataProtectionBlocked as exc:
+        raise HTTPException(422, "Text rejected by data-protection policy") from exc
+
+
+
+def _outcome_payload(db: Session, item: ProjectOutcome) -> dict:
+    latest = db.query(OutcomeMeasurement).filter_by(
+        org_id=item.org_id, workspace_id=item.workspace_id, outcome_id=item.id,
+    ).order_by(OutcomeMeasurement.measured_at.desc(), OutcomeMeasurement.created_at.desc()).first()
+    count = db.query(OutcomeMeasurement.id).filter_by(
+        org_id=item.org_id, workspace_id=item.workspace_id, outcome_id=item.id,
+    ).count()
+    if latest is None:
+        impact_status = "not_measured"
+    elif (
+        (item.direction == "increase" and latest.value >= item.target_value)
+        or (item.direction == "decrease" and latest.value <= item.target_value)
+    ):
+        impact_status = "target_met"
+    else:
+        impact_status = "target_missed"
+    return {
+        "id": item.id, "workspace_id": item.workspace_id, "project_id": item.project_id,
+        "title": item.title, "problem_statement": item.problem_statement,
+        "desired_outcome": item.desired_outcome, "metric_name": item.metric_name,
+        "metric_unit": item.metric_unit, "direction": item.direction,
+        "baseline_value": item.baseline_value, "target_value": item.target_value,
+        "target_date": item.target_date, "measurement_method": item.measurement_method,
+        "acceptance_criteria": item.acceptance_criteria,
+        "delivery_acceptance_status": item.delivery_acceptance_status,
+        "acceptance_results": item.acceptance_results,
+        "acceptance_note": item.acceptance_note,
+        "decided_by_user_id": item.decided_by_user_id, "decided_at": item.decided_at,
+        "latest_value": latest.value if latest else None,
+        "latest_measured_at": latest.measured_at if latest else None,
+        "measurement_count": count, "impact_status": impact_status,
+        "created_at": item.created_at,
+    }
+
+
+@router.get("/projects/{project_id}/outcomes", response_model=list[ProjectOutcomeOut])
+def list_project_outcomes(
+    org_id: str, project_id: str,
+    workspace_id: str = Query(min_length=1),
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    require_membership(org_id, p, db)
+    _workspace(db, org_id, workspace_id)
+    _scoped_parent(db, Project, object_id=project_id, org_id=org_id,
+                   workspace_id=workspace_id, label="Project")
+    rows = (db.query(ProjectOutcome).filter_by(
+        org_id=org_id, workspace_id=workspace_id, project_id=project_id,
+    ).order_by(ProjectOutcome.created_at.asc()).limit(100).all())
+    return [_outcome_payload(db, item) for item in rows]
+
+
+@router.post("/projects/{project_id}/outcomes", response_model=ProjectOutcomeOut, status_code=201)
+def create_project_outcome(
+    org_id: str, project_id: str, body: ProjectOutcomeCreate,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    _write_access(org_id, p, db, body.workspace_id)
+    _scoped_parent(db, Project, object_id=project_id, org_id=org_id,
+                   workspace_id=body.workspace_id, label="Project")
+    protected_fields = {
+        "title": body.title, "problem_statement": body.problem_statement,
+        "desired_outcome": body.desired_outcome, "metric_name": body.metric_name,
+        "metric_unit": body.metric_unit, "measurement_method": body.measurement_method,
+    }
+    protected_text = {}
+    redactions = {}
+    for key, value in protected_fields.items():
+        protected_text[key], found = _protect_outcome_text(value.strip())
+        redactions.update({name: redactions.get(name, 0) + count for name, count in found.items()})
+    criteria = []
+    for value in body.acceptance_criteria:
+        cleaned, found = _protect_outcome_text(value.strip())
+        criteria.append(cleaned)
+        redactions.update({name: redactions.get(name, 0) + count for name, count in found.items()})
+    if any(not value for value in criteria) or len({value.casefold() for value in criteria}) != len(criteria):
+        raise HTTPException(422, "Acceptance criteria must be non-empty and unique")
+    if any(not value for value in protected_text.values()):
+        raise HTTPException(422, "Outcome text fields must not be blank")
+    if body.baseline_value is not None:
+        if body.baseline_value == body.target_value:
+            raise HTTPException(422, "Baseline and target must differ")
+        if body.direction == "increase" and body.target_value <= body.baseline_value:
+            raise HTTPException(422, "An increase target must exceed its baseline")
+        if body.direction == "decrease" and body.target_value >= body.baseline_value:
+            raise HTTPException(422, "A decrease target must be below its baseline")
+    item = ProjectOutcome(
+        org_id=org_id, workspace_id=body.workspace_id, project_id=project_id,
+        title=protected_text["title"], problem_statement=protected_text["problem_statement"],
+        desired_outcome=protected_text["desired_outcome"], metric_name=protected_text["metric_name"],
+        metric_unit=protected_text["metric_unit"], direction=body.direction,
+        baseline_value=body.baseline_value, target_value=body.target_value,
+        target_date=body.target_date, measurement_method=protected_text["measurement_method"],
+        acceptance_criteria=criteria, owner_user_id=p.user.id,
+    )
+    db.add(item)
+    db.flush()
+    _event(db, org_id, p.user.id, "delivery.outcome_defined", "project_outcome",
+           item.id, body.workspace_id, {"project_id": project_id, "metric_name": item.metric_name,
+                                       "redaction_counts": redactions})
+    db.commit()
+    db.refresh(item)
+    return _outcome_payload(db, item)
+
+
+@router.get("/projects/{project_id}/outcome-measurements", response_model=list[OutcomeMeasurementOut])
+def list_project_outcome_measurements(
+    org_id: str, project_id: str,
+    workspace_id: str = Query(min_length=1),
+    limit: int = Query(default=500, ge=1, le=1000),
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    require_membership(org_id, p, db)
+    _workspace(db, org_id, workspace_id)
+    _scoped_parent(db, Project, object_id=project_id, org_id=org_id,
+                   workspace_id=workspace_id, label="Project")
+    outcome_ids = select(ProjectOutcome.id).where(
+        ProjectOutcome.org_id == org_id,
+        ProjectOutcome.workspace_id == workspace_id,
+        ProjectOutcome.project_id == project_id,
+    )
+    return (db.query(OutcomeMeasurement).filter(
+        OutcomeMeasurement.org_id == org_id,
+        OutcomeMeasurement.workspace_id == workspace_id,
+        OutcomeMeasurement.outcome_id.in_(outcome_ids),
+    ).order_by(OutcomeMeasurement.measured_at.desc(), OutcomeMeasurement.created_at.desc())
+     .limit(limit).all())
+
+
+@router.get("/outcomes/{outcome_id}/measurements", response_model=list[OutcomeMeasurementOut])
+def list_outcome_measurements(
+    org_id: str, outcome_id: str,
+    workspace_id: str = Query(min_length=1),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    require_membership(org_id, p, db)
+    _workspace(db, org_id, workspace_id)
+    _scoped_parent(db, ProjectOutcome, object_id=outcome_id, org_id=org_id,
+                   workspace_id=workspace_id, label="Project outcome")
+    return (db.query(OutcomeMeasurement).filter_by(
+        org_id=org_id, workspace_id=workspace_id, outcome_id=outcome_id,
+    ).order_by(OutcomeMeasurement.measured_at.desc(), OutcomeMeasurement.created_at.desc())
+     .limit(limit).all())
+
+
+@router.post("/outcomes/{outcome_id}/measurements", response_model=OutcomeMeasurementOut, status_code=201)
+def create_outcome_measurement(
+    org_id: str, outcome_id: str, body: OutcomeMeasurementCreate,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    _write_access(org_id, p, db, body.workspace_id)
+    outcome = _scoped_parent(db, ProjectOutcome, object_id=outcome_id, org_id=org_id,
+                             workspace_id=body.workspace_id, label="Project outcome")
+    measured_at = body.measured_at or datetime.now(timezone.utc)
+    if measured_at.tzinfo is None or measured_at.utcoffset() is None:
+        raise HTTPException(422, "Outcome measurement timestamps must include a timezone")
+    if measured_at > datetime.now(timezone.utc):
+        raise HTTPException(422, "Outcome measurements cannot be future-dated")
+    if body.supporting_evaluation_run_id:
+        evaluation = db.query(EvaluationRun).filter_by(
+            id=body.supporting_evaluation_run_id, org_id=org_id,
+            workspace_id=body.workspace_id,
+        ).first()
+        if evaluation is None:
+            raise HTTPException(404, "Supporting evaluation run not found in this workspace")
+    if body.milestone_id:
+        milestone = _scoped_parent(
+            db, Milestone, object_id=body.milestone_id, org_id=org_id,
+            workspace_id=body.workspace_id, label="Milestone",
+        )
+        if milestone.project_id != outcome.project_id:
+            raise HTTPException(404, "Milestone not found in this project")
+    source_reference, source_redactions = _protect_outcome_text(body.source_reference.strip())
+    evidence_summary, evidence_redactions = _protect_outcome_text(body.evidence_summary.strip())
+    if not source_reference or not evidence_summary:
+        raise HTTPException(422, "Measurement source and evidence summary must not be blank")
+    item = OutcomeMeasurement(
+        org_id=org_id, workspace_id=body.workspace_id, outcome_id=outcome.id,
+        value=body.value, measured_at=measured_at, source_type=body.source_type,
+        source_reference=source_reference,
+        evidence_summary=evidence_summary,
+        supporting_evaluation_run_id=body.supporting_evaluation_run_id,
+        milestone_id=body.milestone_id, created_by=p.user.id,
+    )
+    db.add(item)
+    db.flush()
+    _event(db, org_id, p.user.id, "delivery.outcome_measured", "outcome_measurement",
+           item.id, body.workspace_id, {
+               "outcome_id": outcome.id, "source_type": item.source_type,
+               "supporting_evaluation_run_id": item.supporting_evaluation_run_id,
+               "redaction_counts": {
+                   key: source_redactions.get(key, 0) + evidence_redactions.get(key, 0)
+                   for key in set(source_redactions) | set(evidence_redactions)
+               },
+           })
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.post("/outcomes/{outcome_id}/acceptance", response_model=ProjectOutcomeOut)
+def decide_outcome_delivery_acceptance(
+    org_id: str, outcome_id: str, body: OutcomeAcceptanceDecision,
+    db: Session = Depends(get_db), p: Principal = Depends(get_principal),
+):
+    require_membership(org_id, p, db)
+    require_founder_authority(db, org_id, p.user.id)
+    _workspace(db, org_id, body.workspace_id)
+    item = db.query(ProjectOutcome).filter_by(
+        id=outcome_id, org_id=org_id, workspace_id=body.workspace_id,
+    ).with_for_update().first()
+    if item is None:
+        raise HTTPException(404, "Project outcome not found")
+    if item.delivery_acceptance_status != "pending":
+        raise HTTPException(409, "Delivery acceptance has already been decided")
+    expected = set(item.acceptance_criteria)
+    supplied = set(body.criteria_results)
+    if supplied != expected:
+        raise HTTPException(422, "Acceptance results must cover the exact agreed criteria")
+    if body.decision == "accepted" and not all(body.criteria_results.values()):
+        raise HTTPException(409, "Delivery cannot be accepted while an agreed criterion is unmet")
+    if body.decision == "rejected" and all(body.criteria_results.values()):
+        raise HTTPException(422, "A rejected delivery must identify at least one unmet criterion")
+    acceptance_note, note_redactions = _protect_outcome_text(body.note.strip())
+    if not acceptance_note:
+        raise HTTPException(422, "Acceptance note must not be blank")
+    item.delivery_acceptance_status = body.decision
+    item.acceptance_results = body.criteria_results
+    item.acceptance_note = acceptance_note
+    item.decided_by_user_id = p.user.id
+    item.decided_at = datetime.now(timezone.utc)
+    _event(db, org_id, p.user.id, "delivery.outcome_" + body.decision,
+           "project_outcome", item.id, body.workspace_id,
+           {"criteria_results": body.criteria_results, "redaction_counts": note_redactions})
+    db.commit()
+    db.refresh(item)
+    return _outcome_payload(db, item)
 
 
 @router.get("/projects", response_model=list[ProjectOut])

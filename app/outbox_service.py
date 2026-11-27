@@ -257,3 +257,60 @@ def dispatch_outbox_batch(
                     retried += 1
     return published, retried, dead
 
+
+
+def summarize_outbox(
+    db: Session, *, org_id: str, workspace_id: str,
+    now: datetime | None = None,
+) -> dict:
+    """Return payload-free operational counts for one exact tenant workspace."""
+    from sqlalchemy import func
+
+    now = _utc(now or datetime.now(timezone.utc))
+    scope = (OutboxEvent.org_id == org_id, OutboxEvent.workspace_id == workspace_id)
+    grouped = (
+        db.query(OutboxEvent.status, func.count(OutboxEvent.id))
+        .filter(*scope)
+        .group_by(OutboxEvent.status)
+        .all()
+    )
+    counts = {status: 0 for status in ("pending", "processing", "published", "dead_letter")}
+    for status, count in grouped:
+        if status in counts:
+            counts[status] = int(count)
+
+    oldest_pending = (
+        db.query(func.min(OutboxEvent.created_at))
+        .filter(*scope, OutboxEvent.status == "pending")
+        .scalar()
+    )
+    expired_leases = (
+        db.query(func.count(OutboxEvent.id))
+        .filter(
+            *scope,
+            OutboxEvent.status == "processing",
+            OutboxEvent.lease_expires_at.is_not(None),
+            OutboxEvent.lease_expires_at <= now,
+        )
+        .scalar()
+    )
+    exhausted_pending = (
+        db.query(func.count(OutboxEvent.id))
+        .filter(
+            *scope,
+            OutboxEvent.status == "pending",
+            OutboxEvent.attempts >= OutboxEvent.max_attempts,
+        )
+        .scalar()
+    )
+    oldest_pending_utc = _utc(oldest_pending) if oldest_pending else None
+    age = max(0, int((now - oldest_pending_utc).total_seconds())) if oldest_pending_utc else None
+    return {
+        "counts": counts,
+        "total": sum(counts.values()),
+        "oldest_pending_at": oldest_pending_utc.isoformat() if oldest_pending_utc else None,
+        "oldest_pending_age_seconds": age,
+        "expired_leases": int(expired_leases or 0),
+        "exhausted_pending": int(exhausted_pending or 0),
+        "as_of": now.isoformat(),
+    }

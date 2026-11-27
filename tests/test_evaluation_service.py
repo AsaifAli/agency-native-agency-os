@@ -3,7 +3,12 @@ from app.evaluation_service import catalog, evaluate
 
 def test_registry_exposes_only_agency_os_packs():
     names = {item["name"] for item in catalog()}
-    assert names == {"agent_workflow", "rag"}
+    assert names == {
+    "agent_workflow",
+    "rag",
+    "safety_security",
+    "regression",
+}
 
 
 def test_agent_workflow_gate_fails_when_approval_compliance_fails():

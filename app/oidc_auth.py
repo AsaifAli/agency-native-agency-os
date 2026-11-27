@@ -56,7 +56,7 @@ def configure_oidc() -> None:
         name="authentik",
         client_id=settings.oidc_client_id,
         client_secret=settings.oidc_client_secret,
-        server_metadata_url=f"{issuer.rstrip("/")}/.well-known/openid-configuration",
+        server_metadata_url=f"{issuer.rstrip('/')}/.well-known/openid-configuration",
         client_kwargs={
             "scope": "openid profile email",
             "code_challenge_method": "S256",

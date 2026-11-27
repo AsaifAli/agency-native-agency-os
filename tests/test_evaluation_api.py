@@ -69,3 +69,36 @@ def test_evaluation_api_persists_tenant_scoped_run_and_audit():
     )
     assert listed.status_code == 200
     assert len(listed.json()) == 1
+
+
+def test_user_submitted_evaluation_is_never_marked_as_release_verified():
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer dev:eval-owner@test.local"}
+    org_id = _org_id()
+    response = client.post(
+        f"/v1/orgs/{org_id}/evaluations",
+        headers=headers,
+        json={
+            "workspace_id": "ws-eval-test",
+            "pack_name": "safety_security",
+            "expected": {"required_controls": ["tenant_isolation"]},
+            "actual": {
+                "control_results": {"tenant_isolation": True},
+                "tenant_isolation_passed": True,
+                "data_policy_passed": True,
+            },
+        },
+    )
+    assert response.status_code == 201, response.text
+    result = response.json()
+    assert result["passed"] is True
+    assert result["evidence_trust"] == "self_reported"
+    assert result["release_eligible"] is False
+
+    listed = client.get(
+        f"/v1/orgs/{org_id}/evaluations?workspace_id=ws-eval-test",
+        headers=headers,
+    )
+    assert listed.status_code == 200
+    assert listed.json()[0]["evidence_trust"] == "self_reported"
+    assert listed.json()[0]["release_eligible"] is False

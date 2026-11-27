@@ -2,6 +2,20 @@
 
 > **Current authoritative checkpoint — 2026-11-26:** PR #47 (20-point security audit) and PR #48 (worker RLS hardening) are both merged into `main`. PR #47 merge commit: `caadb692741f7375ab5ab5c58c5295af8f978508`; PR #48 merge commit / current main head at this checkpoint: `cba0fce036ff8e4eceb590b7e15cecb6d044b67b`. The merged baseline includes persistent browser-session revocation/rotation/retention, JWT key overlap, 51 tenant RLS policies plus `execution_attempts` RLS, separate API/migrator/worker roles, worker `NOBYPASSRLS`, scoped worker sessions, bounded audited browser-session cleanup, route-auth inventory guards and centralized log redaction. User-run isolated PostgreSQL validation for PR #47 passed 5 tests; PR #48 migration/bootstrap plus its configured PostgreSQL test image passed 22/22. Earlier candidate evidence includes 364 backend tests passed, 5 PostgreSQL-only tests skipped, Python compilation, frontend lint (0 errors; 7 existing warnings) and Next.js production build. These results are not a fresh full-suite run on current `main`, not a production migration rehearsal, and not production approval. No GitHub Actions workflow was triggered for PR #47/#48 merges.
 
+
+## 2026-11-27 — RAAS outcome management (implementation committed; verification pending)
+
+- The agency philosophy is **Results as a Service (RAAS)**: the product is the result; AI is the means. See `docs/AGENCY_PHILOSOPHY_RAAS.md`.
+- Added project-scoped outcomes with a problem statement, desired outcome, metric/unit, baseline, target, direction, target date, measurement method and agreed acceptance criteria.
+- Added append-only, source-backed outcome measurements. Latest measurements are compared deterministically with the target; source metadata is not treated as independent verification.
+- Kept delivery acceptance distinct from measured business impact. Acceptance is founder-authority-only, locks the outcome row during the decision, requires an exact result for every agreed criterion and is audited. Delivery acceptance does not automatically mean the business-impact target has been met.
+- Outcome definitions are protected from silent edits in PostgreSQL. Outcome measurements are append-only at the database boundary. Both tables have workspace RLS; outcome-to-project, measurement-to-outcome, milestone and evaluation references carry composite workspace constraints.
+- Added the Founder Console Client Outcomes page with project selection/creation, outcome definition, measurement history and founder acceptance controls.
+- Added API, privacy, scope, acceptance, RLS and PostgreSQL append-only regression tests. The isolated PostgreSQL test image now includes the new RLS/immutability test.
+- Added an Alembic merge revision for the two previously separate migration heads, followed by the additive outcome schema migration.
+- **Verification status:** not yet run against the updated branch. The full backend suite, frontend lint/typecheck/build and isolated PostgreSQL migration/RLS suite remain pending. No production database, deployment, external integration or client data was touched.
+- **Known limits:** no automatic KPI ingestion, client portal sign-off, verified external impact attestations, outcome revision/scope-change workflow, statistical impact analysis or approved outcome-evidence erasure workflow. Project activation is not yet globally blocked when no outcome has been defined. Outcome measurements currently record a source reference and narrative supplied by an authorized workspace user.
+
 ## Verified cleanup checkpoint
 - Branch: `feature/agency-os-native-runtime-cleanup`.
 - Commit: `80b989ae611b08d9a9c37925195517417ba79b05`.
@@ -299,3 +313,52 @@ Added production fail-closed configuration checks, Redis-backed request throttli
 
 Added Authentik OIDC relying-party integration (Authlib, OIDC discovery, authorization code + PKCE S256, state/nonce), strict pre-provisioned-user linking by verified issuer/subject/email, unique OIDC subject migration, AES-GCM encrypted OIDC transaction cookie, HttpOnly session cookie, double-submit CSRF + Origin checks, CSRF bootstrap/current-user/logout endpoints and frontend credentialed requests. Added `docs/AUTHENTIK_SETUP.md`. Validation: OIDC/CSRF focused tests 35 passed; full backend suite 320 passed / 4 PostgreSQL-only skipped; compileall passed; Alembic single head `r8a2c4e6f901`. Live Authentik configuration, Authentik MFA assurance policy (`acr`), browser topology and PostgreSQL RLS remain unverified. Production remains NO-GO.
 
+
+
+## Integration PR #58 delta — source-reviewed, not yet merged or runtime-verified
+
+This section describes only `integration/consolidated-agency-os-2026-11-26`; it must not be read as a statement about `main`.
+
+- Durable workspace-scoped execution pause/resume/cancel routes, persisted control requests, worker acknowledgement, Managed Agents interruption/reconciliation and Workflow UI controls are present in the PR. Provider/runtime capability differences and lease/retry/cancellation races still require verification.
+- The PR branch also contains an OS Tool Gateway, tool registry, machine identity/session foundations and Data Protection Gateway. Tool grants remain fail-closed; the separate MCP Streamable HTTP/session-credential adapter has **not** been integrated. The candidate MCP branch currently has a missing migration parent and stale service-call arguments, so it requires a deliberate port.
+- The PR branch contains the explicit human workspace-grant migration and expanded `REQUIRED_RLS_TABLES` inventory, including `workspace_grants`. The integration migration has SQLite interrupted-DDL recovery absent from the older candidate copy. PostgreSQL policy coverage, grant backfill, role verification and cross-workspace isolation still require runtime proof.
+- The PR branch contains the tenant outreach integrity migration and DPG tests. These are code-presence findings only; no claim is made that the full provider-boundary coverage or PostgreSQL integrity tests passed on this head.
+- The PR branch contains a subprocess-based worker crash-recovery test in `tests/test_worker_postgres.py`; the process-crash candidate's file is identical. Additional concurrent claim/lease/outbox cases from the lease-recovery candidate must be checked for coverage before adding tests.
+- Revenue/Delivery source pages and models for contracts, onboarding, opportunities, outreach, research outreach and retainers are already present. Outreach currently prepares an approved queue and stop controls; it does not send email. No external dispatch is enabled.
+- The PR adds `docs/CONSOLIDATION_EXECUTION_LEDGER.md`, which is the current phase-by-phase reconciliation and verification ownership record.
+
+**Verification:** this PR head has not had a fresh full local test run in this session. The previously observed backend workflow failed before backend compilation/tests because its disposable PostgreSQL service did not create `agency_os_migrator`. Do not interpret earlier main/other-PR test results above as tests of this integration head.
+
+
+## Consolidation increment — outbox observability (2026-11-26)
+
+**Implemented on integration branch, not yet runtime-tested:** a founder-only
+workspace-scoped outbox summary API is registered at
+`GET /v1/orgs/{org_id}/workspaces/{workspace_id}/outbox/summary`. It requires
+active organization membership, an exact active workspace grant and explicit
+Founder Authority. It returns aggregate state counts, oldest pending age,
+expired lease count, exhausted pending count and an as-of timestamp. It does
+not return event payloads, idempotency keys, worker identifiers or provider
+error text.
+
+Focused tests were added for the aggregate summary, workspace scoping inputs,
+payload non-disclosure, expired leases and exhausted pending work. These tests
+have **not been executed** in the current environment. The endpoint is not yet
+surfaced in the Founder Console; HTTP authorization, PostgreSQL RLS, browser
+integration and live worker metrics remain unverified.
+
+
+## Integration verification update — 2026-11-26 (PR #58)
+
+The current integration branch head after the evaluation evidence-trust increment is `aac2d845587c3e2c07999e57afc0f74ed9261664`. The branch is 189 commits ahead of `main`, 0 behind at base `0a190719fd52c385e7e385989676cf9051e6b7b0`. The PR remains open/draft and no production deployment or merge has occurred.
+
+- Full backend suite on the integration source: **453 passed, 10 skipped, 2 deprecation warnings** (Python 3.13.18 sandbox). The skipped tests require PostgreSQL URLs; this run is not PostgreSQL proof.
+- `python -m compileall -q app tests`: passed.
+- Alembic reports one head: `x4c8d1e6f902`.
+- Full SQLite migration upgrade through `x4c8d1e6f902`: passed.
+- Evaluation API test confirms a caller-supplied passing `safety_security` payload is persisted as `self_reported` and returned with `release_eligible=false`; listing preserves the same classification.
+- The new migration adds non-null `evaluation_runs.evidence_trust`, defaulting existing and new ordinary API runs to `self_reported`. The API does not accept a caller-supplied trust flag.
+
+**Remaining release blockers:** worker RLS still trusts caller-settable custom GUC scope and the worker retains broad direct table privileges for lifecycle/maintenance operations. The full worker DB capability migration is not implemented. Human/browser/machine/intake RLS identity assertions also remain a separate open hardening item. No trusted evaluation runner attestation issuer/verifier, immutable manifest, signed artifact digest or non-bypassable release gate exists; all ordinary API evaluation runs are deliberately ineligible. MCP Streamable HTTP/session credentials remain unported because the candidate branch has a stale Tool Gateway call contract and a migration parent that cannot be copied directly. PostgreSQL migration/RLS/concurrency tests on this exact head, provider E2E, full frontend verification, production restore drill and independent security review remain outstanding.
+
+**Readiness:** development integration candidate only; not production-ready. Do not merge or enable production side effects until the PostgreSQL worker authorization boundary and other release blockers are resolved and tested.

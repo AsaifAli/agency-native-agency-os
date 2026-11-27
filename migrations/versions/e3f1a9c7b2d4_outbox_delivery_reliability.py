@@ -77,11 +77,18 @@ def upgrade() -> None:
                     f"Unexpected length for outbox_events.{name}"
                 )
 
-        if isinstance(expected_type, sa.DateTime):
-            if actual_type.timezone != expected_type.timezone:
-                raise RuntimeError(
-                    f"Unexpected timezone for outbox_events.{name}"
-                )
+        # SQLite has no native timezone-aware DATETIME type. Its SQLAlchemy
+        # inspector therefore reports timezone=False even when the schema
+        # was declared with DateTime(timezone=True). Keep this check on
+        # dialects that can represent the distinction (e.g. PostgreSQL).
+        if (
+            isinstance(expected_type, sa.DateTime)
+            and bind.dialect.name != "sqlite"
+            and actual_type.timezone != expected_type.timezone
+        ):
+            raise RuntimeError(
+                f"Unexpected timezone for outbox_events.{name}"
+            )
 
     inspector = sa.inspect(bind)
 
@@ -109,15 +116,17 @@ def upgrade() -> None:
                 f"Unexpected definition for {check_name}"
             )
     else:
-        op.create_check_constraint(
-            check_name,
-            "outbox_events",
-            "attempts >= 0 AND max_attempts >= 1",
-        )
+        # SQLite does not support ALTER TABLE ADD CONSTRAINT. Alembic batch
+        # mode rebuilds the table while preserving its existing schema/data.
+        with op.batch_alter_table("outbox_events") as batch_op:
+            batch_op.create_check_constraint(
+                check_name,
+                "attempts >= 0 AND max_attempts >= 1",
+            )
 
     indexes = {
         item["name"]: item
-        for item in inspector.get_indexes("outbox_events")
+        for item in sa.inspect(bind).get_indexes("outbox_events")
     }
 
     index_name = "ix_outbox_lease_recovery"

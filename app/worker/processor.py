@@ -6,20 +6,27 @@ from app.data_protection import DataProtectionBlocked, protect_execution_request
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.db import WorkerSessionLocal
+from app.db import WorkerSessionLocal, scoped_worker_capability_session_factory
 from app.integrations.runtime import (
     ExecutionRequest,
     ExecutionResult,
     RuntimeExecutionError,
     RuntimeManualReviewRequired,
+    RuntimeCancelled,
+    RuntimePaused,
     RuntimeNotConfiguredError,
     RuntimeTransientError,
 )
 from app.worker.runtime_factory import get_runtime
 from app.worker.tool_executor import build_machine_tool_executor
+from app.execution_controls import (
+    acknowledge_execution_cancel,
+    get_execution_control_request,
+)
 from app.worker_service import (
     LeaseExpired,
     claim_next_execution,
@@ -28,6 +35,7 @@ from app.worker_service import (
     heartbeat_execution,
     start_execution,
     attach_external_run_id,
+    claim_worker_execution_capability,
 )
 SessionFactory = Callable[[], Session]
 
@@ -77,6 +85,12 @@ class LeaseHeartbeat:
                         db, execution_id=self.execution_id, attempt_id=self.attempt_id,
                         worker_id=self.worker_id, lease_seconds=self.lease_seconds,
                     )
+                    if db.get_bind().dialect.name == "postgresql":
+                        renewed = db.execute(text(
+                            "SELECT agency_os_private.renew_worker_execution_capability()"
+                        )).scalar_one()
+                        if renewed is not True:
+                            raise LeaseExpired("Worker capability could not be renewed")
                     db.commit()
             except Exception as exc:
                 self._error = exc
@@ -180,12 +194,37 @@ def process_one_execution(
 ) -> str | None:
     """Claim and process one execution; provider work runs outside DB transactions."""
     with session_factory() as db:
-        claimed = claim_next_execution(db, worker_id=worker_id, lease_seconds=lease_seconds)
-        if claimed is None:
-            return None
-        execution, attempt = claimed
-        execution_id, attempt_id = execution.id, attempt.id
-        db.commit()
+        if db.get_bind().dialect.name == "postgresql":
+            capability = claim_worker_execution_capability(
+                db, worker_id=worker_id, lease_seconds=lease_seconds,
+            )
+            if capability is None:
+                return None
+            execution_id, attempt_id = capability.execution_id, capability.attempt_id
+            db.commit()
+            # Every subsequent transaction re-establishes the database-verified
+            # capability. No tenant GUC or workspace inventory authorizes reads.
+            session_factory = scoped_worker_capability_session_factory(
+                capability, session_factory,
+            )
+            from app.models import Execution, ExecutionAttempt
+            with session_factory() as scoped_db:
+                execution = scoped_db.query(Execution).filter_by(id=execution_id).one()
+                attempt = scoped_db.query(ExecutionAttempt).filter_by(
+                    id=attempt_id, execution_id=execution_id,
+                ).one()
+                attempt_number = attempt.attempt_number
+                scoped_db.commit()
+        else:
+            claimed = claim_next_execution(
+                db, worker_id=worker_id, lease_seconds=lease_seconds,
+            )
+            if claimed is None:
+                return None
+            execution, attempt = claimed
+            execution_id, attempt_id = execution.id, attempt.id
+            attempt_number = attempt.attempt_number
+            db.commit()
 
     with session_factory() as db:
         execution, _ = start_execution(
@@ -227,9 +266,43 @@ def process_one_execution(
             agent_instructions=agent.instructions, task_title=task.title,
             task_description=task.description,
             external_run_id=prior_attempt.external_run_id if prior_attempt else None,
+            attempt_number=attempt_number,
             persist_external_run_id=persist_provider_run,
             request_metadata=execution.request_metadata or {},
         )
+
+        def persist_resume_event(resume_token: str, provider_event_id: str) -> None:
+            from app.execution_controls import persist_execution_resume_event
+            with session_factory() as callback_db:
+                persist_execution_resume_event(
+                    callback_db, execution_id=execution_id, attempt_id=attempt_id,
+                    worker_id=worker_id, resume_token=resume_token,
+                    provider_event_id=provider_event_id,
+                )
+                callback_db.commit()
+
+        def persist_control_event(action: str, provider_event_id: str) -> None:
+            from app.execution_controls import persist_execution_control_event
+            with session_factory() as callback_db:
+                persist_execution_control_event(
+                    callback_db, execution_id=execution_id, attempt_id=attempt_id,
+                    worker_id=worker_id, action=action,
+                    provider_event_id=provider_event_id,
+                )
+                callback_db.commit()
+
+        def check_execution_control() -> str | None:
+            with session_factory() as control_db:
+                return get_execution_control_request(
+                    control_db,
+                    execution_id=execution_id,
+                    attempt_id=attempt_id,
+                    worker_id=worker_id,
+                )
+
+        request.control_check = check_execution_control
+        request.persist_resume_event = persist_resume_event
+        request.persist_control_event = persist_control_event
         runtime_name = execution.runtime
         execution_org_id = execution.org_id
         execution_workspace_id = execution.workspace_id
@@ -277,6 +350,8 @@ def process_one_execution(
     heartbeat.start()
     runtime_error: tuple[str, str, bool] | None = None
     serialized_result: dict | None = None
+    cancellation_requested = False
+    pause_requested = False
     data_protection_block_code: str | None = None
     try:
         runtime = get_runtime(runtime_name)
@@ -290,6 +365,8 @@ def process_one_execution(
                 session_ttl_seconds=settings.claude_managed_timeout_seconds,
             )
         runtime_result = runtime.start(request)
+        if request.control_check is not None and request.control_check() == "cancel":
+            raise RuntimeCancelled("OS cancellation request observed after provider return.")
         runtime_result, output_protection = protect_execution_result(runtime_result)
         if output_protection.total_redactions:
             try:
@@ -326,9 +403,13 @@ def process_one_execution(
     except RuntimeManualReviewRequired:
         runtime_error = (
             "RUNTIME_REQUIRES_REVIEW",
-            "The managed agent paused for a human decision; no tool action was authorized.",
+            "The runtime requires human review before this execution can be treated as complete.",
             False,
         )
+    except RuntimeCancelled:
+        cancellation_requested = True
+    except RuntimePaused:
+        pause_requested = True
     except RuntimeTransientError:
         runtime_error = (
             "RUNTIME_TRANSIENT_ERROR",
@@ -357,6 +438,37 @@ def process_one_execution(
         return execution_id
 
     heartbeat.assert_healthy()
+    if pause_requested:
+        from app.execution_controls import acknowledge_execution_pause
+        with session_factory() as pause_db:
+            current_control = get_execution_control_request(
+                pause_db, execution_id=execution_id, attempt_id=attempt_id,
+                worker_id=worker_id,
+            )
+            if current_control == "cancel":
+                acknowledge_execution_cancel(
+                    pause_db, execution_id=execution_id, attempt_id=attempt_id,
+                    worker_id=worker_id,
+                )
+            else:
+                acknowledge_execution_pause(
+                    pause_db, execution_id=execution_id, attempt_id=attempt_id,
+                    worker_id=worker_id,
+                )
+            pause_db.commit()
+        return execution_id
+
+    if cancellation_requested:
+        with session_factory() as cancel_db:
+            acknowledge_execution_cancel(
+                cancel_db,
+                execution_id=execution_id,
+                attempt_id=attempt_id,
+                worker_id=worker_id,
+            )
+            cancel_db.commit()
+        return execution_id
+
     if runtime_error is not None:
         error_code, error_message, retryable = runtime_error
         _record_failure(
@@ -368,6 +480,20 @@ def process_one_execution(
 
     with session_factory() as db:
         heartbeat.assert_healthy()
+        if get_execution_control_request(
+            db,
+            execution_id=execution_id,
+            attempt_id=attempt_id,
+            worker_id=worker_id,
+        ) == "cancel":
+            acknowledge_execution_cancel(
+                db,
+                execution_id=execution_id,
+                attempt_id=attempt_id,
+                worker_id=worker_id,
+            )
+            db.commit()
+            return execution_id
         complete_execution(
             db, execution_id=execution_id, attempt_id=attempt_id,
             worker_id=worker_id, result=serialized_result,

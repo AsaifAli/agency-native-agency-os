@@ -51,6 +51,9 @@ type Position = {
   status: string;
 };
 type Workforce = { units: Unit[]; members: Member[]; capabilities: Capability[]; positions: Position[] };
+type Specialist = { specialist_key: string; title: string; department_key: string; runtime_owner: "claude"; profile_ref: string; status: "catalogued"; default_enabled: false };
+type BlueprintTask = { specialist_key: string; department_key: string; title: string; objective: string; inputs: string[]; outputs: string[]; review_required: true };
+type TeamBlueprint = { slug: string; title: string; summary: string; duration_hint: string; schema_version: number; groups: { group: string; activation: string; tasks: BlueprintTask[] }[] };
 
 const GROUP_ORDER = [
   "Growth",
@@ -67,6 +70,8 @@ export default function WorkforcePage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [bootstrapping, setBootstrapping] = useState(false);
+  const [specialists, setSpecialists] = useState<Specialist[]>([]);
+  const [blueprints, setBlueprints] = useState<TeamBlueprint[]>([]);
 
   async function load(selected = workspaceId) {
     setLoading(true);
@@ -80,10 +85,14 @@ export default function WorkforcePage() {
         setWorkforce({ units: [], members: [], capabilities: [], positions: [] });
         return;
       }
-      const result = await api<Workforce>(
-        `/v1/orgs/${orgId()}/workforce?workspace_id=${encodeURIComponent(chosen)}`,
-      );
+      const [result, specialistResult, blueprintResult] = await Promise.all([
+        api<Workforce>(`/v1/orgs/${orgId()}/workforce?workspace_id=${encodeURIComponent(chosen)}`),
+        api<{ specialists: Specialist[] }>(`/v1/orgs/${orgId()}/workforce/specialists?workspace_id=${encodeURIComponent(chosen)}`),
+        api<{ blueprints: TeamBlueprint[] }>(`/v1/orgs/${orgId()}/workforce/blueprints?workspace_id=${encodeURIComponent(chosen)}`),
+      ]);
       setWorkforce(result);
+      setSpecialists(specialistResult.specialists);
+      setBlueprints(blueprintResult.blueprints);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -168,6 +177,54 @@ export default function WorkforcePage() {
             Use the founder-authorized provisioning action to create the five groups and all sixteen departments. This does not activate any agent.
           </div>
         )}
+      </section>
+
+      <div style={{ height: 16 }} />
+      <section className="panel">
+        <div className="panel-head">
+          <div className="panel-title">Specialist registry</div>
+          <span className="panel-note">{specialists.length} Claude-owned profile references · not executable in the OS</span>
+        </div>
+        <div className="grid dashboard-grid">
+          {specialists.map((specialist) => (
+            <div className="activity-row" key={specialist.specialist_key}>
+              <span className="activity-dot" />
+              <div style={{ minWidth: 0 }}>
+                <div className="activity-title">{specialist.title}</div>
+                <div className="activity-meta">{specialist.department_key} · {specialist.specialist_key}</div>
+                <div className="activity-meta">Runtime owner: Claude · {specialist.status}</div>
+                <div className="activity-meta">Profile source: {specialist.profile_ref}</div>
+                <div className="activity-meta">No OS-side prompt execution or automatic tool grants</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+      <div style={{ height: 16 }} />
+      <section className="panel">
+        <div className="panel-head">
+          <div className="panel-title">Team blueprints</div>
+          <span className="panel-note">{blueprints.length} versioned playbooks · preview only</span>
+        </div>
+        {blueprints.map((blueprint) => (
+          <div className="activity-row" key={blueprint.slug}>
+            <span className="activity-dot" />
+            <div style={{ minWidth: 0, width: "100%" }}>
+              <div className="activity-title">{blueprint.title}</div>
+              <div className="activity-meta">{blueprint.summary}</div>
+              {blueprint.groups.map((group) => (
+                <div key={group.group} style={{ marginTop: 8 }}>
+                  <div className="activity-meta"><strong>{group.group}</strong> · {group.activation}</div>
+                  {group.tasks.map((task) => (
+                    <div className="activity-meta" key={task.title}>
+                      {task.title} — {task.specialist_key} · review required
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
       </section>
 
       <div style={{ height: 16 }} />

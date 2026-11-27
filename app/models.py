@@ -39,6 +39,7 @@ class ExecutionStatus(str, enum.Enum):
     succeeded = "succeeded"
     failed = "failed"
     cancelled = "cancelled"
+    paused = "paused"
 
 
 class ExecutionAttemptStatus(str, enum.Enum):
@@ -48,6 +49,7 @@ class ExecutionAttemptStatus(str, enum.Enum):
     succeeded = "succeeded"
     failed = "failed"
     abandoned = "abandoned"
+    paused = "paused"
 
 
 class Organization(Base):
@@ -276,6 +278,7 @@ class ExecutionAttempt(Base):
     )
 
     attempt_number: Mapped[int] = mapped_column(nullable=False)
+    lease_generation: Mapped[int] = mapped_column(default=1, nullable=False)
     worker_id: Mapped[str | None] = mapped_column(
         String(160), nullable=True
     )
@@ -379,6 +382,7 @@ class AuditEvent(Base):
 class EvaluationRun(Base):
     __tablename__ = "evaluation_runs"
     __table_args__ = (
+        Index("uq_evaluation_runs_scope_id", "org_id", "workspace_id", "id", unique=True),
         Index("ix_eval_org_workspace_created", "org_id", "workspace_id", "created_at"),
     )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
@@ -390,5 +394,6 @@ class EvaluationRun(Base):
     passed: Mapped[bool] = mapped_column(Boolean, nullable=False)
     metrics: Mapped[dict] = mapped_column(JSON, default=dict)
     gate_results: Mapped[dict] = mapped_column(JSON, default=dict)
+    evidence_trust: Mapped[str] = mapped_column(String(32), default="self_reported", nullable=False)
     created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)

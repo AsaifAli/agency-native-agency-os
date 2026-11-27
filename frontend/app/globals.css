@@ -710,3 +710,41 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px
     transition: transform 220ms var(--ease-out), visibility 0s linear 0s;
   }
 }
+
+/* RAAS outcome scorecard — retained from the integration work, adapted to the dark UI. */
+.stack { display: grid; gap: 14px; min-width: 0; }
+.sub-panel {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--surface-soft);
+}
+.inline-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin-top: 14px;
+}
+.button-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.check-row {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  padding: 8px 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+.check-row input { margin-top: 2px; }
+.stat-label {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+details > summary { cursor: pointer; color: #dce4ee; }
+details[open] > summary { margin-bottom: 8px; }
+@media (max-width: 560px) {
+  .inline-form { grid-template-columns: minmax(0, 1fr); }
+}

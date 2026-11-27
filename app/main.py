@@ -88,7 +88,7 @@ async def lifespan(app: FastAPI):
     if settings.app_env.lower() == "production":
         if settings.process_role != "api":
             raise RuntimeError("API process must use PROCESS_ROLE=api in production")
-        verify_postgres_role(engine, expected_bypassrls=False, require_rls=True)
+        verify_postgres_role(engine, expected_bypassrls=False, require_rls=True, expected_role="agency_os_app")
     yield
 
 
@@ -1084,6 +1084,7 @@ def create_evaluation(
         passed=result["passed"],
         metrics=result["metrics"],
         gate_results=result["gate_results"],
+        evidence_trust="self_reported",
         created_by=p.user.id,
     )
 
@@ -1141,6 +1142,10 @@ def list_evaluations(
     )
 
 
+# Workspace-authorized durable execution controls.
+from app.execution_control_routes import router as execution_control_router
+app.include_router(execution_control_router)
+
 # Revenue and Delivery API module installed by Agency OS bundle.
 from app.domain_routes import router as revenue_delivery_router
 app.include_router(revenue_delivery_router)
@@ -1183,4 +1188,6 @@ app.include_router(machine_tool_gateway_router)
 
 # Founder-reviewed agent research drafts; CRM promotion remains an explicit human action.
 from app.revenue_research_routes import router as revenue_research_router
+from app.outbox_observability_routes import router as outbox_observability_router
 app.include_router(revenue_research_router)
+app.include_router(outbox_observability_router)

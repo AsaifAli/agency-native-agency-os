@@ -359,6 +359,25 @@ def test_tool_gateway_idempotent_replay_and_session_binding(security_client):
     assert replay.json()["id"] == first.json()["id"]
     assert replay.json()["replayed"] is True
 
+    # Once payload retention expires, the tombstone must reject replay rather
+    # than re-execute a tool whose original result has been scrubbed.
+    db = security_client.factory()
+    try:
+        invocation = db.query(ToolInvocation).filter_by(id=first.json()["id"]).one()
+        invocation.request_payload = {}
+        invocation.result = None
+        invocation.payload_purged_at = datetime.now(timezone.utc) - timedelta(days=181)
+        db.commit()
+    finally:
+        db.close()
+    expired_replay = security_client.post(
+        "/v1/machine/tools/system.health.read/invoke",
+        headers={**headers, "Idempotency-Key": "health-read-replay-01"},
+        json={"session_id": first_session, "input": {}},
+    )
+    assert expired_replay.status_code == 410
+    assert expired_replay.json()["detail"] == "IDEMPOTENCY_RESULT_EXPIRED"
+
     second_session_response = security_client.post(
         "/v1/machine/sessions",
         headers=headers,
@@ -1028,3 +1047,34 @@ def test_worker_custom_tool_executor_rechecks_revoked_workforce_capability(secur
     )
     with pytest.raises(ToolExecutionRejected):
         executor("os_revenue_lead_research_capture", _research_payload(), "sevt_revoked_grant")
+
+
+def test_denied_tool_invocation_is_audited_without_raw_input(security_client):
+    from app.models import AuditEvent
+
+    _issued, session_id, headers = _issue_research_session(security_client)
+    payload = _research_payload()
+    payload["contact_email"] = "sensitive.owner@example.test"
+    response = security_client.post(
+        "/v1/machine/tools/revenue.lead.research.capture/invoke",
+        headers={**headers, "Idempotency-Key": "revenue-research-denied-audit"},
+        json={"session_id": session_id, "input": payload},
+    )
+    assert response.status_code == 422
+
+    db = security_client.factory()
+    try:
+        event = (
+            db.query(AuditEvent)
+            .filter_by(
+                org_id=security_client.org_id,
+                event_type="tool.invocation.denied",
+            )
+            .order_by(AuditEvent.created_at.desc())
+            .first()
+        )
+        assert event is not None
+        assert event.payload["reason_code"] == "INPUT_SCHEMA_INVALID"
+        assert "sensitive.owner@example.test" not in str(event.payload)
+    finally:
+        db.close()

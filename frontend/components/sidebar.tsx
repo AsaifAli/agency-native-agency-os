@@ -26,6 +26,7 @@ const groups = [
       ["Onboarding", "/onboardings", "▧"],
       ["Invoices & Receivables", "/invoices", "＄"],
       ["Retainers", "/retainers", "◷"],
+      ["Client Outcomes", "/outcomes", "◎"],
       ["Clients", "/clients", "▣"],
       ["Contacts", "/contacts", "♧"],
       ["Calls & Transcripts", "/calls", "☎"],

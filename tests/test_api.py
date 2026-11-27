@@ -8,7 +8,9 @@ from app.db import Base, engine, SessionLocal
 from app.models import (
     User, Organization, Membership, Workspace, Role,
     Agent, Task, DataClass, AuditEvent, Execution, ExecutionStatus, WorkspaceGrant,
+    FounderAuthority,
 )
+from app.telephony.models import OutboxEvent
 from app.config import settings
 from app.worker.processor import process_one_execution
 
@@ -127,7 +129,13 @@ def test_execution_api_accepts_explicit_development_mock(monkeypatch):
     db = SessionLocal()
     try:
         saved = db.get(Execution, execution_id)
-        assert saved.status == ExecutionStatus.succeeded
+        assert saved.status == ExecutionStatus.succeeded, (
+            "Mock execution did not succeed: "
+            f"status={saved.status!r}, runtime={saved.runtime!r}, "
+            f"error_code={saved.error_code!r}, "
+            f"error_message={saved.error_message!r}, "
+            f"attempt_count={saved.attempt_count!r}"
+        )
         assert saved.result["provider"] == "mock"
         assert saved.result["status"] == "succeeded"
 
@@ -283,3 +291,224 @@ def test_organization_owner_without_founder_authority_cannot_change_workspace_gr
         headers=headers,
     )
     assert denied_revoke.status_code == 403
+
+
+def test_execution_cancel_api_cancels_queued_execution_and_audits(monkeypatch):
+    monkeypatch.setattr(settings, "mock_runtime_enabled", True)
+    org_id, workspace_id, task_id, agent_id = _seed_execution_records("mock")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer dev:owner@test.local"}
+    created = client.post(
+        f"/v1/orgs/{org_id}/executions",
+        headers=headers,
+        json={
+            "workspace_id": workspace_id,
+            "task_id": task_id,
+            "agent_id": agent_id,
+            "idempotency_key": f"cancel-api-{uuid.uuid4().hex}",
+        },
+    )
+    assert created.status_code == 201
+    execution_id = created.json()["id"]
+
+    cancelled = client.post(
+        f"/v1/orgs/{org_id}/executions/{execution_id}/cancel",
+        params={"workspace_id": workspace_id},
+        headers=headers,
+    )
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+
+    db = SessionLocal()
+    try:
+        saved = db.get(Execution, execution_id)
+        assert saved.status == ExecutionStatus.cancelled
+        assert saved.finished_at is not None
+        assert db.query(AuditEvent).filter_by(
+            resource_id=execution_id, event_type="execution.cancelled"
+        ).count() == 1
+    finally:
+        db.close()
+
+
+def test_execution_cancel_api_hides_cross_workspace_execution(monkeypatch):
+    monkeypatch.setattr(settings, "mock_runtime_enabled", True)
+    org_id, workspace_id, task_id, agent_id = _seed_execution_records("mock")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer dev:owner@test.local"}
+    created = client.post(
+        f"/v1/orgs/{org_id}/executions",
+        headers=headers,
+        json={
+            "workspace_id": workspace_id,
+            "task_id": task_id,
+            "agent_id": agent_id,
+            "idempotency_key": f"cancel-scope-{uuid.uuid4().hex}",
+        },
+    )
+    assert created.status_code == 201
+    execution_id = created.json()["id"]
+
+    denied = client.post(
+        f"/v1/orgs/{org_id}/executions/{execution_id}/cancel",
+        params={"workspace_id": "another-workspace"},
+        headers=headers,
+    )
+    assert denied.status_code == 404
+
+
+def test_execution_cancel_api_persists_request_for_active_execution(monkeypatch):
+    monkeypatch.setattr(settings, "mock_runtime_enabled", True)
+    org_id, workspace_id, task_id, agent_id = _seed_execution_records("mock")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer dev:owner@test.local"}
+    created = client.post(
+        f"/v1/orgs/{org_id}/executions",
+        headers=headers,
+        json={
+            "workspace_id": workspace_id,
+            "task_id": task_id,
+            "agent_id": agent_id,
+            "idempotency_key": f"cancel-active-{uuid.uuid4().hex}",
+        },
+    )
+    assert created.status_code == 201
+    execution_id = created.json()["id"]
+
+    db = SessionLocal()
+    try:
+        execution = db.get(Execution, execution_id)
+        execution.status = ExecutionStatus.running
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.post(
+        f"/v1/orgs/{org_id}/executions/{execution_id}/cancel",
+        params={"workspace_id": workspace_id},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "running"
+    assert response.json()["control_request"]["action"] == "cancel"
+
+
+
+def test_execution_pause_and_resume_api_for_unstarted_execution(monkeypatch):
+    monkeypatch.setattr(settings, "mock_runtime_enabled", True)
+    org_id, workspace_id, task_id, agent_id = _seed_execution_records("mock")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer dev:owner@test.local"}
+    created = client.post(
+        f"/v1/orgs/{org_id}/executions", headers=headers,
+        json={"workspace_id": workspace_id, "task_id": task_id,
+              "agent_id": agent_id, "idempotency_key": f"pause-api-{uuid.uuid4().hex}"},
+    )
+    assert created.status_code == 201
+    execution_id = created.json()["id"]
+
+    paused = client.post(
+        f"/v1/orgs/{org_id}/executions/{execution_id}/pause",
+        params={"workspace_id": workspace_id}, headers=headers,
+    )
+    assert paused.status_code == 200
+    assert paused.json()["status"] == "paused"
+
+    resumed = client.post(
+        f"/v1/orgs/{org_id}/executions/{execution_id}/resume",
+        params={"workspace_id": workspace_id}, headers=headers,
+    )
+    assert resumed.status_code == 200
+    assert resumed.json()["status"] == "queued"
+    assert resumed.json()["control_request"]["action"] == "resume"
+
+
+
+def test_outbox_summary_requires_authentication():
+    client = TestClient(app)
+    response = client.get(
+        f"/v1/orgs/{_org_id()}/workspaces/ws-test/outbox/summary"
+    )
+    assert response.status_code == 401
+
+
+def test_outbox_summary_rejects_organization_owner_without_founder_authority():
+    client = TestClient(app)
+    response = client.get(
+        f"/v1/orgs/{_org_id()}/workspaces/ws-test/outbox/summary",
+        headers={"Authorization": "Bearer dev:owner@test.local"},
+    )
+    assert response.status_code == 403
+
+
+def test_outbox_summary_rejects_member_without_exact_workspace_grant():
+    db = SessionLocal()
+    try:
+        viewer = User(
+            email=f"outbox-viewer-{uuid.uuid4().hex}@test.local",
+            display_name="Outbox Viewer",
+        )
+        db.add(viewer)
+        db.flush()
+        db.add(Membership(org_id=_org_id(), user_id=viewer.id, role=Role.viewer))
+        db.commit()
+        email = viewer.email
+    finally:
+        db.close()
+
+    response = TestClient(app).get(
+        f"/v1/orgs/{_org_id()}/workspaces/ws-test/outbox/summary",
+        headers={"Authorization": f"Bearer dev:{email}"},
+    )
+    assert response.status_code == 404
+
+
+def test_outbox_summary_founder_response_is_scoped_and_payload_free():
+    org_id = _org_id()
+    db = SessionLocal()
+    try:
+        owner = db.query(User).filter_by(email="owner@test.local").one()
+        db.add(FounderAuthority(org_id=org_id, user_id=owner.id, active=True))
+        db.add_all([
+            OutboxEvent(
+                org_id=org_id, workspace_id="ws-test", event_type="test.pending",
+                schema_version=1, aggregate_type="test", aggregate_id=str(uuid.uuid4()),
+                idempotency_key=f"outbox-api-pending-{uuid.uuid4().hex}",
+                payload={"secret": "must-not-leak"}, status="pending",
+            ),
+            OutboxEvent(
+                org_id=org_id, workspace_id="ws-test", event_type="test.published",
+                schema_version=1, aggregate_type="test", aggregate_id=str(uuid.uuid4()),
+                idempotency_key=f"outbox-api-published-{uuid.uuid4().hex}",
+                payload={"published": True}, status="published",
+            ),
+        ])
+        other_workspace = Workspace(
+            id=f"outbox-other-{uuid.uuid4().hex[:12]}",
+            org_id=org_id, name="Other Outbox Workspace",
+        )
+        db.add(other_workspace)
+        db.flush()
+        db.add(OutboxEvent(
+            org_id=org_id, workspace_id=other_workspace.id, event_type="test.other",
+            schema_version=1, aggregate_type="test", aggregate_id=str(uuid.uuid4()),
+            idempotency_key=f"outbox-api-other-{uuid.uuid4().hex}",
+            payload={"other_workspace": True}, status="pending",
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    response = TestClient(app).get(
+        f"/v1/orgs/{org_id}/workspaces/ws-test/outbox/summary",
+        headers={"Authorization": "Bearer dev:owner@test.local"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["counts"] == {
+        "pending": 1, "processing": 0, "published": 1, "dead_letter": 0,
+    }
+    assert body["total"] == 2
+    assert "payload" not in body
+    assert "secret" not in str(body)
+    assert "other_workspace" not in str(body)

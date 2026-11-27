@@ -84,6 +84,7 @@ A checkbox is complete only when code/infrastructure, tests, operational evidenc
 - [ ] Kill a worker after claim and after provider call; prove lease recovery, safe retry/reconciliation and no duplicate business effect.
 - [ ] Test heartbeat loss, lease renewal races, expired lease recovery, retry scheduling, max attempts and dead-letter transitions.
 - [ ] Test cancellation before claim, during execution and after external side effect; define honest terminal states for ambiguous outcomes.
+- [ ] Verify pause/resume lifecycle: queued pause, provider-confirmed active pause, same-session resume, resume deduplication after worker crash, cancellation superseding pause, retry exhaustion and workspace isolation. Backend/API implementation and focused tests are present on `feat/agency-os-consolidation`; focused Python suite passed (47 tests), full SQLite-backed backend regression passed (408 tests; 8 PostgreSQL-only tests skipped), and the PostgreSQL Compose migration/test suite passed (55 tests). Live Managed Agents interruption/resumption, deployed multi-worker behavior and end-to-end UI verification remain pending.
 - [ ] Implement idempotency keys and deduplication for every external action; reconcile provider outcomes after timeout rather than blindly resending.
 - [ ] Complete transactional outbox delivery, versioned events, at-least-once semantics, duplicate handling, replay permissions and reconciliation.
 - [ ] Test actual multi-process and multi-replica workers under sustained synthetic load; measure queue age, throughput, lock contention and resource usage.
@@ -208,7 +209,7 @@ A checkbox is complete only when code/infrastructure, tests, operational evidenc
 - [ ] Add accessible navigation, keyboard support, loading/empty/error states and responsive layouts.
 - [ ] Ensure destructive/high-impact controls require confirmation and show consequences.
 - [ ] Verify frontend authorization mirrors backend policy without treating UI hiding as security.
-- [ ] Run end-to-end browser tests for critical founder journeys.
+- [ ] Run end-to-end browser tests for critical founder journeys. Frontend `npm ci`, ESLint (0 errors; 7 React Hook dependency warnings), TypeScript validation and Next.js production build passed locally on the integration branch; 31 static pages generated and npm reported 0 vulnerabilities. Browser-level interaction tests remain pending.
 
 ### 17. Learning and operational improvement
 - [ ] Capture incidents, corrections, successful playbooks and postmortems as reviewed knowledge.
@@ -265,8 +266,8 @@ A checkbox is complete only when code/infrastructure, tests, operational evidenc
 
 ## Known open blockers at the 2026-11-26 checkpoint
 
-- [ ] PostgreSQL 16 verification; latest worker integration evidence is PostgreSQL 17 (368 passed, 1 RLS-only test skipped).
-- [ ] NOBYPASSRLS RLS integration and complete role/grant/ownership verification.
+- [x] PostgreSQL 16 Compose migration and integration suite: 55 passed, 0 failed on 2026-11-26. The stack provisions a `NOBYPASSRLS` worker role and exercises the configured admin/application/worker database URLs; this is test-suite evidence, not proof of deployed production topology.
+- [ ] Complete independent role/grant/ownership and RLS policy review across every tenant-scoped table, SECURITY DEFINER function and deployment role; retain the 55-pass PostgreSQL 16 suite as regression evidence.
 - [ ] Replace broad worker BYPASSRLS with narrowly scoped queue operations.
 - [ ] Human workspace assignment model and complete nested-object authorization matrix.
 - [ ] Actual worker process termination/restart, sustained load, cancellation and deployed multi-replica verification.

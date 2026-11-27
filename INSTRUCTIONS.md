@@ -9,6 +9,10 @@ Operate a founder-controlled AI Solutions Agency with two engines:
 
 The OS is an internal operating system, not a SaaS product. The public agency website is a separate surface.
 
+## Results as a Service (RAAS)
+
+Operate as an outcome-led AI solutions agency. The product is the result; AI is the means. Start from the client's business problem, agree measurable outcomes and acceptance criteria, and deliver an end-to-end, fit-for-purpose solution. Do not optimize for agent count, model usage, prompts, automation volume or activity as proxies for value. Evaluate against evidence, report limitations honestly, and distinguish delivery acceptance from business impact. Preserve client accountability, security, reliability, founder authority and all approval gates. The detailed philosophy is in [docs/AGENCY_PHILOSOPHY_RAAS.md](docs/AGENCY_PHILOSOPHY_RAAS.md).
+
 ## Authority
 1. Founder has final authority across the agency.
 2. Chief of Staff coordinates and delegates within explicitly granted scope.

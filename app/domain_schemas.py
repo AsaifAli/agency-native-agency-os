@@ -1,5 +1,6 @@
 """Validated API contracts for Revenue and Delivery resources."""
 from datetime import datetime
+from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -282,3 +283,78 @@ class MilestoneOut(BaseModel):
     due_date: datetime | None
     sort_order: int
     created_at: datetime
+
+
+class ProjectOutcomeCreate(BaseModel):
+    workspace_id: str
+    title: str = Field(min_length=3, max_length=240)
+    problem_statement: str = Field(min_length=10, max_length=10000)
+    desired_outcome: str = Field(min_length=10, max_length=10000)
+    metric_name: str = Field(min_length=2, max_length=160)
+    metric_unit: str = Field(min_length=1, max_length=64)
+    direction: str = Field(pattern="^(increase|decrease)$")
+    baseline_value: Decimal | None = Field(default=None, max_digits=20, decimal_places=6, allow_inf_nan=False)
+    target_value: Decimal = Field(max_digits=20, decimal_places=6, allow_inf_nan=False)
+    target_date: datetime | None = None
+    measurement_method: str = Field(min_length=10, max_length=10000)
+    acceptance_criteria: list[str] = Field(min_length=1, max_length=20)
+
+
+class ProjectOutcomeOut(BaseModel):
+    id: str
+    workspace_id: str
+    project_id: str
+    title: str
+    problem_statement: str
+    desired_outcome: str
+    metric_name: str
+    metric_unit: str
+    direction: str
+    baseline_value: Decimal | None
+    target_value: Decimal
+    target_date: datetime | None
+    measurement_method: str
+    acceptance_criteria: list[str]
+    delivery_acceptance_status: str
+    acceptance_results: dict[str, bool]
+    acceptance_note: str
+    decided_by_user_id: str | None
+    decided_at: datetime | None
+    latest_value: Decimal | None
+    latest_measured_at: datetime | None
+    measurement_count: int
+    impact_status: str
+    created_at: datetime
+
+
+class OutcomeMeasurementCreate(BaseModel):
+    workspace_id: str
+    value: Decimal = Field(max_digits=20, decimal_places=6, allow_inf_nan=False)
+    measured_at: datetime | None = None
+    source_type: str = Field(pattern="^(agency_measured|client_reported|system_measured)$")
+    source_reference: str = Field(min_length=2, max_length=240)
+    evidence_summary: str = Field(min_length=10, max_length=10000)
+    supporting_evaluation_run_id: str | None = None
+    milestone_id: str | None = None
+
+
+class OutcomeMeasurementOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    workspace_id: str
+    outcome_id: str
+    value: Decimal
+    measured_at: datetime
+    source_type: str
+    source_reference: str
+    evidence_summary: str
+    supporting_evaluation_run_id: str | None
+    milestone_id: str | None
+    created_at: datetime
+
+
+class OutcomeAcceptanceDecision(BaseModel):
+    workspace_id: str
+    decision: str = Field(pattern="^(accepted|rejected)$")
+    criteria_results: dict[str, bool]
+    note: str = Field(min_length=10, max_length=5000)

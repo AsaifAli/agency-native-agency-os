@@ -65,11 +65,11 @@ Existing n8n-related code and legacy workflow exports may remain as migration re
 ## 4. Delivery Engine
 
 - Client onboarding checklist and workspace provisioning.
-- Discovery records, problem statement, objectives, constraints, stakeholders and success measures.
+- Discovery records, problem statement, objectives, constraints, stakeholders and success measures. Each engagement should define measurable project outcomes with baseline, target, metric/unit, measurement method and agreed delivery acceptance criteria.
 - Requirements with stable IDs and traceability to design decisions, tasks, code changes, tests and handover evidence.
 - Project plans, milestones, tasks, dependencies, owners, risks, budgets, change requests and deliverables.
 - Engineering work must include human review; AI-generated code cannot approve itself.
-- QA/security gates, test evidence, deployment approvals, rollback plan and handover.
+- QA/security gates, test evidence, deployment approvals, rollback plan and handover. Delivery acceptance must remain distinct from measured business impact; task completion, deployment and agent activity are not proof of client results. Record source-backed measurements against the agreed outcome and report verification limits honestly.
 - Client support tickets, incidents, maintenance history, service commitments and renewal reminders.
 - Client-specific knowledge and artifacts remain tenant/workspace scoped.
 

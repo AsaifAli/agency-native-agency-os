@@ -38,7 +38,7 @@ def test_postgres_role_verification_fails_closed_for_non_postgres_engine():
     engine = create_engine("sqlite://")
     try:
         with pytest.raises(RuntimeError, match="requires PostgreSQL"):
-            verify_postgres_role(engine, expected_bypassrls=False, require_rls=True)
+            verify_postgres_role(engine, expected_bypassrls=False, require_rls=True, expected_role="agency_os_app")
     finally:
         engine.dispose()
 
@@ -46,7 +46,10 @@ def test_postgres_role_verification_fails_closed_for_non_postgres_engine():
 def test_required_rls_inventory_covers_every_tenant_table_and_execution_attempts():
     from app.db import REQUIRED_RLS_TABLES
 
-    assert len(REQUIRED_RLS_TABLES) == 53
+    # Keep this aligned with the current explicit inventory. Outcome tables
+    # were added in the RAAS capability migration.
+    assert len(REQUIRED_RLS_TABLES) == 55
+    assert {"project_outcomes", "outcome_measurements"}.issubset(REQUIRED_RLS_TABLES)
     assert {
         "organizations",
         "workspaces",
@@ -66,3 +69,16 @@ def test_required_rls_inventory_has_no_duplicate_table_names():
     from app.db import REQUIRED_RLS_TABLES
 
     assert len(REQUIRED_RLS_TABLES) == len(set(REQUIRED_RLS_TABLES))
+
+
+
+def test_postgres_role_verification_requires_an_exact_expected_role():
+    engine = create_engine("sqlite://")
+    try:
+        with pytest.raises(ValueError, match="expected_role"):
+            verify_postgres_role(
+                engine, expected_bypassrls=False, require_rls=True,
+                expected_role=" ",
+            )
+    finally:
+        engine.dispose()

@@ -42,17 +42,18 @@ def outbox_context(tmp_path):
 
 
 def add_event(ctx, **overrides):
-    row = OutboxEvent(
-        org_id=ctx["org_id"],
-        workspace_id=ctx["workspace_id"],
-        event_type="test.event",
-        schema_version=1,
-        aggregate_type="test",
-        aggregate_id=str(uuid.uuid4()),
-        idempotency_key=f"test:{uuid.uuid4().hex}",
-        payload={"safe": True},
-        **overrides,
-    )
+    values = {
+        "org_id": ctx["org_id"],
+        "workspace_id": ctx["workspace_id"],
+        "event_type": "test.event",
+        "schema_version": 1,
+        "aggregate_type": "test",
+        "aggregate_id": str(uuid.uuid4()),
+        "idempotency_key": f"test:{uuid.uuid4().hex}",
+        "payload": {"safe": True},
+    }
+    values.update(overrides)
+    row = OutboxEvent(**values)
     ctx["db"].add(row)
     ctx["db"].commit()
     return row.id
@@ -163,3 +164,49 @@ def test_outbox_model_declares_lease_recovery_index():
 
     assert "ix_outbox_dispatch" in index_names
     assert "ix_outbox_lease_recovery" in index_names
+
+
+def test_outbox_summary_is_workspace_scoped_and_never_returns_payload(outbox_context):
+    from app.outbox_service import summarize_outbox
+
+    ctx = outbox_context
+    now = datetime.now(timezone.utc)
+    add_event(ctx, payload={"secret": "must-not-leak"}, created_at=now - timedelta(seconds=90))
+    add_event(ctx, status="published")
+
+    other_workspace = Workspace(
+        id=f"other-{uuid.uuid4().hex[:10]}", org_id=ctx["org_id"],
+        name="Other Workspace",
+    )
+    ctx["db"].add(other_workspace)
+    ctx["db"].commit()
+    add_event({
+        **ctx, "workspace_id": other_workspace.id,
+    }, payload={"other_workspace": True})
+
+    summary = summarize_outbox(
+        ctx["db"], org_id=ctx["org_id"], workspace_id=ctx["workspace_id"], now=now,
+    )
+    assert summary["counts"] == {
+        "pending": 1, "processing": 0, "published": 1, "dead_letter": 0,
+    }
+    assert summary["total"] == 2
+    assert summary["oldest_pending_age_seconds"] == 90
+    assert "payload" not in summary
+    assert "secret" not in str(summary)
+    assert "other_workspace" not in str(summary)
+
+
+def test_outbox_summary_reports_expired_and_exhausted_work(outbox_context):
+    from app.outbox_service import summarize_outbox
+
+    ctx = outbox_context
+    add_event(ctx, status="processing", claimed_by="stale-worker",
+              lease_expires_at=datetime.now(timezone.utc) - timedelta(seconds=10))
+    add_event(ctx, attempts=8, max_attempts=8)
+    summary = summarize_outbox(
+        ctx["db"], org_id=ctx["org_id"], workspace_id=ctx["workspace_id"],
+        now=datetime.now(timezone.utc),
+    )
+    assert summary["expired_leases"] == 1
+    assert summary["exhausted_pending"] == 1
