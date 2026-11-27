@@ -444,6 +444,35 @@ def test_resume_tokens_are_only_allowed_as_validated_internal_identifiers():
     assert protected["resume_token"] == "resume-token-123"
 
 
+def test_resume_token_exception_is_limited_to_flat_resume_control_metadata():
+    nested = _request(request_metadata={
+        "provider": {"resume_token": "resume-token-123"},
+    })
+    with pytest.raises(DataProtectionBlocked) as error:
+        protect_execution_request(nested)
+    assert error.value.code == "SECRET_FIELD_DETECTED"
+
+    nested_inside_control = _request(request_metadata={
+        "control_request": {
+            "action": "resume",
+            "details": {"resume_token": "resume-token-123"},
+        },
+    })
+    with pytest.raises(DataProtectionBlocked) as error:
+        protect_execution_request(nested_inside_control)
+    assert error.value.code == "INVALID_CONTROL_METADATA"
+
+    token_on_pause = _request(request_metadata={
+        "control_request": {
+            "action": "pause",
+            "resume_token": "resume-token-123",
+        },
+    })
+    with pytest.raises(DataProtectionBlocked) as error:
+        protect_execution_request(token_on_pause)
+    assert error.value.code == "INVALID_CONTROL_METADATA"
+
+
 def test_execution_metadata_blocks_structured_credentials_but_allows_resume_control_token():
     unsafe = _request(request_metadata={"provider": {"api_key": "opaque-credential-fixture"}})
     with pytest.raises(DataProtectionBlocked) as error:
