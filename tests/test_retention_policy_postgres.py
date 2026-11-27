@@ -39,14 +39,21 @@ def test_retention_scrubbing_runs_only_with_exact_workspace_capability():
     user = User(email=f"retention-pg-{suffix}@example.test")
     org = Organization(name=f"Retention PG {suffix}")
     org_id = workspace_id = session_id = invocation_id = identity_id = None
+    after_workspace_id = None
     capability = None
     workspace_factory = None
     try:
         with Admin() as db:
             db.add_all([user, org])
             db.flush()
+            # Maintenance claims are global and ordered by workspace ID. Start
+            # after the pre-existing maximum and give this fixture a sortable
+            # high ID so unrelated workspaces cannot steal this test's claim.
+            after_workspace_id = db.execute(
+                text("SELECT max(id) FROM public.workspaces")
+            ).scalar_one_or_none()
             workspace = Workspace(
-                id=f"00000000-0000-4000-8000-{suffix}",
+                id=f"~retention-{suffix}",
                 org_id=org.id,
                 name="Retention capability test",
                 created_by=user.id,
@@ -104,11 +111,13 @@ def test_retention_scrubbing_runs_only_with_exact_workspace_capability():
 
         with Worker() as claim_db:
             capability = claim_worker_maintenance_scope(
-                claim_db, worker_id=f"retention-{suffix}", lease_seconds=120,
+                claim_db, worker_id=f"retention-{suffix}",
+                after_workspace_id=after_workspace_id, lease_seconds=120,
             )
             assert capability is not None
             assert capability.workspace_id == workspace_id, (
-                "The isolated retention test DB must have no other unclaimed workspaces"
+                "The claim cursor must select this test's workspace after the "
+                "pre-existing workspace inventory"
             )
             claim_db.commit()
 
