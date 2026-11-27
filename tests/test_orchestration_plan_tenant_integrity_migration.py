@@ -59,7 +59,9 @@ def _base_schema(engine, *, cross_workspace_link=False):
                 delegation_id VARCHAR(36) NOT NULL,
                 ordinal INTEGER NOT NULL,
                 PRIMARY KEY (plan_id, delegation_id),
-                CONSTRAINT uq_plan_delegation_ordinal UNIQUE (plan_id, ordinal)
+                CONSTRAINT uq_plan_delegation_ordinal UNIQUE (plan_id, ordinal),
+                FOREIGN KEY (plan_id) REFERENCES orchestration_plans(id) ON DELETE CASCADE,
+                FOREIGN KEY (delegation_id) REFERENCES delegations(id) ON DELETE CASCADE
             )
             """
         ))
@@ -127,10 +129,10 @@ def test_orchestration_plan_links_are_backfilled_and_reject_cross_workspace_pair
             "orchestration_plan_delegations"
         )
     }
-    assert foreign_keys == {
+    assert {
         "fk_plan_delegation_plan_workspace",
         "fk_plan_delegation_delegation_workspace",
-    }
+    } <= foreign_keys
     indexes = {
         item["name"] for item in inspector.get_indexes(
             "orchestration_plan_delegations"
