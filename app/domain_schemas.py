@@ -318,8 +318,8 @@ class ProjectOutcomeOut(BaseModel):
     delivery_acceptance_status: str
     acceptance_results: dict[str, bool]
     acceptance_note: str
-    accepted_by_user_id: str | None
-    accepted_at: datetime | None
+    decided_by_user_id: str | None
+    decided_at: datetime | None
     latest_value: Decimal | None
     latest_measured_at: datetime | None
     measurement_count: int
