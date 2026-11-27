@@ -188,6 +188,7 @@ def _bounded_json_size(value: Any) -> int:
 def _sanitize_value(
     value: Any, counts: dict[str, int], depth: int = 0,
     trusted_internal_id_keys: frozenset[str] = frozenset(),
+    redaction_count_context: bool = False,
 ) -> Any:
     if depth > MAX_METADATA_DEPTH:
         raise DataProtectionBlocked("METADATA_TOO_DEEP")
@@ -200,7 +201,10 @@ def _sanitize_value(
         if len(value) > MAX_CONTAINER_ITEMS:
             raise DataProtectionBlocked("METADATA_TOO_LARGE")
         return [
-            _sanitize_value(item, counts, depth + 1, trusted_internal_id_keys)
+            _sanitize_value(
+                item, counts, depth + 1, trusted_internal_id_keys,
+                redaction_count_context,
+            )
             for item in value
         ]
     if isinstance(value, dict):
@@ -222,7 +226,7 @@ def _sanitize_value(
                 or not 0 <= item <= MAX_REDACTION_COUNT
             ):
                 raise DataProtectionBlocked("INVALID_TOKEN_USAGE")
-            if normalized_key in _REDACTION_COUNT_KEYS and (
+            if redaction_count_context and normalized_key in _REDACTION_COUNT_KEYS and (
                 isinstance(item, bool)
                 or not isinstance(item, int)
                 or not 0 <= item <= MAX_REDACTION_COUNT
@@ -233,7 +237,7 @@ def _sanitize_value(
                 counts[label] = counts.get(label, 0) + count
             if safe_key in cleaned:
                 raise DataProtectionBlocked("DUPLICATE_SANITIZED_METADATA_KEY")
-            if normalized_key in _REDACTION_COUNT_KEYS:
+            if redaction_count_context and normalized_key in _REDACTION_COUNT_KEYS:
                 cleaned[safe_key] = item
                 continue
             if _is_structured_pii_key(key):
@@ -246,7 +250,11 @@ def _sanitize_value(
                 cleaned[safe_key] = _validate_runtime_identifier(item, internal_scope_id=True)
             else:
                 cleaned[safe_key] = _sanitize_value(
-                    item, counts, depth + 1, trusted_internal_id_keys
+                    item, counts, depth + 1, trusted_internal_id_keys,
+                    redaction_count_context=(
+                        normalized_key == "redaction_counts"
+                        or normalized_key.endswith("_redaction_counts")
+                    ),
                 )
         return cleaned
     if value is None or isinstance(value, bool) or isinstance(value, int):

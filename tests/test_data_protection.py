@@ -466,6 +466,15 @@ def test_trusted_internal_metadata_keys_are_case_sensitive():
     assert error.value.code == "SECRET_FIELD_DETECTED"
 
 
+def test_redaction_counters_survive_audit_payload_protection_without_exempting_pii_fields():
+    protected, _ = protect_untrusted_payload({
+        "purpose_redaction_counts": {"EMAIL": 1},
+        "email": 1,
+    })
+    assert protected["purpose_redaction_counts"] == {"EMAIL": 1}
+    assert protected["email"] == "[REDACTED_PII_FIELD]"
+
+
 def test_nonsecret_token_metadata_is_type_checked():
     with pytest.raises(DataProtectionBlocked) as error:
         protect_untrusted_payload({"token_prefix": "full-token-fixture"})
