@@ -17,12 +17,13 @@ class ToolInvokeRequest(BaseModel):
     input: dict = Field(default_factory=dict)
 
 
-def _agent_authorized_tool_keys(db: Session, identity) -> set[str] | None:
-    """Return tools granted to an agent; None means a non-agent machine identity.
+def _agent_authorized_tool_data_classes(db: Session, identity) -> dict[str, set[str]] | None:
+    """Return per-tool data classes granted to an agent.
 
-    Discovery is deliberately filtered by the workforce grant as well as the
-    machine credential. Invocation still performs the authoritative locked
-    authorization check in the shared Tool Gateway.
+    None means a non-agent machine identity. Discovery is filtered by the
+    workforce grant as well as the machine credential. Invocation still
+    performs the authoritative locked authorization check in the shared
+    Tool Gateway.
     """
     if identity.subject_type != "agent":
         return None
@@ -37,7 +38,7 @@ def _agent_authorized_tool_keys(db: Session, identity) -> set[str] | None:
         .first()
     )
     if member is None or member.status != "active" or member.is_founder_reserved:
-        return set()
+        return {}
 
     scope_rank = {"self": 0, "team": 1, "workspace": 2}
     grants = (
@@ -50,26 +51,26 @@ def _agent_authorized_tool_keys(db: Session, identity) -> set[str] | None:
         )
         .all()
     )
-    allowed: set[str] = set()
+    allowed: dict[str, set[str]] = {}
     for spec in list_tools():
         if spec.minimum_scope not in scope_rank:
             continue
-        if any(
-            spec.key in (grant.tool_allowlist or [])
-            and spec.required_action in (grant.allowed_actions or [])
-            and any(
-                data_class in (grant.allowed_data_classes or [])
-                and data_class in identity.allowed_data_classes
-                and data_class in spec.allowed_data_classes
-                for data_class in identity.allowed_data_classes
-            )
-            and grant.scope in scope_rank
-            and scope_rank[grant.scope] >= scope_rank[spec.minimum_scope]
+        data_classes = {
+            data_class
             for grant in grants
-        ):
-            allowed.add(spec.key)
+            if (
+                spec.key in (grant.tool_allowlist or [])
+                and spec.required_action in (grant.allowed_actions or [])
+                and grant.scope in scope_rank
+                and scope_rank[grant.scope] >= scope_rank[spec.minimum_scope]
+            )
+            for data_class in set(identity.allowed_data_classes)
+            .intersection(spec.allowed_data_classes)
+            .intersection(grant.allowed_data_classes or [])
+        }
+        if data_classes:
+            allowed[spec.key] = data_classes
     return allowed
-
 
 def _tool_view(spec, identity_allowed_data_classes: list[str]):
     return {
@@ -90,15 +91,23 @@ def list_machine_tools(
     principal: MachinePrincipal = Depends(get_machine_principal),
 ):
     identity = principal.identity
-    agent_allowed_tools = _agent_authorized_tool_keys(db, identity)
+    agent_tool_data_classes = _agent_authorized_tool_data_classes(db, identity)
     return {
         "tools": [
-            _tool_view(spec, identity.allowed_data_classes)
+            _tool_view(
+                spec,
+                identity.allowed_data_classes
+                if agent_tool_data_classes is None
+                else list(agent_tool_data_classes[spec.key]),
+            )
             for spec in list_tools()
             if "tools:invoke" in identity.scopes
             and f"tool:{spec.key}" in identity.scopes
             and any(value in identity.allowed_data_classes for value in spec.allowed_data_classes)
-            and (agent_allowed_tools is None or spec.key in agent_allowed_tools)
+            and (
+                agent_tool_data_classes is None
+                or spec.key in agent_tool_data_classes
+            )
         ]
     }
 
