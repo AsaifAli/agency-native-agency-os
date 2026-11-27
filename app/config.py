@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     oidc_csrf_cookie_name: str = "agency_os_csrf"
     oidc_session_ttl_seconds: int = Field(default=1800, ge=300, le=43200)
     browser_session_retention_days: int = Field(default=30, ge=1, le=3650)
+    agent_session_metadata_retention_days: int = Field(default=90, ge=1, le=3650)
+    tool_invocation_payload_retention_days: int = Field(default=180, ge=1, le=3650)
 
     db_connect_timeout_seconds: int = Field(default=5, ge=1, le=60)
     db_pool_timeout_seconds: int = Field(default=5, ge=1, le=300)
