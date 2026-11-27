@@ -75,6 +75,12 @@ def test_browser_session_retention_rpc_is_worker_only_bounded_and_audited():
                 )
             """)).scalar_one()
             assert can_execute is True
+            table_privileges = connection.execute(text("""
+                SELECT
+                    has_table_privilege(current_user, 'public.browser_sessions', 'SELECT'),
+                    has_table_privilege(current_user, 'public.browser_sessions', 'DELETE')
+            """)).one()
+            assert table_privileges == (False, False)
             deleted = connection.execute(text("""
                 SELECT agency_os_private.prune_expired_browser_sessions(
                     :retention_days, :batch_size
