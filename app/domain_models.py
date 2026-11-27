@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, JSON, String, Text,
-    UniqueConstraint, CheckConstraint,
+    UniqueConstraint, CheckConstraint, Numeric,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -243,6 +243,7 @@ class Project(Base):
     __tablename__ = "projects"
     __table_args__ = (
         Index("ix_projects_scope_status", "org_id", "workspace_id", "status"),
+        UniqueConstraint("org_id", "workspace_id", "id", name="uq_projects_scope_id"),
         CheckConstraint("budget_minor >= 0", name="ck_project_budget_nonnegative"),
     )
 
@@ -282,6 +283,78 @@ class Milestone(Base):
     status: Mapped[str] = mapped_column(String(32), default="pending", server_default="pending", nullable=False)
     due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sort_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class ProjectOutcome(Base):
+    """Agreed client outcome and delivery-acceptance contract for a project."""
+    __tablename__ = "project_outcomes"
+    __table_args__ = (
+        UniqueConstraint("org_id", "workspace_id", "id", name="uq_project_outcomes_scope_id"),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "project_id"],
+            ["projects.org_id", "projects.workspace_id", "projects.id"],
+            ondelete="CASCADE", name="fk_project_outcomes_project_scope",
+        ),
+        Index("ix_project_outcomes_scope_project", "org_id", "workspace_id", "project_id"),
+        CheckConstraint("direction IN ('increase','decrease')", name="ck_project_outcome_direction"),
+        CheckConstraint("delivery_acceptance_status IN ('pending','accepted','rejected')",
+                        name="ck_project_outcome_acceptance_status"),
+        CheckConstraint("target_value IS NOT NULL", name="ck_project_outcome_target_required"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    problem_statement: Mapped[str] = mapped_column(Text, nullable=False)
+    desired_outcome: Mapped[str] = mapped_column(Text, nullable=False)
+    metric_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    metric_unit: Mapped[str] = mapped_column(String(64), nullable=False)
+    direction: Mapped[str] = mapped_column(String(16), nullable=False)
+    baseline_value: Mapped[object | None] = mapped_column(Numeric(20, 6), nullable=True)
+    target_value: Mapped[object] = mapped_column(Numeric(20, 6), nullable=False)
+    target_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    measurement_method: Mapped[str] = mapped_column(Text, nullable=False)
+    acceptance_criteria: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    delivery_acceptance_status: Mapped[str] = mapped_column(String(16), default="pending", server_default="pending", nullable=False)
+    acceptance_results: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    acceptance_note: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
+    accepted_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    owner_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
+
+
+class OutcomeMeasurement(Base):
+    """Append-only, source-backed observation of a client outcome metric."""
+    __tablename__ = "outcome_measurements"
+    __table_args__ = (
+        UniqueConstraint("org_id", "workspace_id", "id", name="uq_outcome_measurements_scope_id"),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "outcome_id"],
+            ["project_outcomes.org_id", "project_outcomes.workspace_id", "project_outcomes.id"],
+            ondelete="CASCADE", name="fk_outcome_measurements_outcome_scope",
+        ),
+        Index("ix_outcome_measurements_scope_outcome_time", "org_id", "workspace_id", "outcome_id", "measured_at"),
+        CheckConstraint("source_type IN ('agency_measured','client_reported','system_measured','independently_verified')",
+                        name="ck_outcome_measurement_source_type"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    outcome_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    value: Mapped[object] = mapped_column(Numeric(20, 6), nullable=False)
+    measured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_reference: Mapped[str] = mapped_column(String(240), nullable=False)
+    evidence_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    supporting_evaluation_run_id: Mapped[str | None] = mapped_column(ForeignKey("evaluation_runs.id"), nullable=True)
+    milestone_id: Mapped[str | None] = mapped_column(ForeignKey("milestones.id"), nullable=True)
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 
 
