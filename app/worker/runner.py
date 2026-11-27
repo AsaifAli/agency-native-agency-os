@@ -75,6 +75,22 @@ def _run_session_maintenance(
     return expired_count
 
 
+def _run_retention_maintenance(
+    session_factory: SessionFactory,
+    batch_size: int,
+) -> dict[str, int]:
+    """Scrub eligible session descriptions and tool payloads in one workspace."""
+    with session_factory() as db:
+        result = purge_due_retention_data(
+            db,
+            limit=min(batch_size, 1000),
+            agent_session_days=settings.agent_session_metadata_retention_days,
+            tool_invocation_payload_days=settings.tool_invocation_payload_retention_days,
+        )
+        db.commit()
+    return result
+
+
 def _run_browser_session_retention(
     session_factory: SessionFactory,
     batch_size: int,
@@ -218,7 +234,7 @@ def run_worker(
 
         if now >= next_maintenance_at:
             cursor_workspace_id = None
-            totals = [0, 0, 0, 0, 0, 0, 0]
+            totals = [0, 0, 0, 0, 0, 0, 0, 0, 0]
             while not stop_event.is_set():
                 # The database chooses exactly one workspace. The worker never
                 # receives an unscoped tenant inventory or chooses a tenant ID.
@@ -245,6 +261,9 @@ def run_worker(
                     expired_sessions = _run_session_maintenance(
                         scoped_factory, maintenance_batch_size,
                     )
+                    retention = _run_retention_maintenance(
+                        scoped_factory, maintenance_batch_size,
+                    )
                     published, retried, dead, requeued = _run_outbox_maintenance(
                         scoped_factory,
                         worker_id=worker_id,
@@ -269,10 +288,13 @@ def run_worker(
                 totals[4] += published
                 totals[5] += retried
                 totals[6] += dead + requeued
+                totals[7] += retention["agent_sessions_scrubbed"]
+                totals[8] += retention["tool_payloads_purged"]
                 cursor_workspace_id = capability.workspace_id
                 did_work = did_work or any((
                     promoted, recovered, queued, expired_sessions,
                     published, retried, dead, requeued,
+                    retention["agent_sessions_scrubbed"], retention["tool_payloads_purged"],
                 ))
 
             pruned_browser_sessions = _run_browser_session_retention(
@@ -282,7 +304,8 @@ def run_worker(
                 logger.info(
                     "Capability-scoped worker maintenance completed: promoted=%s recovered=%s "
                     "delegated_queued=%s sessions_expired=%s outbox_published=%s "
-                    "outbox_retried=%s outbox_reconciled=%s browser_sessions_pruned=%s",
+                    "outbox_retried=%s outbox_reconciled=%s agent_session_metadata_scrubbed=%s "
+                    "tool_payloads_purged=%s browser_sessions_pruned=%s",
                     *totals, pruned_browser_sessions,
                 )
             next_maintenance_at = clock() + maintenance_interval_seconds
