@@ -108,6 +108,7 @@ def list_machine_tools(
             for spec in list_tools()
             if "tools:invoke" in identity.scopes
             and f"tool:{spec.key}" in identity.scopes
+            and not spec.requires_approval
             and any(value in identity.allowed_data_classes for value in spec.allowed_data_classes)
             and (
                 agent_tool_data_classes is None
