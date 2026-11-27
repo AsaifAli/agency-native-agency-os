@@ -22,7 +22,10 @@ def test_rls_migration_covers_every_model_table_with_org_id():
     # workspace_grants is introduced by the follow-up authorization migration;
     # the original migration remains an immutable historical baseline.
     expected.pop("workspace_grants")
-    # Outcome tables were introduced by a later additive migration; keep the\n    # original tenant-RLS revision immutable.\n    expected.difference_update({"project_outcomes", "outcome_measurements"})\n    assert MIGRATION.ORG_TABLES == expected
+    # Outcome tables were introduced by a later additive migration; keep the
+    # original tenant-RLS revision immutable.
+    expected.difference_update({"project_outcomes", "outcome_measurements"})
+    assert MIGRATION.ORG_TABLES == expected
 
 
 def test_rls_migration_has_security_definer_membership_and_dedicated_roles():
@@ -75,9 +78,8 @@ def test_startup_rls_inventory_matches_all_migration_tables():
     from app.db import REQUIRED_RLS_TABLES
 
     expected = set(MIGRATION.ORG_TABLES) | {
-        "organizations",
-        "browser_sessions",
-        "execution_attempts",
+        "organizations", "browser_sessions", "execution_attempts",
+        "project_outcomes", "outcome_measurements",
     }
     assert REQUIRED_RLS_TABLES == expected | {"workspace_grants"}
 
@@ -108,7 +110,8 @@ def test_workspace_authorization_migration_covers_every_workspace_owned_table():
         if {"org_id", "workspace_id"} <= {column.name for column in table.columns}
         and table.name != "workspace_grants"
     }
-    expected.difference_update({"project_outcomes", "outcome_measurements"})\n    assert set(migration.WORKSPACE_TABLES) == expected
+    expected.difference_update({"project_outcomes", "outcome_measurements"})
+    assert set(migration.WORKSPACE_TABLES) == expected
 
 
 def test_only_explicit_org_level_tables_allow_null_workspace_rows():
