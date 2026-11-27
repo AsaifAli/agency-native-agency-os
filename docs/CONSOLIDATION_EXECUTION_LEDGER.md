@@ -1,8 +1,8 @@
 # Agency OS — Consolidation and Readiness Execution Ledger
 
 **Last reconciled:** 2026-11-27  
-**Release candidate:** `main` at `4541626d6fffc904d8ee3131bb2f408efbe27acf`  
-**Merged work:** PR #58 — [Consolidate Agency OS execution controls and reliability changes](https://github.com/AsaifAli/agency-native-agency-os/pull/58)  
+**Release candidate:** `main` at `9e42fbe49d0c9bff2553d0c8b2b77412e889fc0d`  
+**Latest code consolidation:** PR #58 — [Consolidate Agency OS execution controls and reliability changes](https://github.com/AsaifAli/agency-native-agency-os/pull/58)\n**Readiness documentation:** PR #60 — [Reconcile Agency OS readiness docs after PR #58](https://github.com/AsaifAli/agency-native-agency-os/pull/60), merged 2026-11-27  
 **Release posture:** **NO-GO for production** — implementation and disposable-environment tests are not production acceptance.
 
 This document supersedes the pre-merge integration ledger below. PR #58 is merged. Its old candidate-branch queue, PR #58 merge blocker and workflow bootstrap failure are historical, not current merge tasks. GitHub Actions are intentionally excluded from this workstream per founder direction.
@@ -18,7 +18,7 @@ This document supersedes the pre-merge integration ledger below. PR #58 is merge
 
 ## Merged baseline
 
-- PR #58 merged into `main` on 2026-11-27; merge commit `4541626d6fffc904d8ee3131bb2f408efbe27acf`.
+- PR #58 merged into `main` on 2026-11-27; merge commit `9e42fbe49d0c9bff2553d0c8b2b77412e889fc0d`.
 - The merged baseline includes the consolidated worker capability boundary, workspace-grant human authorization restoration, append-only audit-event protection, retention scrubbing foundations and RAAS project outcome management.
 - Backend suite on the merged candidate: **483 passed, 19 skipped, 2 warnings**.
 - Isolated PostgreSQL 16 Compose suite on the merged candidate: **105 passed, 2 warnings**.
