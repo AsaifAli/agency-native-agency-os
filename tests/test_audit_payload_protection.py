@@ -86,19 +86,20 @@ def test_record_event_rejects_oversized_or_non_object_payloads():
     assert db.added == []
 
 
-def test_record_event_preserves_only_validated_resume_token_and_safe_token_prefix():
+def test_record_event_rejects_resume_tokens_but_preserves_safe_machine_prefix():
     db = RecordingSession()
 
-    event = record_event(
-        db,
-        "org-1",
-        "user-1",
-        "execution.resume_requested",
-        "execution",
-        "execution-1",
-        "workspace-1",
-        {"resume_token": "resume-token-123", "token_prefix": "aos_mi_test."},
-    )
+    with pytest.raises(DataProtectionBlocked) as error:
+        record_event(
+            db,
+            "org-1",
+            "user-1",
+            "execution.resume_requested",
+            "execution",
+            "execution-1",
+            "workspace-1",
+            {"resume_token": "resume-token-123", "token_prefix": "aos_mi_test."},
+        )
 
-    assert event.payload["resume_token"] == "resume-token-123"
-    assert event.payload["token_prefix"] == "aos_mi_test."
+    assert error.value.code == "SECRET_FIELD_DETECTED"
+    assert db.added == []
