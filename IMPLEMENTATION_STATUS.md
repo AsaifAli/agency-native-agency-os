@@ -57,7 +57,7 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 - Workspace-scoped execution history and execution trace APIs; Founder Console Processes and Monitoring views.
 
 ### Audit, privacy and retention
-- Audit payloads reject invalid/oversized structures, detect known credential-bearing fields fail-closed and redact supported free-text/structured PII. PR #68 removes the generic audit exemption for `resume_token`; resume identifiers remain validated only in the narrowly scoped execution-control boundary. Latest regression is added but awaits rerun.
+- Audit payloads reject invalid/oversized structures, detect known credential-bearing fields fail-closed and redact supported free-text/structured PII. PR #68 removes the generic audit exemption for `resume_token`; resume identifiers remain validated only in the narrowly scoped execution-control boundary. Latest audit-token and worker-function privilege regressions are added but await rerun.
 - PostgreSQL audit events reject UPDATE/DELETE by application and worker roles. This is append-only protection, **not cryptographic tamper-evidence**; hash chaining or externally anchored integrity checkpoints are not implemented.
 - Browser sessions store a digest of the JWT identifier, support server-side revocation and rotation, and are pruned in bounded batches.
 - Agent sessions are constrained by machine identity data-class grants and cannot outlive the identity.
@@ -154,7 +154,7 @@ npm run build
 cd ..
 
 # Focused security regressions added in PR #68
-python -m pytest -q tests/test_data_protection.py tests/test_log_sanitization.py tests/test_audit_payload_protection.py tests/test_tool_gateway_policy.py tests/test_machine_identity.py tests/test_tool_gateway_policy.py tests/test_machine_identity.py
+python -m pytest -q tests/test_data_protection.py tests/test_log_sanitization.py tests/test_audit_payload_protection.py tests/test_tool_gateway_policy.py tests/test_machine_identity.py tests/test_rls_migration.py
 
 # Full backend suite
 python -m pytest -q
