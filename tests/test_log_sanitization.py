@@ -74,7 +74,10 @@ def test_generic_secret_token_and_signing_key_fields_are_redacted(caplog):
 
     record = caplog.records[-1]
     for field, value in secret_values.items():
+        if field == "metadata":
+            continue
         assert value not in caplog.text
-        if field != "metadata":
-            assert getattr(record, field) == "[REDACTED]"
+        assert getattr(record, field) == "[REDACTED]"
     assert record.metadata == {"token": "[REDACTED]", "secret": "[REDACTED]"}
+    assert "nested-token-fixture" not in repr(record.metadata)
+    assert "nested-secret-fixture" not in repr(record.metadata)

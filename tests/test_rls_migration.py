@@ -26,6 +26,9 @@ def test_rls_migration_covers_every_model_table_with_org_id():
     # original tenant-RLS revision immutable.
     expected.pop("project_outcomes", None)
     expected.pop("outcome_measurements", None)
+    # Orchestration plan links receive tenant scope in a later additive
+    # migration; keep the original tenant-RLS revision immutable.
+    expected.pop("orchestration_plan_delegations", None)
     assert MIGRATION.ORG_TABLES == expected
 
 
@@ -81,6 +84,7 @@ def test_startup_rls_inventory_matches_all_migration_tables():
     expected = set(MIGRATION.ORG_TABLES) | {
         "organizations", "browser_sessions", "execution_attempts",
         "project_outcomes", "outcome_measurements",
+        "orchestration_plan_delegations",
     }
     assert REQUIRED_RLS_TABLES == expected | {"workspace_grants"}
 
@@ -111,7 +115,10 @@ def test_workspace_authorization_migration_covers_every_workspace_owned_table():
         if {"org_id", "workspace_id"} <= {column.name for column in table.columns}
         and table.name != "workspace_grants"
     }
-    expected.difference_update({"project_outcomes", "outcome_measurements"})
+    expected.difference_update({
+        "project_outcomes", "outcome_measurements",
+        "orchestration_plan_delegations",
+    })
     assert set(migration.WORKSPACE_TABLES) == expected
 
 

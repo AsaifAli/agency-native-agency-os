@@ -89,6 +89,8 @@ _SAFE_NONSECRET_METADATA_KEYS = frozenset({
     "input_tokens", "output_tokens", "tokens_used",
 })
 _TOKEN_USAGE_KEYS = _SAFE_NONSECRET_METADATA_KEYS - {"token_prefix"}
+_REDACTION_COUNT_KEYS = frozenset({"email", "phone", "government_id", "payment_card", "structured_pii"})
+MAX_REDACTION_COUNT = 1_000_000_000
 _MACHINE_TOKEN_PREFIX = re.compile(r"^aos_mi_[A-Za-z0-9_-]{1,36}\.$")
 
 
@@ -216,15 +218,24 @@ def _sanitize_value(
                     raise DataProtectionBlocked("INVALID_TOKEN_PREFIX")
             if normalized_key in _TOKEN_USAGE_KEYS and (
                 isinstance(item, bool)
-                or not isinstance(item, (int, float))
-                or not math.isfinite(item)
+                or not isinstance(item, int)
+                or not 0 <= item <= MAX_REDACTION_COUNT
             ):
                 raise DataProtectionBlocked("INVALID_TOKEN_USAGE")
+            if normalized_key in _REDACTION_COUNT_KEYS and (
+                isinstance(item, bool)
+                or not isinstance(item, int)
+                or not 0 <= item <= MAX_REDACTION_COUNT
+            ):
+                raise DataProtectionBlocked("INVALID_REDACTION_COUNT")
             safe_key, found = sanitize_text(key)
             for label, count in found.items():
                 counts[label] = counts.get(label, 0) + count
             if safe_key in cleaned:
                 raise DataProtectionBlocked("DUPLICATE_SANITIZED_METADATA_KEY")
+            if normalized_key in _REDACTION_COUNT_KEYS:
+                cleaned[safe_key] = item
+                continue
             if _is_structured_pii_key(key):
                 counts["STRUCTURED_PII"] = counts.get("STRUCTURED_PII", 0) + 1
                 cleaned[safe_key] = "[REDACTED_PII_FIELD]"

@@ -62,8 +62,8 @@ def test_protect_execution_request_redacts_nested_metadata_and_prompt_fields():
     )
     protected, report = protect_execution_request(request)
     assert "founder@example.com" not in protected.task_description
-    assert protected.request_metadata["source"]["email"] == "[REDACTED_EMAIL]"
-    assert report.redaction_counts["EMAIL"] == 2
+    assert protected.request_metadata["source"]["email"] == "[REDACTED_PII_FIELD]"
+    assert report.redaction_counts["EMAIL"] == 1
     assert request.task_description == "Contact founder at founder@example.com"
 
 
