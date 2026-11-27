@@ -52,8 +52,9 @@ def test_retention_scrubbing_runs_only_with_exact_workspace_capability():
             after_workspace_id = db.execute(
                 text("SELECT max(id) FROM public.workspaces")
             ).scalar_one_or_none()
+            workspace_id = f"{after_workspace_id or ''}z-retention-{suffix}"
             workspace = Workspace(
-                id=f"~retention-{suffix}",
+                id=workspace_id,
                 org_id=org.id,
                 name="Retention capability test",
                 created_by=user.id,
