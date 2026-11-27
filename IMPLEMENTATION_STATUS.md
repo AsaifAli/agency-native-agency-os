@@ -186,3 +186,9 @@ Founder-reported test results on the exact PR head after fast-forwarding to `41f
 - The earlier resume audit-token and unregistered-tool test failures are resolved in these reruns.
 - Remaining warnings are Starlette/httpx and Authlib/httpx deprecations; they did not fail the runs.
 - GitHub Actions remain intentionally not run per founder direction. No production database, deployment, provider activation or production data operation was performed. PR #68 remains draft pending independent security review and final founder/maintainer merge decision.
+
+
+## Additional independent-review finding — 2026-11-27
+
+- A second-pass review found that the generic `protect_untrusted_payload` API still exposed a caller-selected `resume_token` trusted-identifier exemption. This was narrower than arbitrary-key trust but still violated the intended rule that resume tokens are trusted only inside the validated execution `control_request`. The generic allowlist is now limited to `draft_id`, `lead_id` and `research_record_id`, with a regression test asserting that callers cannot request the resume-token exemption. This code change postdates the reported green test run; rerun focused, full and isolated PostgreSQL suites before merge.
+- Tool Gateway review confirmed that the successful-call ceiling is checked under the locked AgentSession row and persisted invocation rows retain the session ID. The 100-call ceiling remains a global interim cap, not a persisted per-session budget grant.
