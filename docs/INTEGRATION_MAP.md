@@ -34,6 +34,12 @@ The standalone Harness API, dashboard, persistence layer, plugin host, MLOps ext
 
 Evaluation judges, trajectory capture, golden-dataset lifecycle, regression baselines and release orchestration are not claimed as implemented merely because deterministic packs exist. Add these only behind OS tenant/data policy, budgets, audit and release gates.
 
+## Results as a Service (RAAS)
+
+The agency sells measurable client outcomes, not agents or automation for their own sake. The OS records the agreed problem, metric, baseline, target, measurement method and acceptance criteria as project outcomes. Measurements are append-only and retain source references; a source reference or narrative is not independent verification. Delivery acceptance is a founder-authorized decision against the agreed criteria and remains distinct from whether the business-impact target has been achieved.
+
+RAAS does not imply contingent/performance-based pricing. Pricing, attribution, measurement windows, external dependencies and risk allocation must be explicitly agreed in the commercial scope. Automatic KPI ingestion, client sign-off, verified external impact attestations and outcome revision workflows remain future work.
+
 ## Automation boundaries
 
 Native Python workers and the PostgreSQL transactional outbox are the initial automation architecture. No n8n, Activepieces, Temporal or second workflow engine is required. External calls run outside database transactions; consumers must be idempotent; delivery is at-least-once with bounded retries, dead letters and reconciliation.
