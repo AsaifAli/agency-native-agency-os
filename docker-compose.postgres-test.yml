@@ -68,6 +68,8 @@ services:
       - "-c"
       - "REVOKE UPDATE, DELETE ON TABLE public.audit_events FROM agency_os_test_app"
       - "-c"
+      - "REVOKE UPDATE, DELETE ON TABLE public.outcome_measurements FROM agency_os_test_app"
+      - "-c"
       - "GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO agency_os_test_app"
       - "-c"
       - "REVOKE ALL ON TABLE public.workspace_grants FROM agency_os_test_app"
