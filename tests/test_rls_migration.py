@@ -24,7 +24,8 @@ def test_rls_migration_covers_every_model_table_with_org_id():
     expected.pop("workspace_grants")
     # Outcome tables were introduced by a later additive migration; keep the
     # original tenant-RLS revision immutable.
-    expected.difference_update({"project_outcomes", "outcome_measurements"})
+    expected.pop("project_outcomes", None)
+    expected.pop("outcome_measurements", None)
     assert MIGRATION.ORG_TABLES == expected
 
 
