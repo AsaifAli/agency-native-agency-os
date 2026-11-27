@@ -93,6 +93,7 @@ class Delegation(Base):
         CheckConstraint("review_status IN ('pending','approved','changes_requested','waived')", name="ck_delegation_review_status"),
         CheckConstraint("status IN ('blocked','ready','queued','running','awaiting_review','succeeded','failed','cancelled')", name="ck_delegation_status"),
         UniqueConstraint("parent_task_id", "child_task_id", name="uq_delegation_parent_child"),
+        UniqueConstraint("org_id", "workspace_id", "id", name="uq_delegation_scope_id"),
         Index("ix_delegation_scope_parent", "org_id", "workspace_id", "parent_task_id"),
         Index("ix_delegation_scope_assignee", "org_id", "workspace_id", "assigned_to_member_id"),
         Index("ix_delegation_scope_status", "org_id", "workspace_id", "status"),
@@ -119,6 +120,7 @@ class OrchestrationPlan(Base):
     __tablename__ = "orchestration_plans"
     __table_args__ = (
         CheckConstraint("status IN ('planned','in_progress','awaiting_review','succeeded','failed','cancelled')", name="ck_orchestration_plan_status"),
+        UniqueConstraint("org_id", "workspace_id", "id", name="uq_orchestration_plan_scope_id"),
         Index("ix_orchestration_plan_scope_status", "org_id", "workspace_id", "status"),
         Index("ix_orchestration_plan_root_task", "root_task_id"),
     )
@@ -136,9 +138,26 @@ class OrchestrationPlan(Base):
 
 class OrchestrationPlanDelegation(Base):
     __tablename__ = "orchestration_plan_delegations"
-    __table_args__ = (UniqueConstraint("plan_id", "ordinal", name="uq_plan_delegation_ordinal"),)
-    plan_id: Mapped[str] = mapped_column(ForeignKey("orchestration_plans.id", ondelete="CASCADE"), primary_key=True)
-    delegation_id: Mapped[str] = mapped_column(ForeignKey("delegations.id", ondelete="CASCADE"), primary_key=True)
+    __table_args__ = (
+        UniqueConstraint("plan_id", "ordinal", name="uq_plan_delegation_ordinal"),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "plan_id"],
+            ["orchestration_plans.org_id", "orchestration_plans.workspace_id", "orchestration_plans.id"],
+            ondelete="CASCADE",
+            name="fk_plan_delegation_plan_workspace",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "delegation_id"],
+            ["delegations.org_id", "delegations.workspace_id", "delegations.id"],
+            ondelete="CASCADE",
+            name="fk_plan_delegation_delegation_workspace",
+        ),
+        Index("ix_orchestration_plan_delegations_scope_plan", "org_id", "workspace_id", "plan_id"),
+    )
+    org_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    plan_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    delegation_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
