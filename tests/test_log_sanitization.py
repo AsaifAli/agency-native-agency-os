@@ -52,3 +52,29 @@ def test_exception_text_and_structured_extras_are_sanitized(caplog):
     assert record.access_token == "[REDACTED]"
     assert record.email == "[REDACTED]"
     assert record.metadata["contact"] == "[REDACTED_EMAIL]"
+
+
+def test_generic_secret_token_and_signing_key_fields_are_redacted(caplog):
+    configure_log_redaction()
+    logger = logging.getLogger("agency_os.test.structured_secrets")
+    secret_values = {
+        "token": "opaque-token-value-123",
+        "secret": "opaque-secret-value-123",
+        "private_key": "private-key-material-123",
+        "signing_key": "signing-key-material-123",
+        "jwt": "opaque-jwt-value-123",
+        "customer_name": "test-person-fixture",
+        "date_of_birth": "test-date-fixture",
+        "account_number": "test-account-fixture",
+        "metadata": {"token": "nested-token-fixture", "secret": "nested-secret-fixture"},
+    }
+
+    with caplog.at_level(logging.INFO, logger="agency_os.test.structured_secrets"):
+        logger.info("Structured provider event", extra=secret_values)
+
+    record = caplog.records[-1]
+    for field, value in secret_values.items():
+        assert value not in caplog.text
+        if field != "metadata":
+            assert getattr(record, field) == "[REDACTED]"
+    assert record.metadata == {"token": "[REDACTED]", "secret": "[REDACTED]"}
