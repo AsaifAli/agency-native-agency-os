@@ -85,7 +85,7 @@ Never commit `.env`. Use separate dev, staging and production configuration. Rev
 
 ## Key operating documents
 
-- `docs/FINAL_SCOPE_AND_ACCEPTANCE.md` — frozen product boundary and acceptance criteria.
+- `docs/AGENCY_PHILOSOPHY_RAAS.md` — Results as a Service philosophy and outcome-led delivery standard.\n- `docs/FINAL_SCOPE_AND_ACCEPTANCE.md` — frozen product boundary and acceptance criteria.
 - `docs/AGENCY_ORGANIZATION_WORKFORCE_BLUEPRINT.md` — departments, teams, positions and reporting structure.
 - `docs/WORKFORCE_AUTONOMY_AND_FOUNDER_AUTHORITY.md` and `docs/FOUNDER_AUTONOMY_MODEL.md` — founder authority and governed autonomy.
 - `docs/INTEGRATION_MAP.md` — migration decisions and native module boundaries.
@@ -93,7 +93,7 @@ Never commit `.env`. Use separate dev, staging and production configuration. Rev
 - `docs/CLAUDE_MANAGED_AGENTS_ADAPTER.md` — runtime adapter behavior and limitations.
 - `docs/SKILLS_AND_SKILL_GOVERNANCE.md` — curated, provenance-pinned Agent Skills library, admission policy and runtime boundary.
 - `docs/WEBSITE_LEAD_INTAKE.md` — signed website-to-OS boundary.
-- `docs/DELIVERY_OPERATIONS_V5.md` — delivery operations.
+- `docs/DELIVERY_OPERATIONS_V5.md` — delivery operations.\n- Founder Console **Client Outcomes** (`/outcomes`) — project outcomes, source-backed measurements and founder delivery acceptance.
 - `IMPLEMENTATION_STATUS.md` — implemented, tested, partial and unverified capabilities.
 
 ## Verification boundary
