@@ -17,6 +17,7 @@ from app.models import DataClass
 MAX_METADATA_BYTES = 32_768
 MAX_EXECUTION_REQUEST_BYTES = 65_536
 MAX_RUNTIME_DETAIL_CHARS = 16_000
+MAX_RUNTIME_IDENTIFIER_CHARS = 200
 MAX_METADATA_DEPTH = 6
 MAX_CONTAINER_ITEMS = 100
 
@@ -152,7 +153,10 @@ def _sanitize_value(
     if isinstance(value, list):
         if len(value) > MAX_CONTAINER_ITEMS:
             raise DataProtectionBlocked("METADATA_TOO_LARGE")
-        return [_sanitize_value(item, counts, depth + 1) for item in value]
+        return [
+            _sanitize_value(item, counts, depth + 1, trusted_internal_id_keys)
+            for item in value
+        ]
     if isinstance(value, dict):
         if len(value) > MAX_CONTAINER_ITEMS:
             raise DataProtectionBlocked("METADATA_TOO_LARGE")
@@ -192,7 +196,7 @@ def _validate_runtime_identifier(
     """Validate opaque database IDs separately from provider-returned identifiers."""
     if value is None:
         return None
-    if not isinstance(value, str):
+    if not isinstance(value, str) or len(value) > MAX_RUNTIME_IDENTIFIER_CHARS:
         raise DataProtectionBlocked("INVALID_RUNTIME_IDENTIFIER")
     if any(pattern.search(value) for pattern in _SECRET_PATTERNS):
         raise DataProtectionBlocked("SECRET_DETECTED")
@@ -267,6 +271,26 @@ def protect_execution_request(
     if _bounded_json_size(metadata) > MAX_METADATA_BYTES:
         raise DataProtectionBlocked("METADATA_TOO_LARGE")
 
+    control_request = metadata.get("control_request")
+    if control_request is not None:
+        if not isinstance(control_request, dict):
+            raise DataProtectionBlocked("INVALID_CONTROL_METADATA")
+        action = control_request.get("action")
+        if not isinstance(action, str) or action not in {"resume", "pause", "cancel"}:
+            raise DataProtectionBlocked("INVALID_CONTROL_METADATA")
+        for identifier_key in (
+            "resume_token", "resume_event_id", "interrupt_event_id",
+        ):
+            identifier = control_request.get(identifier_key)
+            if identifier is not None:
+                _validate_runtime_identifier(identifier)
+        interrupt_action = control_request.get("interrupt_action")
+        if interrupt_action is not None and (
+            not isinstance(interrupt_action, str)
+            or interrupt_action not in {"pause", "cancel"}
+        ):
+            raise DataProtectionBlocked("INVALID_CONTROL_METADATA")
+
     counts: dict[str, int] = {}
     identifier_fields = {
         "org_id": request.org_id,
@@ -308,13 +332,26 @@ def protect_execution_request(
         raise DataProtectionBlocked("EXECUTION_REQUEST_TOO_LARGE")
 
     original_persist_callback = request.persist_external_run_id
+    original_persist_resume_event = request.persist_resume_event
+    original_persist_control_event = request.persist_control_event
 
     def persist_protected_external_run_id(external_run_id: str) -> None:
-        if not isinstance(external_run_id, str) or not external_run_id:
-            raise DataProtectionBlocked("INVALID_RUNTIME_IDENTIFIER")
         safe_external_run_id = _validate_runtime_identifier(external_run_id)
         if original_persist_callback is not None:
             original_persist_callback(safe_external_run_id)
+
+    def persist_protected_resume_event(resume_token: str, provider_event_id: str) -> None:
+        safe_resume_token = _validate_runtime_identifier(resume_token)
+        safe_provider_event_id = _validate_runtime_identifier(provider_event_id)
+        if original_persist_resume_event is not None:
+            original_persist_resume_event(safe_resume_token, safe_provider_event_id)
+
+    def persist_protected_control_event(action: str, provider_event_id: str) -> None:
+        if not isinstance(action, str) or action not in {"pause", "cancel"}:
+            raise DataProtectionBlocked("INVALID_CONTROL_ACTION")
+        safe_provider_event_id = _validate_runtime_identifier(provider_event_id)
+        if original_persist_control_event is not None:
+            original_persist_control_event(action, safe_provider_event_id)
 
     protected = replace(
         request,
@@ -328,6 +365,14 @@ def protect_execution_request(
         persist_external_run_id=(
             persist_protected_external_run_id
             if original_persist_callback is not None else None
+        ),
+        persist_resume_event=(
+            persist_protected_resume_event
+            if original_persist_resume_event is not None else None
+        ),
+        persist_control_event=(
+            persist_protected_control_event
+            if original_persist_control_event is not None else None
         ),
     )
     return protected, DataProtectionReport(redaction_counts=dict(counts))

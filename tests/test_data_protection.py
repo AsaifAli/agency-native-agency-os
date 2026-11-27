@@ -328,3 +328,80 @@ def test_sanitize_text_blocks_generic_secret_and_token_assignments():
         with pytest.raises(DataProtectionBlocked) as error:
             sanitize_text(value)
         assert error.value.code == "SECRET_DETECTED"
+
+
+def test_trusted_internal_id_keys_are_preserved_inside_nested_arrays():
+    protected, report = protect_untrusted_payload(
+        {"results": [{"draft_id": "draft-1234567890"}]},
+        trusted_internal_id_keys={"draft_id"},
+    )
+    assert protected["results"][0]["draft_id"] == "draft-1234567890"
+    assert report.total_redactions == 0
+
+
+def test_protect_execution_request_wraps_provider_event_persistence_callbacks():
+    persisted = []
+    request = _request(
+        persist_resume_event=lambda token, event_id: persisted.append(("resume", token, event_id)),
+        persist_control_event=lambda action, event_id: persisted.append((action, event_id)),
+    )
+    protected, _ = protect_execution_request(request)
+
+    protected.persist_resume_event("resume-token-123", "provider-event-123")
+    protected.persist_control_event("pause", "provider-event-456")
+
+    assert persisted == [
+        ("resume", "resume-token-123", "provider-event-123"),
+        ("pause", "provider-event-456"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "provider_event_id",
+    ["owner@example.test", "sk-or-v1-1234567890abcdefghijklmnopqrstuv", "e" * 201],
+)
+def test_protect_execution_request_blocks_unsafe_provider_event_ids(provider_event_id):
+    persisted = []
+    request = _request(
+        persist_control_event=lambda action, event_id: persisted.append((action, event_id)),
+    )
+    protected, _ = protect_execution_request(request)
+
+    with pytest.raises(DataProtectionBlocked):
+        protected.persist_control_event("pause", provider_event_id)
+    assert persisted == []
+
+
+def test_protect_execution_request_validates_persisted_provider_event_ids_in_metadata():
+    request = _request(request_metadata={
+        "control_request": {
+            "action": "resume",
+            "resume_token": "resume-token-123",
+            "resume_event_id": "owner@example.test",
+        },
+    })
+    with pytest.raises(DataProtectionBlocked) as error:
+        protect_execution_request(request)
+    assert error.value.code == "SENSITIVE_RUNTIME_IDENTIFIER"
+
+
+def test_protect_execution_request_rejects_invalid_control_metadata():
+    request = _request(request_metadata={
+        "control_request": {"action": "run_anything", "resume_token": "resume-token-123"},
+    })
+    with pytest.raises(DataProtectionBlocked) as error:
+        protect_execution_request(request)
+    assert error.value.code == "INVALID_CONTROL_METADATA"
+
+
+def test_protect_execution_request_blocks_unsupported_control_callback_actions():
+    persisted = []
+    request = _request(
+        persist_control_event=lambda action, event_id: persisted.append((action, event_id)),
+    )
+    protected, _ = protect_execution_request(request)
+
+    with pytest.raises(DataProtectionBlocked) as error:
+        protected.persist_control_event("resume", "provider-event-123")
+    assert error.value.code == "INVALID_CONTROL_ACTION"
+    assert persisted == []
