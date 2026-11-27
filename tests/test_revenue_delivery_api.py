@@ -393,3 +393,167 @@ def test_cross_workspace_parent_reference_is_rejected(client):
         "first_name": "Nope"
     })
     assert r.status_code == 404
+
+
+def test_project_outcomes_track_targets_measurements_and_founder_acceptance(client):
+    org, ws = client.org_id, client.ws_id
+    project = client.post(f"/v1/orgs/{org}/projects", headers=auth(), json={
+        "workspace_id": ws, "name": "Invoice processing automation",
+    })
+    assert project.status_code == 201, project.text
+    project_id = project.json()["id"]
+
+    outcome = client.post(f"/v1/orgs/{org}/projects/{project_id}/outcomes", headers=auth(), json={
+        "workspace_id": ws,
+        "title": "Reduce invoice processing time",
+        "problem_statement": "Manual invoice processing takes too long.",
+        "desired_outcome": "Reduce average processing time from 10 minutes to 4 minutes.",
+        "metric_name": "Average invoice processing time",
+        "metric_unit": "minutes",
+        "direction": "decrease",
+        "baseline_value": "10",
+        "target_value": "4",
+        "measurement_method": "Compare the average processing duration over a representative 30-day period.",
+        "acceptance_criteria": [
+            "The deployed workflow processes the agreed invoice types.",
+            "The workflow meets the agreed QA and security checks.",
+        ],
+    })
+    assert outcome.status_code == 201, outcome.text
+    outcome_id = outcome.json()["id"]
+    assert outcome.json()["impact_status"] == "not_measured"
+    assert outcome.json()["delivery_acceptance_status"] == "pending"
+
+    measurement = client.post(
+        f"/v1/orgs/{org}/outcomes/{outcome_id}/measurements",
+        headers=auth(), json={
+            "workspace_id": ws,
+            "value": "3.5",
+            "source_type": "client_reported",
+            "source_reference": "Client operations report 2026-11",
+            "evidence_summary": "Client reported the 30-day average after rollout.",
+        },
+    )
+    assert measurement.status_code == 201, measurement.text
+    assert measurement.json()["value"] == "3.500000" or float(measurement.json()["value"]) == 3.5
+
+    listed = client.get(
+        f"/v1/orgs/{org}/projects/{project_id}/outcomes",
+        headers=auth(), params={"workspace_id": ws},
+    )
+    assert listed.status_code == 200, listed.text
+    assert listed.json()[0]["impact_status"] == "target_met"
+    assert listed.json()[0]["latest_value"] == "3.500000" or float(listed.json()[0]["latest_value"]) == 3.5
+    assert listed.json()[0]["measurement_count"] == 1
+
+    denied = client.post(
+        f"/v1/orgs/{org}/outcomes/{outcome_id}/acceptance",
+        headers=auth(), json={
+            "workspace_id": ws, "decision": "accepted",
+            "criteria_results": {
+                "The deployed workflow processes the agreed invoice types.": True,
+                "The workflow meets the agreed QA and security checks.": True,
+            },
+            "note": "All delivery acceptance checks were reviewed.",
+        },
+    )
+    assert denied.status_code == 403
+
+    from app.db import get_db
+    from app.models import FounderAuthority
+    generator = client.app.dependency_overrides[get_db]()
+    session = next(generator)
+    try:
+        session.add(FounderAuthority(
+            org_id=org, user_id=client.user_id, grant_source="test_outcome_acceptance",
+        ))
+        session.commit()
+    finally:
+        generator.close()
+
+    accepted = client.post(
+        f"/v1/orgs/{org}/outcomes/{outcome_id}/acceptance",
+        headers=auth(), json={
+            "workspace_id": ws, "decision": "accepted",
+            "criteria_results": {
+                "The deployed workflow processes the agreed invoice types.": True,
+                "The workflow meets the agreed QA and security checks.": True,
+            },
+            "note": "All delivery acceptance checks were reviewed.",
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["delivery_acceptance_status"] == "accepted"
+    assert accepted.json()["impact_status"] == "target_met"
+
+    # An accepted delivery can still miss its later business-impact target.
+    later = client.post(
+        f"/v1/orgs/{org}/outcomes/{outcome_id}/measurements",
+        headers=auth(), json={
+            "workspace_id": ws, "value": "7",
+            "source_type": "client_reported",
+            "source_reference": "Client operations report 2026-12",
+            "evidence_summary": "Follow-up measurement after process volume increased.",
+        },
+    )
+    assert later.status_code == 201, later.text
+    refreshed = client.get(
+        f"/v1/orgs/{org}/projects/{project_id}/outcomes",
+        headers=auth(), params={"workspace_id": ws},
+    )
+    assert refreshed.status_code == 200
+    assert refreshed.json()[0]["delivery_acceptance_status"] == "accepted"
+    assert refreshed.json()[0]["impact_status"] == "target_missed"
+
+
+def test_project_outcome_rejects_cross_workspace_parent_and_mismatched_acceptance_criteria(client):
+    org, ws = client.org_id, client.ws_id
+    project = client.post(f"/v1/orgs/{org}/projects", headers=auth(), json={
+        "workspace_id": ws, "name": "Scoped outcome project",
+    })
+    assert project.status_code == 201, project.text
+    project_id = project.json()["id"]
+
+    cross_scope = client.post(
+        f"/v1/orgs/{org}/projects/{project_id}/outcomes",
+        headers=auth(), json={
+            "workspace_id": client.other_ws_id,
+            "title": "Cross-workspace outcome",
+            "problem_statement": "Scope must be enforced.",
+            "desired_outcome": "No cross-workspace records.",
+            "metric_name": "Records",
+            "metric_unit": "count",
+            "direction": "increase",
+            "target_value": "1",
+            "measurement_method": "Count records.",
+            "acceptance_criteria": ["Record is workspace scoped."],
+        },
+    )
+    assert cross_scope.status_code == 404
+
+    created = client.post(
+        f"/v1/orgs/{org}/projects/{project_id}/outcomes",
+        headers=auth(), json={
+            "workspace_id": ws,
+            "title": "Scoped outcome",
+            "problem_statement": "Scope must be enforced.",
+            "desired_outcome": "One verified result.",
+            "metric_name": "Records",
+            "metric_unit": "count",
+            "direction": "increase",
+            "target_value": "1",
+            "measurement_method": "Count records.",
+            "acceptance_criteria": ["Record is workspace scoped."],
+        },
+    )
+    assert created.status_code == 201, created.text
+    outcome_id = created.json()["id"]
+    mismatch = client.post(
+        f"/v1/orgs/{org}/outcomes/{outcome_id}/acceptance",
+        headers=auth(), json={
+            "workspace_id": ws, "decision": "accepted",
+            "criteria_results": {"A different criterion": True},
+            "note": "This must not silently accept an unknown criterion.",
+        },
+    )
+    assert mismatch.status_code == 403
