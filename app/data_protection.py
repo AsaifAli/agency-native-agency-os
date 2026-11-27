@@ -302,8 +302,12 @@ def protect_untrusted_payload(
     if _bounded_json_size(payload) > MAX_EXECUTION_REQUEST_BYTES:
         raise DataProtectionBlocked("UNTRUSTED_PAYLOAD_TOO_LARGE")
     counts: dict[str, int] = {}
+    # This public boundary may preserve only resource IDs emitted by the
+    # registered lead-research tool. Resume tokens are accepted exclusively
+    # by protect_execution_request's validated control_request path below;
+    # callers must not be able to self-authorize a credential exemption.
     allowed_internal_id_keys = {
-        "draft_id", "lead_id", "research_record_id", "resume_token",
+        "draft_id", "lead_id", "research_record_id",
     }
     if not set(trusted_internal_id_keys).issubset(allowed_internal_id_keys):
         raise DataProtectionBlocked("INVALID_TRUSTED_IDENTIFIER_POLICY")
