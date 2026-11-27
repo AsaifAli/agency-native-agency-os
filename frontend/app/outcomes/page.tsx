@@ -8,7 +8,7 @@ import { api, orgId, type Workspace } from "@/lib/api";
 
 type Project = { id: string; workspace_id: string; name: string; status: string };
 type Measurement = {
-  id: string; value: string; measured_at: string; source_type: string;
+  id: string; outcome_id: string; value: string; measured_at: string; source_type: string;
   source_reference: string; evidence_summary: string;
 };
 type OutcomeRecord = {
@@ -130,12 +130,17 @@ export default function OutcomesPage() {
   const [notice, setNotice] = useState("");
 
   async function loadOutcomeRows(selectedProject: string, selectedWorkspace: string) {
-    const rows = await api<OutcomeRecord[]>(`/v1/orgs/${orgId()}/projects/${selectedProject}/outcomes?workspace_id=${encodeURIComponent(selectedWorkspace)}`);
-    const expanded = await Promise.all(rows.map(async outcome => ({
-      ...outcome,
-      measurements: await api<Measurement[]>(`/v1/orgs/${orgId()}/outcomes/${outcome.id}/measurements?workspace_id=${encodeURIComponent(selectedWorkspace)}&limit=25`),
-    })));
-    setOutcomes(expanded);
+    const [rows, measurements] = await Promise.all([
+      api<OutcomeRecord[]>(`/v1/orgs/${orgId()}/projects/${selectedProject}/outcomes?workspace_id=${encodeURIComponent(selectedWorkspace)}`),
+      api<Measurement[]>(`/v1/orgs/${orgId()}/projects/${selectedProject}/outcome-measurements?workspace_id=${encodeURIComponent(selectedWorkspace)}&limit=1000`),
+    ]);
+    const byOutcome = new Map<string, Measurement[]>();
+    for (const measurement of measurements) {
+      const current = byOutcome.get(measurement.outcome_id) || [];
+      if (current.length < 25) current.push(measurement);
+      byOutcome.set(measurement.outcome_id, current);
+    }
+    setOutcomes(rows.map(outcome => ({ ...outcome, measurements: byOutcome.get(outcome.id) || [] })));
   }
 
   async function loadProjects(selectedWorkspace = workspaceId) {
