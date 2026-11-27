@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from app.db import Base
-from app.models import Organization, Workspace
+from app.models import AuditEvent, Organization, Workspace, User
 from app.security_models import AgentSession, MachineIdentity, ToolInvocation
 from app.retention import purge_due_retention_data
 
@@ -40,7 +40,6 @@ def test_retention_scrubs_old_session_metadata_and_tool_payloads_but_keeps_tombs
                 expires_at=now + timedelta(days=365), created_by_user_id=None,
             )
             # Machine identities require a creator FK; use a minimal user fixture.
-            from app.models import User
             user = User(email="retention@example.test")
             db.add(user)
             db.flush()
@@ -112,5 +111,23 @@ def test_retention_scrubs_old_session_metadata_and_tool_payloads_but_keeps_tombs
             assert recent_invocation.request_payload == {"query": "recent"}
             assert recent_invocation.result == {"lead_id": "lead-2"}
             assert recent_invocation.payload_purged_at is None
+
+            events = db.query(AuditEvent).filter(
+                AuditEvent.event_type.in_(( 
+                    "agent_session.metadata_purged",
+                    "tool.invocation.payload_purged",
+                ))
+            ).all()
+            assert {event.event_type for event in events} == {
+                "agent_session.metadata_purged",
+                "tool.invocation.payload_purged",
+            }
+            assert all(
+                event.payload["reason_code"] in {
+                    "AGENT_SESSION_RETENTION_ELAPSED",
+                    "TOOL_PAYLOAD_RETENTION_ELAPSED",
+                }
+                for event in events
+            )
     finally:
         engine.dispose()
