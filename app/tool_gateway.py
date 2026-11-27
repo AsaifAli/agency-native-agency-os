@@ -62,6 +62,50 @@ def _deny(
     raise HTTPException(status_code, message)
 
 
+DEFAULT_MAX_TOOL_CALLS_PER_SESSION = 100
+
+
+def _effective_session_tool_policy(
+    identity,
+    *,
+    allowed_tool_keys: set[str] | frozenset[str] | None,
+    max_calls_per_session: int | None,
+) -> tuple[frozenset[str], int]:
+    """Derive a fail-closed session policy from OS-issued machine scopes.
+
+    Adapter-supplied values may narrow this policy, never widen it. The global
+    ceiling is deliberately conservative until per-session policy is persisted
+    as an OS-owned grant.
+    """
+    scopes = identity.scopes if isinstance(identity.scopes, list) else []
+    if "tools:invoke" not in scopes:
+        return frozenset(), DEFAULT_MAX_TOOL_CALLS_PER_SESSION
+    scoped_tools = {
+        scope.removeprefix("tool:")
+        for scope in scopes
+        if isinstance(scope, str) and scope.startswith("tool:")
+    }
+    if allowed_tool_keys is not None:
+        if not isinstance(allowed_tool_keys, (set, frozenset)) or any(
+            not isinstance(value, str)
+            or not re.fullmatch(r"[a-z0-9_.-]{1,100}", value)
+            for value in allowed_tool_keys
+        ):
+            raise ValueError("invalid session tool allowlist")
+        scoped_tools.intersection_update(allowed_tool_keys)
+    if max_calls_per_session is not None and (
+        isinstance(max_calls_per_session, bool)
+        or not isinstance(max_calls_per_session, int)
+        or not 1 <= max_calls_per_session <= 10000
+    ):
+        raise ValueError("invalid session call limit")
+    call_limit = min(
+        max_calls_per_session or DEFAULT_MAX_TOOL_CALLS_PER_SESSION,
+        DEFAULT_MAX_TOOL_CALLS_PER_SESSION,
+    )
+    return frozenset(scoped_tools), call_limit
+
+
 def invoke_registered_tool(
     db: Session,
     principal: MachinePrincipal,
@@ -87,33 +131,23 @@ def invoke_registered_tool(
             status_code=422, message="Tool invocation was denied by OS policy.",
         )
 
-    if allowed_tool_keys is not None:
-        if not isinstance(allowed_tool_keys, (set, frozenset)) or any(
-            not isinstance(value, str)
-            or not re.fullmatch(r"[a-z0-9_.-]{1,100}", value)
-            for value in allowed_tool_keys
-        ):
-            _deny(
-                db, org_id=org_id, workspace_id=workspace_id, identity_id=identity_id,
-                tool_key=tool_key, reason_code="INVALID_SESSION_TOOL_ALLOWLIST",
-                status_code=422, message="Tool invocation was denied by OS policy.",
-            )
-        if tool_key not in allowed_tool_keys:
-            _deny(
-                db, org_id=org_id, workspace_id=workspace_id, identity_id=identity_id,
-                tool_key=tool_key, reason_code="SESSION_TOOL_NOT_ALLOWED",
-                status_code=403, message="Tool invocation was denied by OS policy.",
-            )
-
-    if max_calls_per_session is not None and (
-        isinstance(max_calls_per_session, bool)
-        or not isinstance(max_calls_per_session, int)
-        or not 1 <= max_calls_per_session <= 10000
-    ):
+    try:
+        session_tool_allowlist, effective_call_limit = _effective_session_tool_policy(
+            identity,
+            allowed_tool_keys=allowed_tool_keys,
+            max_calls_per_session=max_calls_per_session,
+        )
+    except ValueError:
         _deny(
             db, org_id=org_id, workspace_id=workspace_id, identity_id=identity_id,
-            tool_key=tool_key, reason_code="INVALID_SESSION_CALL_LIMIT",
+            tool_key=tool_key, reason_code="INVALID_SESSION_TOOL_POLICY",
             status_code=422, message="Tool invocation was denied by OS policy.",
+        )
+    if tool_key not in session_tool_allowlist:
+        _deny(
+            db, org_id=org_id, workspace_id=workspace_id, identity_id=identity_id,
+            tool_key=tool_key, reason_code="SESSION_TOOL_NOT_ALLOWED",
+            status_code=403, message="Tool invocation was denied by OS policy.",
         )
 
     spec = get_tool(tool_key)
@@ -275,7 +309,7 @@ def invoke_registered_tool(
 
     # authorize_tool_session locks the AgentSession row, serializing concurrent
     # calls so this persisted-success count cannot be oversubscribed.
-    if max_calls_per_session is not None:
+    if effective_call_limit:
         successful_calls = (
             db.query(ToolInvocation.id)
             .filter_by(
@@ -286,7 +320,7 @@ def invoke_registered_tool(
             )
             .count()
         )
-        if successful_calls >= max_calls_per_session:
+        if successful_calls >= effective_call_limit:
             _deny(
                 db, org_id=org_id, workspace_id=workspace_id, identity_id=identity_id,
                 tool_key=spec.key, reason_code="SESSION_TOOL_CALL_LIMIT_REACHED",
