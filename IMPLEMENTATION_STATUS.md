@@ -14,7 +14,7 @@
 - Added API, privacy, scope, acceptance, RLS and PostgreSQL append-only regression tests. The isolated PostgreSQL test image now includes the new RLS/immutability test.
 - Added an Alembic merge revision for the two previously separate migration heads, followed by the additive outcome schema migration.
 - **Verification status:** not yet run against the updated branch. The full backend suite, frontend lint/typecheck/build and isolated PostgreSQL migration/RLS suite remain pending. No production database, deployment, external integration or client data was touched.
-- **Known limits:** no automatic KPI ingestion, client portal sign-off, verified external impact attestations, outcome revision/scope-change workflow, statistical impact analysis or approved outcome-evidence erasure workflow. Outcome measurements currently record a source reference and narrative supplied by an authorized workspace user.
+- **Known limits:** no automatic KPI ingestion, client portal sign-off, verified external impact attestations, outcome revision/scope-change workflow, statistical impact analysis or approved outcome-evidence erasure workflow. Project activation is not yet globally blocked when no outcome has been defined. Outcome measurements currently record a source reference and narrative supplied by an authorized workspace user.
 
 ## Verified cleanup checkpoint
 - Branch: `feature/agency-os-native-runtime-cleanup`.
