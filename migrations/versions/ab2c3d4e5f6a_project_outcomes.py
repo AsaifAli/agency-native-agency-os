@@ -24,6 +24,22 @@ def upgrade() -> None:
         op.create_unique_constraint(
             "uq_projects_scope_id", "projects", ["org_id", "workspace_id", "id"]
         )
+    if op.get_bind().dialect.name == "sqlite":
+        with op.batch_alter_table("milestones") as batch_op:
+            batch_op.create_unique_constraint(
+                "uq_milestones_scope_id", ["org_id", "workspace_id", "id"]
+            )
+        with op.batch_alter_table("evaluation_runs") as batch_op:
+            batch_op.create_unique_constraint(
+                "uq_evaluation_runs_scope_id", ["org_id", "workspace_id", "id"]
+            )
+    else:
+        op.create_unique_constraint(
+            "uq_milestones_scope_id", "milestones", ["org_id", "workspace_id", "id"]
+        )
+        op.create_unique_constraint(
+            "uq_evaluation_runs_scope_id", "evaluation_runs", ["org_id", "workspace_id", "id"]
+        )
     op.create_table(
         "project_outcomes",
         sa.Column("id", sa.String(length=36), primary_key=True),
@@ -80,8 +96,8 @@ def upgrade() -> None:
         sa.Column("source_type", sa.String(length=32), nullable=False),
         sa.Column("source_reference", sa.String(length=240), nullable=False),
         sa.Column("evidence_summary", sa.Text(), nullable=False),
-        sa.Column("supporting_evaluation_run_id", sa.String(length=36), sa.ForeignKey("evaluation_runs.id"), nullable=True),
-        sa.Column("milestone_id", sa.String(length=36), sa.ForeignKey("milestones.id"), nullable=True),
+        sa.Column("supporting_evaluation_run_id", sa.String(length=36), nullable=True),
+        sa.Column("milestone_id", sa.String(length=36), nullable=True),
         sa.Column("created_by", sa.String(length=36), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["workspace_id"], ["workspaces.id"], ondelete="CASCADE"),
@@ -93,6 +109,16 @@ def upgrade() -> None:
             ["org_id", "workspace_id", "outcome_id"],
             ["project_outcomes.org_id", "project_outcomes.workspace_id", "project_outcomes.id"],
             ondelete="CASCADE", name="fk_outcome_measurements_outcome_scope",
+        ),
+        sa.ForeignKeyConstraint(
+            ["org_id", "workspace_id", "supporting_evaluation_run_id"],
+            ["evaluation_runs.org_id", "evaluation_runs.workspace_id", "evaluation_runs.id"],
+            ondelete="RESTRICT", name="fk_outcome_measurements_evaluation_scope",
+        ),
+        sa.ForeignKeyConstraint(
+            ["org_id", "workspace_id", "milestone_id"],
+            ["milestones.org_id", "milestones.workspace_id", "milestones.id"],
+            ondelete="RESTRICT", name="fk_outcome_measurements_milestone_scope",
         ),
         sa.UniqueConstraint("org_id", "workspace_id", "id", name="uq_outcome_measurements_scope_id"),
         sa.CheckConstraint(
@@ -175,5 +201,11 @@ def downgrade() -> None:
     if op.get_bind().dialect.name == "sqlite":
         with op.batch_alter_table("projects") as batch_op:
             batch_op.drop_constraint("uq_projects_scope_id", type_="unique")
+        with op.batch_alter_table("milestones") as batch_op:
+            batch_op.drop_constraint("uq_milestones_scope_id", type_="unique")
+        with op.batch_alter_table("evaluation_runs") as batch_op:
+            batch_op.drop_constraint("uq_evaluation_runs_scope_id", type_="unique")
     else:
         op.drop_constraint("uq_projects_scope_id", "projects", type_="unique")
+        op.drop_constraint("uq_milestones_scope_id", "milestones", type_="unique")
+        op.drop_constraint("uq_evaluation_runs_scope_id", "evaluation_runs", type_="unique")
