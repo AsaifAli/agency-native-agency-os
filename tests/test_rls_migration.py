@@ -168,3 +168,33 @@ def test_project_outcome_tables_are_added_to_current_rls_inventory():
     assert "user_has_workspace_access" in source
     assert "outcome_measurements_append_only" in source
     assert "REVOKE UPDATE, DELETE" in source
+
+def test_worker_global_workspace_enumerator_is_revoked_and_replaced_by_single_scope_claim():
+    cutover = PATH.with_name(
+        "a7c2e9f4b1d6_worker_rls_capability_cutover.py"
+    ).read_text()
+    maintenance = PATH.with_name(
+        "e1f4a6b8c0d2_worker_workspace_maintenance_capabilities.py"
+    ).read_text()
+    return_type_fix = PATH.with_name(
+        "f3b7d9e1a5c2_worker_maintenance_claim_return_type_fix.py"
+    ).read_text()
+
+    # The legacy SECURITY DEFINER inventory function may remain for historical
+    # compatibility, but neither PUBLIC nor the worker role may execute it.
+    assert "p.proname = 'worker_workspace_scopes'" in cutover
+    assert "REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC, agency_os_worker" in cutover
+
+    # Maintenance discovery is an atomic one-workspace claim with a short lease.
+    assert "claim_worker_maintenance_scope" in maintenance
+    assert "LIMIT 1" in maintenance
+    assert "FOR UPDATE OF w SKIP LOCKED" in maintenance
+    assert "p_lease_seconds NOT BETWEEN 15 AND 300" in maintenance
+    assert "establish_worker_workspace_context" in maintenance
+    assert "release_worker_maintenance_scope" in maintenance
+    assert "GRANT EXECUTE ON FUNCTION agency_os_private.{signature} TO agency_os_worker" in maintenance
+
+    # CREATE OR REPLACE must preserve the function ACL established by the
+    # maintenance migration; this follow-up only corrects result casts.
+    assert "CREATE OR REPLACE FUNCTION agency_os_private.claim_worker_maintenance_scope" in return_type_fix
+    assert "GRANT EXECUTE" not in return_type_fix
