@@ -506,6 +506,60 @@ def test_project_outcomes_track_targets_measurements_and_founder_acceptance(clie
     assert refreshed.json()[0]["impact_status"] == "target_missed"
 
 
+
+def test_project_outcome_text_is_sanitized_and_measurements_are_append_only(client):
+    org, ws = client.org_id, client.ws_id
+    project = client.post(f"/v1/orgs/{org}/projects", headers=auth(), json={
+        "workspace_id": ws, "name": "Outcome privacy project",
+    })
+    assert project.status_code == 201, project.text
+    project_id = project.json()["id"]
+
+    unsafe_secret = client.post(
+        f"/v1/orgs/{org}/projects/{project_id}/outcomes", headers=auth(), json={
+            "workspace_id": ws, "title": "Secret-bearing outcome",
+            "problem_statement": "The API key is sk-ant-abcdefghijklmnop and must be rejected.",
+            "desired_outcome": "Keep credentials out of persisted outcome records.",
+            "metric_name": "Credential exposure", "metric_unit": "count",
+            "direction": "decrease", "target_value": "0",
+            "measurement_method": "Count detected credential exposures.",
+            "acceptance_criteria": ["No credentials are persisted."],
+        },
+    )
+    assert unsafe_secret.status_code == 422
+
+    created = client.post(
+        f"/v1/orgs/{org}/projects/{project_id}/outcomes", headers=auth(), json={
+            "workspace_id": ws, "title": "Reduce processing time",
+            "problem_statement": "Client contact person is a.person@example.test.",
+            "desired_outcome": "Reduce average processing time to four minutes.",
+            "metric_name": "Processing time", "metric_unit": "minutes",
+            "direction": "decrease", "target_value": "4",
+            "measurement_method": "Measure the average over a representative month.",
+            "acceptance_criteria": ["The agreed workflow passes QA."],
+        },
+    )
+    assert created.status_code == 201, created.text
+    assert "a.person@example.test" not in created.json()["problem_statement"]
+    assert "[REDACTED_EMAIL]" in created.json()["problem_statement"]
+
+    outcome_id = created.json()["id"]
+    measurement = client.post(
+        f"/v1/orgs/{org}/outcomes/{outcome_id}/measurements", headers=auth(), json={
+            "workspace_id": ws, "value": "3.8", "source_type": "client_reported",
+            "source_reference": "Client report 2026-11",
+            "evidence_summary": "The client reported the average processing time.",
+        },
+    )
+    assert measurement.status_code == 201, measurement.text
+    changed = client.patch(
+        f"/v1/orgs/{org}/outcomes/{outcome_id}/measurements/{measurement.json()['id']}",
+        headers=auth(), json={"value": "1"},
+    )
+    assert changed.status_code in {404, 405}
+
+
+
 def test_project_outcome_rejects_cross_workspace_parent_and_mismatched_acceptance_criteria(client):
     org, ws = client.org_id, client.ws_id
     project = client.post(f"/v1/orgs/{org}/projects", headers=auth(), json={
