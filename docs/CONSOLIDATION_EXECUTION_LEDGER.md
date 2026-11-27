@@ -1,8 +1,8 @@
 # Agency OS — Consolidation and Readiness Execution Ledger
 
 **Last reconciled:** 2026-11-27  
-**Release candidate:** `main` at `4541626d6fffc904d8ee3131bb2f408efbe27acf`  
-**Merged work:** PR #58 — [Consolidate Agency OS execution controls and reliability changes](https://github.com/AsaifAli/agency-native-agency-os/pull/58)  
+**Release candidate:** `main` at `9e42fbe49d0c9bff2553d0c8b2b77412e889fc0d`  
+**Latest code consolidation:** PR #58 — [Consolidate Agency OS execution controls and reliability changes](https://github.com/AsaifAli/agency-native-agency-os/pull/58)\n**Readiness documentation:** PR #60 — [Reconcile Agency OS readiness docs after PR #58](https://github.com/AsaifAli/agency-native-agency-os/pull/60), merged 2026-11-27  
 **Release posture:** **NO-GO for production** — implementation and disposable-environment tests are not production acceptance.
 
 This document supersedes the pre-merge integration ledger below. PR #58 is merged. Its old candidate-branch queue, PR #58 merge blocker and workflow bootstrap failure are historical, not current merge tasks. GitHub Actions are intentionally excluded from this workstream per founder direction.
@@ -18,7 +18,7 @@ This document supersedes the pre-merge integration ledger below. PR #58 is merge
 
 ## Merged baseline
 
-- PR #58 merged into `main` on 2026-11-27; merge commit `4541626d6fffc904d8ee3131bb2f408efbe27acf`.
+- PR #58 merged into `main` on 2026-11-27; merge commit `9e42fbe49d0c9bff2553d0c8b2b77412e889fc0d`.
 - The merged baseline includes the consolidated worker capability boundary, workspace-grant human authorization restoration, append-only audit-event protection, retention scrubbing foundations and RAAS project outcome management.
 - Backend suite on the merged candidate: **483 passed, 19 skipped, 2 warnings**.
 - Isolated PostgreSQL 16 Compose suite on the merged candidate: **105 passed, 2 warnings**.
@@ -32,7 +32,7 @@ This document supersedes the pre-merge integration ledger below. PR #58 is merge
 |---|---|---|
 | 0. Architecture and consolidation | **Merged; baseline established** | Modular monolith and OS-owned state are retained. Refresh architecture/threat model and migration inventory against current main; no second control plane or queue engine. |
 | 1. Database, APIs and worker infrastructure | **Implemented; tested in disposable PostgreSQL** | PostgreSQL 16 isolated suite 105 passed. Still need empty-volume and existing-volume rehearsal, role/grant/function inventory, performance budgets and deployed topology verification. |
-| 2. Authentication and tenant isolation | **Partial** | OIDC/session lifecycle and workspace-grant authorization exist. Live Authentik MFA/JWKS assurance, full BOLA review and isolation across files/object storage/cache/RAG/logs/artifacts remain open. |
+| 2. Authentication and tenant isolation | **Partial** | OIDC/session lifecycle and workspace-grant authorization exist. The orchestration plan/delegation join now has scope columns, composite same-workspace FKs and forced RLS; ORM-to-RLS inventory parity is regression-tested. Live Authentik MFA/JWKS assurance, global-user access review, full BOLA review and isolation across files/object storage/cache/RAG/logs/artifacts remain open. |
 | 3. Organization and Agent Registry | **Partial** | 16 departments, workforce/position catalog, curated skills and founder-gated capability/member lifecycle exist. Provider Agent provisioning, skill assignment, immutable runtime version promotion/rollback and delegated machine identities remain incomplete. |
 | 4. Revenue Engine | **Partial** | CRM, activity history, suppression records, opportunities, proposal drafts and founder pricing approval exist. Research/provenance at scale, dedupe/merge review, approved outbound dispatch, sender authorization, delivery receipts, reply/opt-out/bounce stops and attribution remain incomplete. |
 | 5. Claude runtime and tool governance | **Partial / live runtime unverified** | Managed Agents adapter is opt-in and synthetic-first; current Tool Gateway foundation exists, but only health and public lead-research draft tools are registered. Full OS MCP bridge, DPG-at-dispatch, cancellation/reconciliation and live account/environment verification remain open. `WorkforceCapability.budget_minor` is stored but not reserved/settled by tool dispatch, so it is not an enforceable spend cap. Claude Agent SDK adapter is not implemented. |
@@ -49,6 +49,8 @@ This document supersedes the pre-merge integration ledger below. PR #58 is merge
 - Worker database role is intended to be `NOBYPASSRLS`; production startup verifies the role and process role.
 - Worker execution and maintenance scope is established by database-verified, capability-bound claim/renewal operations, not caller-forgeable machine GUCs.
 - Human workspace grants are restored after the worker RLS cutover.
+- Orchestration plan/delegation links are now workspace-scoped with composite FKs to both parents and forced RLS. The migration backfills from the parent plan and refuses existing orphan/cross-workspace rows.
+- A model/RLS inventory test requires every mapped table except the explicitly global `users` identity directory to appear in `REQUIRED_RLS_TABLES`; `users` needs a separate global privacy/access review.
 - Audit events reject UPDATE/DELETE for non-superuser application/worker roles. This is append-only protection, **not cryptographic tamper-evidence**; hash chaining or external integrity checkpoints remain future work.
 - Audit payload protection rejects invalid/oversized structures and redacts supported PII/secrets.
 - Browser session lifecycle includes server-side revocation/rotation/expiry; agent session and tool invocation retention scrubs are bounded and workspace-scoped.
