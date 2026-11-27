@@ -561,7 +561,11 @@ def _persist_orchestration_plan(
         )
         ordinal_to_task_id[ordinal] = row.child_task_id
         db.add(OrchestrationPlanDelegation(
-            plan_id=plan.id, delegation_id=row.id, ordinal=ordinal,
+            org_id=org_id,
+            workspace_id=body.workspace_id,
+            plan_id=plan.id,
+            delegation_id=row.id,
+            ordinal=ordinal,
         ))
     # Session factories intentionally disable autoflush; persist the complete
     # plan-to-delegation graph before computing its summary.

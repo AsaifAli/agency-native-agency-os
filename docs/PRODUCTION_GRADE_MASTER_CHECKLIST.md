@@ -42,19 +42,20 @@ A checkbox is complete only when code/infrastructure, tests, operational evidenc
 ### 2. Tenant isolation and Data Protection Gateway
 - [ ] Apply all tenant RLS migrations on the supported PostgreSQL 16 version using the documented migration role.
 - [ ] Verify table ownership, grants, FORCE RLS, policies, SECURITY DEFINER ownership/search path and role attributes.
-- [ ] Run RLS tests as the real non-owner, NOBYPASSRLS API role; verify cross-tenant reads/writes are denied.
+- [x] Run RLS tests as the real non-owner, NOBYPASSRLS API role; the isolated PostgreSQL 16 suite passed 105 tests on the PR #58 merged candidate. Re-run after PR #62 because it adds a newly RLS-protected association table; its focused PostgreSQL regression is included but not yet executed.
 - [ ] Verify transaction-local tenant/user/machine context is set and cleared correctly under pooled connection reuse and rollback.
-- [ ] Enforce exact machine workspace scope; test machine identity lookup and post-authentication context binding.
-- [ ] Remove broad worker BYPASSRLS. Replace it with narrowly scoped queue claim/ack/recovery database functions and per-execution tenant context.
-- [ ] Test tenant isolation across API, ORM, worker, queue, files, object storage, browser sessions, caches, search/RAG, logs and generated artifacts.
+- [x] Enforce exact machine workspace scope with post-authentication machine identity binding and dedicated RLS predicates; retain live deployment/pool-reuse verification as a separate gate.
+- [x] Remove broad worker BYPASSRLS: production worker role is verified as NOBYPASSRLS and uses database-verified execution/workspace capabilities with narrowly scoped claim, renewal and maintenance functions.
+- [ ] Test tenant isolation across API, ORM, worker, queue, files, object storage, browser sessions, caches, search/RAG, logs and generated artifacts. The model-to-RLS inventory parity regression is included in PR #62; the only mapped-model exception is the global `users` identity directory, which needs a separate privacy/access review.
 - [ ] Complete Data Protection Gateway (DPG) classification, minimization, PII/secret detection and redaction for uploads, extracted files, retrieval context, connector responses, tool inputs/outputs and provider callbacks.
+- [ ] Review the shared global `users` identity directory: prove there is no cross-organization directory enumeration, inventory every query path, and decide whether direct application-role table access should be replaced with narrowly scoped identity lookup functions without breaking OIDC/session bootstrap.
 - [ ] Enforce per-client data policy and runtime eligibility before any external provider receives data.
 - [ ] Test prompt injection, indirect instructions in retrieved documents, malicious files, oversized/nested payloads and redaction collisions.
 - [ ] Ensure secrets and unnecessary personal/client data never enter prompts, traces, logs, analytics or source control.
 
 ### 3. Approval and founder control plane
 - [ ] Model approval as a server-enforced state machine with requester, approver, scope, target, version, expiry, evidence and decision history.
-- [ ] Consume approval and perform the protected action in one database transaction; reject stale, replayed, mismatched or expired approvals.
+- [x] Consume approval and perform implemented protected OS-state actions in one database transaction; reject stale, replayed, mismatched or expired approvals. Expand the route-by-route gate inventory as new external side effects are added.
 - [ ] Gate contracts, pricing, payments, invoices being issued/sent, sensitive communications, production releases, permission changes and destructive/deletion actions.
 - [ ] Ensure approval cannot be bypassed by agents, workers, MCP, webhooks, automation workflows or direct provider callbacks.
 - [ ] Add founder exception inbox / Work Queue for approvals, escalations, risks, failed jobs, overdue decisions and budget exceptions.
@@ -79,12 +80,12 @@ A checkbox is complete only when code/infrastructure, tests, operational evidenc
 
 ### 5. Durable execution, queue and worker reliability
 - [ ] Keep PostgreSQL as source of truth for executions, attempts, leases, results, errors, cancellation and audit.
-- [ ] Verify PostgreSQL 16 migrations and integration tests, including concurrent claim, SKIP LOCKED behavior and lease expiry recovery.
+- [x] Verify PostgreSQL 16 migrations and integration tests, including concurrent claim, SKIP LOCKED behavior and lease expiry recovery; isolated Compose suite passed 105 tests on the PR #58 merged candidate. Re-run after schema changes.
 - [ ] Verify independent worker service/container startup, health checks, graceful shutdown and bounded concurrency.
 - [ ] Kill a worker after claim and after provider call; prove lease recovery, safe retry/reconciliation and no duplicate business effect.
 - [ ] Test heartbeat loss, lease renewal races, expired lease recovery, retry scheduling, max attempts and dead-letter transitions.
 - [ ] Test cancellation before claim, during execution and after external side effect; define honest terminal states for ambiguous outcomes.
-- [ ] Verify pause/resume lifecycle: queued pause, provider-confirmed active pause, same-session resume, resume deduplication after worker crash, cancellation superseding pause, retry exhaustion and workspace isolation. Backend/API implementation and focused tests are present on `feat/agency-os-consolidation`; focused Python suite passed (47 tests), full SQLite-backed backend regression passed (408 tests; 8 PostgreSQL-only tests skipped), and the PostgreSQL Compose migration/test suite passed (55 tests). Live Managed Agents interruption/resumption, deployed multi-worker behavior and end-to-end UI verification remain pending.
+- [ ] Verify pause/resume lifecycle: queued pause, provider-confirmed active pause, same-session resume, resume deduplication after worker crash, cancellation superseding pause, retry exhaustion and workspace isolation. Current merged-main backend suite passed 483 tests (19 skipped) and isolated PostgreSQL suite passed 105 tests; live Managed Agents interruption/resumption, deployed multi-worker behavior and end-to-end UI verification remain pending.
 - [ ] Implement idempotency keys and deduplication for every external action; reconcile provider outcomes after timeout rather than blindly resending.
 - [ ] Complete transactional outbox delivery, versioned events, at-least-once semantics, duplicate handling, replay permissions and reconciliation.
 - [ ] Test actual multi-process and multi-replica workers under sustained synthetic load; measure queue age, throughput, lock contention and resource usage.
@@ -209,7 +210,7 @@ A checkbox is complete only when code/infrastructure, tests, operational evidenc
 - [ ] Add accessible navigation, keyboard support, loading/empty/error states and responsive layouts.
 - [ ] Ensure destructive/high-impact controls require confirmation and show consequences.
 - [ ] Verify frontend authorization mirrors backend policy without treating UI hiding as security.
-- [ ] Run end-to-end browser tests for critical founder journeys. Frontend lint (0 errors; 7 pre-existing React Hook dependency warnings), TypeScript validation and Next.js production build passed before the final Founder Console UI reconciliation. A fresh run against exact merged `main` commit `4541626d6fffc904d8ee3131bb2f408efbe27acf` and browser-level critical-flow tests remain pending.
+- [ ] Run end-to-end browser tests for critical founder journeys. Frontend lint (0 errors; 7 pre-existing React Hook dependency warnings), TypeScript validation and Next.js production build passed before the final Founder Console UI reconciliation. A fresh run against current `main` checkpoint `9e42fbe49d0c9bff2553d0c8b2b77412e889fc0d` and browser-level critical-flow tests remain pending.
 
 ### 17. Learning and operational improvement
 - [ ] Capture incidents, corrections, successful playbooks and postmortems as reviewed knowledge.
