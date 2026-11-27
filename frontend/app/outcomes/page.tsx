@@ -11,8 +11,7 @@ type Measurement = {
   id: string; value: string; measured_at: string; source_type: string;
   source_reference: string; evidence_summary: string;
 };
-type Outcome = {
-  measurements: Measurement[];
+type OutcomeRecord = {
   id: string; workspace_id: string; project_id: string; title: string;
   problem_statement: string; desired_outcome: string; metric_name: string;
   metric_unit: string; direction: "increase" | "decrease";
@@ -23,6 +22,7 @@ type Outcome = {
   latest_value: string | null; latest_measured_at: string | null;
   measurement_count: number; impact_status: "not_measured" | "target_met" | "target_missed";
 };
+type Outcome = OutcomeRecord & { measurements: Measurement[] };
 type OutcomeDraft = {
   title: string; problem_statement: string; desired_outcome: string;
   metric_name: string; metric_unit: string; direction: "increase" | "decrease";
@@ -130,10 +130,10 @@ export default function OutcomesPage() {
   const [notice, setNotice] = useState("");
 
   async function loadOutcomeRows(selectedProject: string, selectedWorkspace: string) {
-    const rows = await api<Outcome[]>(`/v1/orgs/${orgId()}/projects/${selectedProject}/outcomes?workspace_id=${encodeURIComponent(selectedWorkspace)}`);
+    const rows = await api<OutcomeRecord[]>(`/v1/orgs/${orgId()}/projects/${selectedProject}/outcomes?workspace_id=${encodeURIComponent(selectedWorkspace)}`);
     const expanded = await Promise.all(rows.map(async outcome => ({
       ...outcome,
-      measurements: await api<Measurement[]>(`/v1/orgs/${orgId()}/outcomes/${outcome.id}/measurements?workspace_id=${encodeURIComponent(selectedWorkspace)}`),
+      measurements: await api<Measurement[]>(`/v1/orgs/${orgId()}/outcomes/${outcome.id}/measurements?workspace_id=${encodeURIComponent(selectedWorkspace)}&limit=25`),
     })));
     setOutcomes(expanded);
   }
