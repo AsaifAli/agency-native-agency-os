@@ -293,6 +293,10 @@ class ProjectOutcome(Base):
     __table_args__ = (
         UniqueConstraint("org_id", "workspace_id", "id", name="uq_project_outcomes_scope_id"),
         ForeignKeyConstraint(
+            ["org_id", "workspace_id"], ["workspaces.org_id", "workspaces.id"],
+            ondelete="CASCADE", name="fk_project_outcomes_workspace_scope",
+        ),
+        ForeignKeyConstraint(
             ["org_id", "workspace_id", "project_id"],
             ["projects.org_id", "projects.workspace_id", "projects.id"],
             ondelete="CASCADE", name="fk_project_outcomes_project_scope",
@@ -301,7 +305,6 @@ class ProjectOutcome(Base):
         CheckConstraint("direction IN ('increase','decrease')", name="ck_project_outcome_direction"),
         CheckConstraint("delivery_acceptance_status IN ('pending','accepted','rejected')",
                         name="ck_project_outcome_acceptance_status"),
-        CheckConstraint("target_value IS NOT NULL", name="ck_project_outcome_target_required"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
@@ -334,6 +337,10 @@ class OutcomeMeasurement(Base):
     __tablename__ = "outcome_measurements"
     __table_args__ = (
         UniqueConstraint("org_id", "workspace_id", "id", name="uq_outcome_measurements_scope_id"),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id"], ["workspaces.org_id", "workspaces.id"],
+            ondelete="CASCADE", name="fk_outcome_measurements_workspace_scope",
+        ),
         ForeignKeyConstraint(
             ["org_id", "workspace_id", "outcome_id"],
             ["project_outcomes.org_id", "project_outcomes.workspace_id", "project_outcomes.id"],
