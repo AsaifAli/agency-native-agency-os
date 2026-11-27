@@ -49,6 +49,7 @@ def upgrade() -> None:
         sa.Column("owner_user_id", sa.String(length=36), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.ForeignKeyConstraint(["workspace_id"], ["workspaces.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(
             ["org_id", "workspace_id"], ["workspaces.org_id", "workspaces.id"],
             ondelete="CASCADE", name="fk_project_outcomes_workspace_scope",
@@ -83,6 +84,7 @@ def upgrade() -> None:
         sa.Column("milestone_id", sa.String(length=36), sa.ForeignKey("milestones.id"), nullable=True),
         sa.Column("created_by", sa.String(length=36), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.ForeignKeyConstraint(["workspace_id"], ["workspaces.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(
             ["org_id", "workspace_id"], ["workspaces.org_id", "workspaces.id"],
             ondelete="CASCADE", name="fk_outcome_measurements_workspace_scope",
