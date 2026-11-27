@@ -115,6 +115,28 @@ def test_orchestration_plan_links_are_backfilled_and_reject_cross_workspace_pair
         "orchestration_plan_delegations"
     )}
     assert {"org_id", "workspace_id", "plan_id", "delegation_id", "ordinal"} <= columns
+    column_map = {
+        column["name"]: column for column in inspector.get_columns(
+            "orchestration_plan_delegations"
+        )
+    }
+    assert column_map["org_id"]["nullable"] is False
+    assert column_map["workspace_id"]["nullable"] is False
+    foreign_keys = {
+        item["name"] for item in inspector.get_foreign_keys(
+            "orchestration_plan_delegations"
+        )
+    }
+    assert foreign_keys == {
+        "fk_plan_delegation_plan_workspace",
+        "fk_plan_delegation_delegation_workspace",
+    }
+    indexes = {
+        item["name"] for item in inspector.get_indexes(
+            "orchestration_plan_delegations"
+        )
+    }
+    assert "ix_orchestration_plan_delegations_scope_delegation" in indexes
 
     with engine.connect() as connection:
         rows = connection.execute(sa.text(
