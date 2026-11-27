@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import type { FormEvent } from "react";
 import Page from "@/components/page";
 import Notice from "@/components/notice";
 import { api, orgId, type Workspace } from "@/lib/api";
@@ -160,7 +161,7 @@ export default function OutcomesPage() {
       await api(`/v1/orgs/${orgId()}/projects/${projectId}/outcomes`, { method: "POST", body: JSON.stringify({
         workspace_id: workspaceId, ...draft,
         baseline_value: draft.baseline_value || null,
-        target_date: draft.target_date ? new Date(draft.target_date).toISOString() : null,
+        target_date: draft.target_date ? `${draft.target_date}T00:00:00Z` : null,
         acceptance_criteria: draft.acceptance_criteria.split("\n").map(v => v.trim()).filter(Boolean),
       }) });
       setDraft(emptyDraft); setNotice("Agreed outcome and acceptance criteria recorded."); await refresh();
@@ -173,7 +174,7 @@ export default function OutcomesPage() {
     try {
       await api(`/v1/orgs/${orgId()}/outcomes/${id}/measurements`, { method: "POST", body: JSON.stringify({ workspace_id: workspaceId, ...data }) });
       setNotice("Measurement recorded as append-only evidence."); await refresh();
-    } catch (e) { setError((e as Error).message); throw e; }
+    } catch (e) { setError((e as Error).message); }
   }
 
   async function decideAcceptance(id: string, decision: "accepted" | "rejected", criteria_results: Record<string, boolean>, note: string) {
