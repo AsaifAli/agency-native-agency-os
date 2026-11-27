@@ -358,7 +358,7 @@ class OutcomeMeasurement(Base):
             ondelete="RESTRICT", name="fk_outcome_measurements_milestone_scope",
         ),
         Index("ix_outcome_measurements_scope_outcome_time", "org_id", "workspace_id", "outcome_id", "measured_at"),
-        CheckConstraint("source_type IN ('agency_measured','client_reported','system_measured','independently_verified')",
+        CheckConstraint("source_type IN ('agency_measured','client_reported','system_measured')",
                         name="ck_outcome_measurement_source_type"),
     )
 
