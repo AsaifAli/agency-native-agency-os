@@ -165,33 +165,40 @@ def test_orchestration_plan_links_are_workspace_isolated_and_composite():
             ).count() == 0
 
     finally:
-        with Admin() as db:
-            db.query(OrchestrationPlanDelegation).filter_by(org_id=org.id).delete(
-                synchronize_session=False
-            )
-            db.query(OrchestrationPlan).filter_by(org_id=org.id).delete(
-                synchronize_session=False
-            )
-            db.query(Delegation).filter_by(org_id=org.id).delete(
-                synchronize_session=False
-            )
-            db.query(Task).filter_by(org_id=org.id).delete(synchronize_session=False)
-            db.query(WorkforceMember).filter_by(org_id=org.id).delete(
-                synchronize_session=False
-            )
-            db.query(WorkspaceGrant).filter_by(org_id=org.id).delete(
-                synchronize_session=False
-            )
-            db.query(Membership).filter_by(org_id=org.id).delete(
-                synchronize_session=False
-            )
-            db.query(Workspace).filter_by(org_id=org.id).delete(
-                synchronize_session=False
-            )
-            db.query(Organization).filter_by(id=org.id).delete(
-                synchronize_session=False
-            )
-            db.query(User).filter_by(id=user.id).delete(synchronize_session=False)
-            db.commit()
+        if org.id is not None or user.id is not None:
+            with Admin() as db:
+                if org.id is not None:
+                    db.query(OrchestrationPlanDelegation).filter_by(org_id=org.id).delete(
+                        synchronize_session=False
+                    )
+                    db.query(OrchestrationPlan).filter_by(org_id=org.id).delete(
+                        synchronize_session=False
+                    )
+                    db.query(Delegation).filter_by(org_id=org.id).delete(
+                        synchronize_session=False
+                    )
+                    db.query(Task).filter_by(org_id=org.id).delete(
+                        synchronize_session=False
+                    )
+                    db.query(WorkforceMember).filter_by(org_id=org.id).delete(
+                        synchronize_session=False
+                    )
+                    db.query(WorkspaceGrant).filter_by(org_id=org.id).delete(
+                        synchronize_session=False
+                    )
+                    db.query(Membership).filter_by(org_id=org.id).delete(
+                        synchronize_session=False
+                    )
+                    db.query(Workspace).filter_by(org_id=org.id).delete(
+                        synchronize_session=False
+                    )
+                    db.query(Organization).filter_by(id=org.id).delete(
+                        synchronize_session=False
+                    )
+                if user.id is not None:
+                    db.query(User).filter_by(id=user.id).delete(
+                        synchronize_session=False
+                    )
+                db.commit()
         app_engine.dispose()
         admin_engine.dispose()
