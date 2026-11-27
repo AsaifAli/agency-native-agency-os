@@ -271,6 +271,7 @@ class Project(Base):
 class Milestone(Base):
     __tablename__ = "milestones"
     __table_args__ = (
+        UniqueConstraint("org_id", "workspace_id", "id", name="uq_milestones_scope_id"),
         Index("ix_milestones_scope_project", "org_id", "workspace_id", "project_id"),
         CheckConstraint("sort_order >= 0", name="ck_milestone_sort_order_nonnegative"),
     )
@@ -346,6 +347,16 @@ class OutcomeMeasurement(Base):
             ["project_outcomes.org_id", "project_outcomes.workspace_id", "project_outcomes.id"],
             ondelete="CASCADE", name="fk_outcome_measurements_outcome_scope",
         ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "supporting_evaluation_run_id"],
+            ["evaluation_runs.org_id", "evaluation_runs.workspace_id", "evaluation_runs.id"],
+            ondelete="RESTRICT", name="fk_outcome_measurements_evaluation_scope",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "milestone_id"],
+            ["milestones.org_id", "milestones.workspace_id", "milestones.id"],
+            ondelete="RESTRICT", name="fk_outcome_measurements_milestone_scope",
+        ),
         Index("ix_outcome_measurements_scope_outcome_time", "org_id", "workspace_id", "outcome_id", "measured_at"),
         CheckConstraint("source_type IN ('agency_measured','client_reported','system_measured','independently_verified')",
                         name="ck_outcome_measurement_source_type"),
@@ -355,13 +366,13 @@ class OutcomeMeasurement(Base):
     org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
     outcome_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    value: Mapped[object] = mapped_column(Numeric(20, 6), nullable=False)
+    value: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
     measured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
     source_type: Mapped[str] = mapped_column(String(32), nullable=False)
     source_reference: Mapped[str] = mapped_column(String(240), nullable=False)
     evidence_summary: Mapped[str] = mapped_column(Text, nullable=False)
-    supporting_evaluation_run_id: Mapped[str | None] = mapped_column(ForeignKey("evaluation_runs.id"), nullable=True)
-    milestone_id: Mapped[str | None] = mapped_column(ForeignKey("milestones.id"), nullable=True)
+    supporting_evaluation_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    milestone_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 
