@@ -12,7 +12,7 @@ This file is the current status summary. Historical branch comparisons, test log
 
 | Check | Recorded result | Qualification |
 |---|---|---|
-| Backend pytest suite | **483 passed, 19 skipped, 2 warnings** | PR #58 baseline; PR #65 was frontend-only. PR #66 changes backend security code, so this result must be rerun before merging #66. |
+| Backend pytest suite | **483 passed, 19 skipped, 2 warnings** | PR #58 baseline; PR #65 was frontend-only. PR #68 changes backend security code, so this result must be rerun before merging #68. |
 | Isolated PostgreSQL 16 Compose suite | **105 passed, 2 warnings** | PR #58 baseline in a disposable isolated stack; rerun after PR #66 before treating it as current evidence. |
 | Frontend ESLint | 0 errors; 7 existing React Hook dependency warnings | Fresh run after PR #65; no warnings were suppressed. |
 | Frontend TypeScript | Passed | Fresh run after PR #65. |
@@ -95,7 +95,7 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 - Complete a route/function/role/grant/ownership inventory for RLS, SECURITY DEFINER functions and pooled-connection context; mapped ORM tables are now checked against the required RLS inventory, but global `users` identity-table access still needs separate review.
 - Complete negative cross-workspace tests for every API and nested object; organization membership must not substitute for exact workspace grant.
 - Prove isolation across current browser/agent sessions, tool outputs and logs, then across files, object storage, caches, search/RAG and generated artifacts when those paths are implemented. No file upload/extraction, object storage, RAG ingestion or business-data cache path currently exists; the signed website lead intake is a fixed-workspace CRM ingestion and does not call an AI provider.
-- Complete Data Protection Gateway classification/minimization/PII-secret detection/redaction for every ingestion, file extraction, RAG, connector, provider callback, tool, log, cache and artifact path. Current implemented provider-facing boundaries cover Managed Agents requests/results/callbacks, Tool Gateway input/output, audit payloads and structured logs. PR #66 adds structured credential-key rejection, structured PII-field redaction and provider event-ID protection; it remains draft pending full tests. No file upload/extraction, object storage, RAG ingestion or general connector ingestion path is currently implemented. There is no automated content classifier; current runtime eligibility is a conservative data-class/authorization gate.
+- Complete Data Protection Gateway classification/minimization/PII-secret detection/redaction for every ingestion, file extraction, RAG, connector, provider callback, tool, log, cache and artifact path. Current implemented provider-facing boundaries cover Managed Agents requests/results/callbacks, Tool Gateway input/output, audit payloads and structured logs. PR #68 adds structured credential-key rejection, structured PII-field redaction and provider event-ID protection; it remains draft pending full tests. No file upload/extraction, object storage, RAG ingestion or general connector ingestion path is currently implemented. There is no automated content classifier; current runtime eligibility is a conservative data-class/authorization gate.
 - Enforce per-client policy and runtime eligibility before any provider receives data.
 - Complete scoped credential rotation, egress allowlists/SSRF defenses, sandbox isolation, resource limits, malware-safe file processing and secrets-history review.
 - Add cryptographic audit integrity checkpoints; current append-only trigger alone is not cryptographic tamper-evidence.
@@ -127,7 +127,7 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 ## Immediate work order
 
 1. Exact-main stabilization and frontend checks: **complete for PR #65**. Re-run backend and PostgreSQL suites after PR #66 because it changes security code.
-2. Complete tenant/RLS and Data Protection Gateway inventory and negative tests; PR #66 is the current draft hardening bundle.
+2. Complete tenant/RLS and Data Protection Gateway inventory and negative tests; PR #68 is the current draft hardening bundle.
 3. Artifact/object storage isolation and retention lifecycle.
 4. OS MCP adapter over the Tool Gateway, with all grants fail-closed.
 5. Worker/outbox recovery and reconciliation acceptance.
@@ -153,7 +153,7 @@ npx tsc --noEmit
 npm run build
 cd ..
 
-# Focused security regressions added in PR #66
+# Focused security regressions added in PR #68
 python -m pytest -q tests/test_data_protection.py tests/test_log_sanitization.py tests/test_audit_payload_protection.py
 
 # Full backend suite
@@ -166,4 +166,4 @@ docker compose -p agency-os-pg-test \
   --exit-code-from postgres-tests postgres-tests
 ```
 
-Then run browser critical-flow/accessibility tests and verify the exact merged commit. PR #66 remains draft until the focused, full and PostgreSQL suites pass. Live provider credentials, DNS, object storage, email/webhooks, staging deployment and backup restore require founder-environment access and will be presented as a final checklist. Production migration/deployment and destructive data actions require separate explicit approval.
+Then run browser critical-flow/accessibility tests and verify the exact merged commit. PR #68 remains draft until the focused, full and PostgreSQL suites pass. Live provider credentials, DNS, object storage, email/webhooks, staging deployment and backup restore require founder-environment access and will be presented as a final checklist. Production migration/deployment and destructive data actions require separate explicit approval.
