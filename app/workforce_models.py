@@ -157,8 +157,14 @@ class OrchestrationPlanDelegation(Base):
     )
     org_id: Mapped[str] = mapped_column(String(36), nullable=False)
     workspace_id: Mapped[str] = mapped_column(String(36), nullable=False)
-    plan_id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    delegation_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    plan_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("orchestration_plans.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    delegation_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("delegations.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
     ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
