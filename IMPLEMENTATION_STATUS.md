@@ -45,6 +45,8 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 ### Tenant isolation, workers and execution reliability
 - PostgreSQL RLS and role separation are implemented; application and worker roles are intended to be non-owner, least-privilege roles.
 - Human workspace-grant authorization was restored in PR #58.
+- The orchestration plan-to-delegation join table now carries organization/workspace scope, composite foreign keys to both parent records, and forced PostgreSQL RLS; the table is included in the startup RLS inventory. The migration backfills scope from the plan and refuses to proceed if existing links cross workspaces or are orphaned.
+- A model/RLS inventory regression test requires every mapped table to be present in the RLS inventory, with the shared global `users` identity table as the explicit exception. The `users` table still needs a separate privacy/access review.
 - Worker production startup verifies `PROCESS_ROLE=worker`, PostgreSQL and the `agency_os_worker` role with `NOBYPASSRLS`.
 - Worker execution and maintenance use database-verified, capability-bound claim/renew/release operations; caller-forgeable machine GUCs do not establish worker authorization.
 - Durable execution lifecycle includes persisted attempts, leases, heartbeats, bounded retries, expired-lease recovery, pause/cancel acknowledgement and workspace-scoped maintenance.
@@ -87,7 +89,7 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 ## Current gaps and blockers
 
 ### P0 — security and data protection
-- Complete a table/route/function/role inventory for RLS, grants, ownership, SECURITY DEFINER functions and pooled-connection context.
+- Complete a route/function/role/grant/ownership inventory for RLS, SECURITY DEFINER functions and pooled-connection context; mapped ORM tables are now checked against the required RLS inventory, but global `users` identity-table access still needs separate review.
 - Complete negative cross-workspace tests for every API and nested object; organization membership must not substitute for exact workspace grant.
 - Prove isolation across files, object storage, browser/agent sessions, caches, search/RAG, logs, tool outputs and generated artifacts.
 - Complete Data Protection Gateway classification/minimization/PII-secret detection/redaction for every ingestion, file extraction, RAG, connector, provider callback, tool, log, cache and artifact path.
