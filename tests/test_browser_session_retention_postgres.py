@@ -56,12 +56,7 @@ def test_browser_session_retention_rpc_is_worker_only_bounded_and_audited():
             org_id = org.id
             user_id = user.id
             db.add(Membership(org_id=org_id, user_id=user_id, role=Role.owner))
-            for label, row in (
-                ("old_expired", old_expired),
-                ("recent_expired", recent_expired),
-                ("active", active),
-                ("old_revoked", old_revoked),
-            ):
+            for row in (old_expired, recent_expired, active, old_revoked):
                 row.user_id = user_id
                 db.add(row)
             db.flush()
@@ -130,6 +125,7 @@ def test_browser_session_retention_rpc_is_worker_only_bounded_and_audited():
             if org_id is not None:
                 connection.execute(text("DELETE FROM public.audit_events WHERE org_id = :org"), {"org": org_id})
                 connection.execute(text("DELETE FROM public.browser_sessions WHERE user_id = :user"), {"user": user_id})
+                connection.execute(text("DELETE FROM public.memberships WHERE org_id = :org AND user_id = :user"), {"org": org_id, "user": user_id})
                 connection.execute(text("DELETE FROM public.organizations WHERE id = :org"), {"org": org_id})
                 connection.execute(text("DELETE FROM public.users WHERE id = :user"), {"user": user_id})
         for engine in (admin_engine, app_engine, worker_engine):
