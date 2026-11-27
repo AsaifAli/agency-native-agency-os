@@ -4,7 +4,7 @@ import uuid
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import sessionmaker
 
 from app.db import set_rls_context, verify_postgres_role
