@@ -18,7 +18,7 @@ This file is the current status summary. Historical branch comparisons, test log
 | Frontend TypeScript | Passed | Fresh run after PR #65. |
 | Next.js production build | Passed; 32 static pages generated | Fresh run after PR #65. |
 | Dashboard theme browser checks | Passed | System/light/dark selection, persistence across reload, live OS light↔dark changes and 320px overflow check. |
-| PR #68 security regressions | Partial | Earlier DPG harnesses passed; latest audit-token and mandatory tool-session policy regressions were added after that run and still require execution. |
+| PR #68 security regressions | Partial | Earlier DPG harnesses passed; latest audit-token, scoped resume-metadata and mandatory tool-session policy regressions were added after that run and still require execution. |
 | Consolidated security full Python pytest suite | **530 passed, 20 skipped, 2 warnings** (founder-reported on earlier code/test head) | PR #68 has since received independent-review fixes; rerun focused and full suites on the final head before merge. |
 | GitHub Actions | Not run | Intentionally ignored per founder direction. |
 
@@ -154,7 +154,7 @@ npm run build
 cd ..
 
 # Focused security regressions added in PR #68
-python -m pytest -q tests/test_data_protection.py tests/test_log_sanitization.py tests/test_audit_payload_protection.py
+python -m pytest -q tests/test_data_protection.py tests/test_log_sanitization.py tests/test_audit_payload_protection.py tests/test_tool_gateway_policy.py tests/test_machine_identity.py tests/test_tool_gateway_policy.py tests/test_machine_identity.py
 
 # Full backend suite
 python -m pytest -q
