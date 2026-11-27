@@ -17,7 +17,9 @@ class ToolInvokeRequest(BaseModel):
     input: dict = Field(default_factory=dict)
 
 
-def _agent_authorized_tool_data_classes(db: Session, identity) -> dict[str, set[str]] | None:
+def _agent_authorized_tool_data_classes(
+    db: Session, identity
+) -> dict[str, set[str]] | None:
     """Return per-tool data classes granted to an agent.
 
     None means a non-agent machine identity. Discovery is filtered by the
@@ -72,6 +74,7 @@ def _agent_authorized_tool_data_classes(db: Session, identity) -> dict[str, set[
             allowed[spec.key] = data_classes
     return allowed
 
+
 def _tool_view(spec, identity_allowed_data_classes: list[str]):
     return {
         "key": spec.key,
@@ -80,7 +83,9 @@ def _tool_view(spec, identity_allowed_data_classes: list[str]):
         "risk_level": spec.risk_level,
         "required_action": spec.required_action,
         "minimum_scope": spec.minimum_scope,
-        "allowed_data_classes": sorted(set(spec.allowed_data_classes).intersection(identity_allowed_data_classes)),
+        "allowed_data_classes": sorted(
+            set(spec.allowed_data_classes).intersection(identity_allowed_data_classes)
+        ),
         "requires_approval": spec.requires_approval,
     }
 
