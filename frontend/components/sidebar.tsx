@@ -87,6 +87,7 @@ export default function Sidebar() {
           type="button"
           className="sidebar-backdrop"
           aria-label="Close navigation"
+          tabIndex={-1}
           onClick={() => setIsOpen(false)}
         />
       ) : null}
