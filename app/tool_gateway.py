@@ -227,6 +227,11 @@ def invoke_registered_tool(
                 tool_key=spec.key, reason_code="IDEMPOTENCY_CONFLICT",
                 status_code=409, message="Tool invocation was denied by OS policy.",
             )
+        if existing.payload_purged_at is not None:
+            raise HTTPException(
+                status_code=410,
+                detail="IDEMPOTENCY_RESULT_EXPIRED",
+            )
         db.commit()
         return {
             "id": existing.id,
