@@ -107,6 +107,8 @@ def test_orchestration_plan_links_are_backfilled_and_reject_cross_workspace_pair
     _base_schema(engine)
 
     _run_upgrade(engine)
+    # A partially/repeated migration must not duplicate constraints or indexes.
+    _run_upgrade(engine)
 
     inspector = sa.inspect(engine)
     columns = {column["name"] for column in inspector.get_columns(
