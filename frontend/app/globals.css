@@ -9,3 +9,14 @@
 @media(max-width:620px){.shell{grid-template-columns:1fr}.sidebar{display:none}.topbar{padding:0 18px}.content{padding:23px 17px}.stats{grid-template-columns:1fr 1fr}.page-title{font-size:23px}.two-col{grid-template-columns:1fr}}
 
 .field select{display:block;width:100%;margin-top:7px;border:0;background:transparent;color:#34415b;font:inherit;outline:none}.field{display:block}
+
+/* RAAS outcome scorecard */
+.stack{display:grid;gap:14px}
+.sub-panel{padding:16px;border:1px solid var(--line);border-radius:10px;background:#fbfcff}
+.inline-form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:end;margin-top:14px}
+.button-row{display:flex;gap:10px;flex-wrap:wrap}
+.check-row{display:flex;gap:9px;align-items:flex-start;padding:8px 0;font-size:12px;color:#34415b}
+.check-row input{margin-top:2px}
+details>summary{cursor:pointer;list-style-position:inside}
+details[open]>summary{margin-bottom:8px}
+@media(max-width:620px){.inline-form{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}}
