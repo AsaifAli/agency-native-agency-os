@@ -356,12 +356,20 @@ def protect_execution_request(
     if control_request is not None:
         if not isinstance(control_request, dict):
             raise DataProtectionBlocked("INVALID_CONTROL_METADATA")
+        allowed_control_keys = {
+            "action", "resume_token", "resume_event_id",
+            "interrupt_event_id", "interrupt_action",
+        }
+        if set(control_request) - allowed_control_keys:
+            raise DataProtectionBlocked("INVALID_CONTROL_METADATA")
         action = control_request.get("action")
         if not isinstance(action, str) or action not in {"resume", "pause", "cancel"}:
             raise DataProtectionBlocked("INVALID_CONTROL_METADATA")
-        for identifier_key in (
-            "resume_token", "resume_event_id", "interrupt_event_id",
-        ):
+        if control_request.get("resume_token") is not None:
+            if action != "resume":
+                raise DataProtectionBlocked("INVALID_CONTROL_METADATA")
+            _validate_runtime_identifier(control_request["resume_token"])
+        for identifier_key in ("resume_event_id", "interrupt_event_id"):
             identifier = control_request.get(identifier_key)
             if identifier is not None:
                 _validate_runtime_identifier(identifier)
@@ -401,9 +409,19 @@ def protect_execution_request(
     raw_payload = {**safe_identifiers, **values, "request_metadata": metadata}
     if _bounded_json_size(raw_payload) > MAX_EXECUTION_REQUEST_BYTES:
         raise DataProtectionBlocked("EXECUTION_REQUEST_TOO_LARGE")
-    safe_metadata = _sanitize_value(
-        metadata, counts, trusted_internal_id_keys=frozenset({"resume_token"}),
-    )
+    # Resume tokens are continuation/idempotency material, not generally safe
+    # metadata. Sanitize all ordinary metadata with no token exemption, then
+    # validate and sanitize only the flat, explicitly allowlisted control object.
+    ordinary_metadata = {
+        key: value for key, value in metadata.items() if key != "control_request"
+    }
+    safe_metadata = _sanitize_value(ordinary_metadata, counts)
+    if control_request is not None:
+        safe_control_request = _sanitize_value(
+            control_request, counts,
+            trusted_internal_id_keys=frozenset({"resume_token"}),
+        )
+        safe_metadata["control_request"] = safe_control_request
     if _bounded_json_size(safe_metadata) > MAX_METADATA_BYTES:
         raise DataProtectionBlocked("METADATA_TOO_LARGE")
     cleaned = {
