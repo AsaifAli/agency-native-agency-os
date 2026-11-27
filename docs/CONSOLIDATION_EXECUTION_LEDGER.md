@@ -100,3 +100,15 @@ This document supersedes the pre-merge integration ledger below. PR #58 is the p
 - On pre-fix PR head `88697b83bae5f1728cffab7c3c44707e368cd114`, the full host suite reported **538 passed, 3 failed, 20 skipped**. Two failures were resume audit events persisting `resume_token` after the generic audit exemption was removed; the resume flow now emits only `provider_session_reuse_required` in the audit payload, with a regression assertion that the token is absent. The third failure expected 404 for an unregistered tool even though the test identity lacked the invocation scope; the test now supplies the specific scope so the expected 404 tests registry absence rather than authorization denial.
 - The isolated PostgreSQL suite on that same pre-fix head reported **106 passed, 1 failed**; the sole failure was the same resume audit-token issue. The fixes are committed on the PR branch; focused, full and PostgreSQL suites must be rerun on the current head before merge.
 - The user's local uncommitted `.gitignore`, `frontend/next-env.d.ts` and generated `frontend/tsconfig.tsbuildinfo` were observed and not modified. The pre-existing local PostgreSQL volume remains out of scope and untouched.
+
+
+## Latest founder verification update — 2026-11-27 (PR #68 head 41ffdd29)
+
+Founder-reported results after updating the local branch to exact PR head `41ffdd29a8968e6b7f62d3ea9057f78296c6f5b3`:
+
+- Focused security/regression suite: **141 passed, 2 warnings**.
+- Full host suite: **541 passed, 20 skipped, 2 warnings**. The 20 skips are environment-gated live-PostgreSQL tests requiring dedicated connection variables and are not counted as passes.
+- Isolated PostgreSQL 16 Compose suite: **107 passed, 2 warnings**, exit code 0; disposable migration and app-role grant jobs completed.
+- This rerun resolves the earlier resume audit-token failures and the test expectation that previously lacked the required tool invocation scope.
+- The two warnings are Starlette/httpx and Authlib/httpx deprecations. GitHub Actions were intentionally not run per founder direction.
+- These are founder-reported local test results, not an independent execution by the reviewer. PR #68 remains draft until the remaining security review and final founder/maintainer merge decision. No production migration, deployment, provider activation or production data operation was performed.
