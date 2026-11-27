@@ -539,3 +539,16 @@ def test_protect_untrusted_payload_redacts_structured_personal_fields_recursivel
     assert contact["address"] == "[REDACTED_PII_FIELD]"
     assert protected["company_name"] == "Example Company"
     assert report.redaction_counts["STRUCTURED_PII"] == 4
+
+def test_aadhaar_redaction_does_not_corrupt_uuid_identifiers():
+    from app.data_protection import sanitize_text
+
+    attempt_id = "39775921-0082-4d4b-8109-7ef4619eaf86"
+    cleaned, counts = sanitize_text(attempt_id)
+
+    assert cleaned == attempt_id
+    assert counts == {}
+
+    aadhaar, aadhaar_counts = sanitize_text("1234 5678 9012")
+    assert aadhaar == "[REDACTED_GOVERNMENT_ID]"
+    assert aadhaar_counts == {"GOVERNMENT_ID": 1}
