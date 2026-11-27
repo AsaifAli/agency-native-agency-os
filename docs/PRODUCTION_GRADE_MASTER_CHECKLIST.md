@@ -174,7 +174,7 @@ A checkbox is complete only when code/infrastructure, tests, operational evidenc
 - [ ] Re-run regression suite after runtime, model, prompt, skill, tool schema or policy changes.
 
 ### 13. Finance, capacity and business operations
-- [ ] Provider/agent budget reservation and settlement integrated with finance ledger.
+- [ ] Replace configured-but-unenforced `WorkforceCapability.budget_minor` metadata with atomic provider/agent budget reservation, settlement and release integrated with the finance ledger; prove concurrent reservations cannot exceed the approved cap.
 - [ ] Track project budget, time/capacity, utilization, cost-to-serve, margin and forecast.
 - [ ] Separate estimates, approved budgets, committed spend, actual usage and invoices.
 - [ ] Reconcile invoice drafts, issued invoices, payments, refunds and provider costs with audit.
