@@ -15,20 +15,31 @@ branch_labels = None
 depends_on = None
 
 
-def _ensure_unique_index(bind: sa.Connection, table: str, name: str, columns: list[str]) -> None:
+def _ensure_index(
+    bind: sa.Connection,
+    table: str,
+    name: str,
+    columns: list[str],
+    *,
+    unique: bool,
+) -> None:
     indexes = {item["name"]: item for item in sa.inspect(bind).get_indexes(table)}
     if name in indexes:
         existing = indexes[name]
-        if existing.get("column_names") != columns or not existing.get("unique"):
+        if (
+            existing.get("column_names") != columns
+            or bool(existing.get("unique")) != unique
+        ):
             raise RuntimeError(f"Unexpected definition for {name}")
         return
-    op.create_index(name, table, columns, unique=True)
+    op.create_index(name, table, columns, unique=unique)
 
 
 def _ensure_column(bind: sa.Connection, name: str) -> None:
-    columns = {item["name"] for item in sa.inspect(bind).get_columns(
-        "orchestration_plan_delegations"
-    )}
+    columns = {
+        item["name"]
+        for item in sa.inspect(bind).get_columns("orchestration_plan_delegations")
+    }
     if name not in columns:
         op.add_column(
             "orchestration_plan_delegations",
@@ -53,7 +64,8 @@ def _validate_existing_links(bind: sa.Connection) -> None:
     """)).scalar_one()
     if invalid:
         raise RuntimeError(
-            "Cannot scope orchestration plan links: existing orphaned or cross-workspace links found"
+            "Cannot scope orchestration plan links: existing orphaned or "
+            "cross-workspace links found"
         )
 
 
@@ -66,7 +78,10 @@ def _install_postgres_rls() -> None:
         "ALTER TABLE public.orchestration_plan_delegations "
         "FORCE ROW LEVEL SECURITY"
     )
-    op.execute("DROP POLICY IF EXISTS tenant_isolation ON public.orchestration_plan_delegations")
+    op.execute(
+        "DROP POLICY IF EXISTS tenant_isolation "
+        "ON public.orchestration_plan_delegations"
+    )
     predicate = """
         (
             agency_os_private.user_has_workspace_access(
@@ -89,7 +104,8 @@ def _install_postgres_rls() -> None:
         )
     """
     op.execute(
-        "CREATE POLICY tenant_isolation ON public.orchestration_plan_delegations "
+        "CREATE POLICY tenant_isolation "
+        "ON public.orchestration_plan_delegations "
         f"USING ({predicate}) WITH CHECK ({predicate})"
     )
 
@@ -97,7 +113,9 @@ def _install_postgres_rls() -> None:
 def upgrade() -> None:
     bind = op.get_bind()
     if not sa.inspect(bind).has_table("orchestration_plan_delegations"):
-        raise RuntimeError("Required table orchestration_plan_delegations does not exist")
+        raise RuntimeError(
+            "Required table orchestration_plan_delegations does not exist"
+        )
 
     _ensure_column(bind, "org_id")
     _ensure_column(bind, "workspace_id")
@@ -114,68 +132,100 @@ def upgrade() -> None:
         )
         WHERE org_id IS NULL OR workspace_id IS NULL
     """))
-
     _validate_existing_links(bind)
 
-    _ensure_unique_index(
-        bind, "orchestration_plans", "uq_orchestration_plan_scope_id",
+    _ensure_index(
+        bind,
+        "orchestration_plans",
+        "uq_orchestration_plan_scope_id",
         ["org_id", "workspace_id", "id"],
+        unique=True,
     )
-    _ensure_unique_index(
-        bind, "delegations", "uq_delegation_scope_id",
+    _ensure_index(
+        bind,
+        "delegations",
+        "uq_delegation_scope_id",
         ["org_id", "workspace_id", "id"],
+        unique=True,
     )
 
+    columns = {
+        item["name"]: item
+        for item in sa.inspect(bind).get_columns("orchestration_plan_delegations")
+    }
+    existing_fks = {
+        item.get("name")
+        for item in sa.inspect(bind).get_foreign_keys("orchestration_plan_delegations")
+    }
+    missing_fks = {
+        "fk_plan_delegation_plan_workspace",
+        "fk_plan_delegation_delegation_workspace",
+    } - existing_fks
+
     if bind.dialect.name == "sqlite":
-        with op.batch_alter_table("orchestration_plan_delegations") as batch:
-            batch.alter_column(
-                "org_id", existing_type=sa.String(length=36), nullable=False
-            )
-            batch.alter_column(
-                "workspace_id", existing_type=sa.String(length=36), nullable=False
-            )
-            batch.create_foreign_key(
+        needs_batch = bool(missing_fks) or any(
+            columns[name].get("nullable", True)
+            for name in ("org_id", "workspace_id")
+        )
+        if needs_batch:
+            with op.batch_alter_table("orchestration_plan_delegations") as batch:
+                for name in ("org_id", "workspace_id"):
+                    if columns[name].get("nullable", True):
+                        batch.alter_column(
+                            name,
+                            existing_type=sa.String(length=36),
+                            nullable=False,
+                        )
+                if "fk_plan_delegation_plan_workspace" in missing_fks:
+                    batch.create_foreign_key(
+                        "fk_plan_delegation_plan_workspace",
+                        "orchestration_plans",
+                        ["org_id", "workspace_id", "plan_id"],
+                        ["org_id", "workspace_id", "id"],
+                        ondelete="CASCADE",
+                    )
+                if "fk_plan_delegation_delegation_workspace" in missing_fks:
+                    batch.create_foreign_key(
+                        "fk_plan_delegation_delegation_workspace",
+                        "delegations",
+                        ["org_id", "workspace_id", "delegation_id"],
+                        ["org_id", "workspace_id", "id"],
+                        ondelete="CASCADE",
+                    )
+    else:
+        for name in ("org_id", "workspace_id"):
+            if columns[name].get("nullable", True):
+                op.alter_column(
+                    "orchestration_plan_delegations",
+                    name,
+                    existing_type=sa.String(length=36),
+                    nullable=False,
+                )
+        if "fk_plan_delegation_plan_workspace" in missing_fks:
+            op.create_foreign_key(
                 "fk_plan_delegation_plan_workspace",
+                "orchestration_plan_delegations",
                 "orchestration_plans",
                 ["org_id", "workspace_id", "plan_id"],
                 ["org_id", "workspace_id", "id"],
                 ondelete="CASCADE",
             )
-            batch.create_foreign_key(
+        if "fk_plan_delegation_delegation_workspace" in missing_fks:
+            op.create_foreign_key(
                 "fk_plan_delegation_delegation_workspace",
+                "orchestration_plan_delegations",
                 "delegations",
                 ["org_id", "workspace_id", "delegation_id"],
                 ["org_id", "workspace_id", "id"],
                 ondelete="CASCADE",
             )
-    else:
-        op.alter_column(
-            "orchestration_plan_delegations", "org_id",
-            existing_type=sa.String(length=36), nullable=False,
-        )
-        op.alter_column(
-            "orchestration_plan_delegations", "workspace_id",
-            existing_type=sa.String(length=36), nullable=False,
-        )
-        op.create_foreign_key(
-            "fk_plan_delegation_plan_workspace",
-            "orchestration_plan_delegations", "orchestration_plans",
-            ["org_id", "workspace_id", "plan_id"],
-            ["org_id", "workspace_id", "id"],
-            ondelete="CASCADE",
-        )
-        op.create_foreign_key(
-            "fk_plan_delegation_delegation_workspace",
-            "orchestration_plan_delegations", "delegations",
-            ["org_id", "workspace_id", "delegation_id"],
-            ["org_id", "workspace_id", "id"],
-            ondelete="CASCADE",
-        )
 
-    op.create_index(
-        "ix_orchestration_plan_delegations_scope_plan",
+    _ensure_index(
+        bind,
         "orchestration_plan_delegations",
+        "ix_orchestration_plan_delegations_scope_plan",
         ["org_id", "workspace_id", "plan_id"],
+        unique=False,
     )
 
     if bind.dialect.name == "postgresql":
@@ -183,8 +233,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    if op.get_bind().dialect.name == "postgresql":
-        raise RuntimeError(
-            "Unsafe downgrade refused: removing workspace constraints and RLS "
-            "would weaken orchestration tenant isolation"
-        )
+    raise RuntimeError(
+        "Unsafe downgrade refused: removing workspace constraints and RLS "
+        "would weaken orchestration tenant isolation"
+    )
