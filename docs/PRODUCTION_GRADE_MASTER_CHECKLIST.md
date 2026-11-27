@@ -210,7 +210,7 @@ A checkbox is complete only when code/infrastructure, tests, operational evidenc
 - [ ] Add accessible navigation, keyboard support, loading/empty/error states and responsive layouts.
 - [ ] Ensure destructive/high-impact controls require confirmation and show consequences.
 - [ ] Verify frontend authorization mirrors backend policy without treating UI hiding as security.
-- [ ] Run end-to-end browser tests for critical founder journeys. Frontend lint (0 errors; 7 pre-existing React Hook dependency warnings), TypeScript validation and Next.js production build passed before the final Founder Console UI reconciliation. A fresh run against exact merged `main` commit `4541626d6fffc904d8ee3131bb2f408efbe27acf` and browser-level critical-flow tests remain pending.
+- [ ] Run end-to-end browser tests for critical founder journeys. Frontend lint (0 errors; 7 pre-existing React Hook dependency warnings), TypeScript validation and Next.js production build passed before the final Founder Console UI reconciliation. A fresh run against current `main` checkpoint `9e42fbe49d0c9bff2553d0c8b2b77412e889fc0d` and browser-level critical-flow tests remain pending.
 
 ### 17. Learning and operational improvement
 - [ ] Capture incidents, corrections, successful playbooks and postmortems as reviewed knowledge.
