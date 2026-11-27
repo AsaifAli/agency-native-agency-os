@@ -244,7 +244,7 @@ class Project(Base):
     __tablename__ = "projects"
     __table_args__ = (
         Index("ix_projects_scope_status", "org_id", "workspace_id", "status"),
-        UniqueConstraint("org_id", "workspace_id", "id", name="uq_projects_scope_id"),
+        Index("uq_projects_scope_id", "org_id", "workspace_id", "id", unique=True),
         CheckConstraint("budget_minor >= 0", name="ck_project_budget_nonnegative"),
     )
 
@@ -271,7 +271,7 @@ class Project(Base):
 class Milestone(Base):
     __tablename__ = "milestones"
     __table_args__ = (
-        UniqueConstraint("org_id", "workspace_id", "id", name="uq_milestones_scope_id"),
+        Index("uq_milestones_scope_id", "org_id", "workspace_id", "id", unique=True),
         Index("ix_milestones_scope_project", "org_id", "workspace_id", "project_id"),
         CheckConstraint("sort_order >= 0", name="ck_milestone_sort_order_nonnegative"),
     )
