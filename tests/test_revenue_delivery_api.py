@@ -436,6 +436,12 @@ def test_project_outcomes_track_targets_measurements_and_founder_acceptance(clie
     )
     assert measurement.status_code == 201, measurement.text
     assert measurement.json()["value"] == "3.500000" or float(measurement.json()["value"]) == 3.5
+    project_measurements = client.get(
+        f"/v1/orgs/{org}/projects/{project_id}/outcome-measurements",
+        headers=auth(), params={"workspace_id": ws},
+    )
+    assert project_measurements.status_code == 200, project_measurements.text
+    assert [row["id"] for row in project_measurements.json()] == [measurement.json()["id"]]
 
     listed = client.get(
         f"/v1/orgs/{org}/projects/{project_id}/outcomes",
