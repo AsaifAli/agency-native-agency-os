@@ -22,7 +22,7 @@ def test_rls_migration_covers_every_model_table_with_org_id():
     # workspace_grants is introduced by the follow-up authorization migration;
     # the original migration remains an immutable historical baseline.
     expected.pop("workspace_grants")
-    assert MIGRATION.ORG_TABLES == expected
+    # Outcome tables were introduced by a later additive migration; keep the\n    # original tenant-RLS revision immutable.\n    expected.difference_update({"project_outcomes", "outcome_measurements"})\n    assert MIGRATION.ORG_TABLES == expected
 
 
 def test_rls_migration_has_security_definer_membership_and_dedicated_roles():
@@ -108,7 +108,7 @@ def test_workspace_authorization_migration_covers_every_workspace_owned_table():
         if {"org_id", "workspace_id"} <= {column.name for column in table.columns}
         and table.name != "workspace_grants"
     }
-    assert set(migration.WORKSPACE_TABLES) == expected
+    expected.difference_update({"project_outcomes", "outcome_measurements"})\n    assert set(migration.WORKSPACE_TABLES) == expected
 
 
 def test_only_explicit_org_level_tables_allow_null_workspace_rows():
@@ -138,3 +138,17 @@ def test_workspace_grant_migration_preserves_machine_scope_and_audits_backfill()
     assert "TO agency_os_app, agency_os_worker" in source
     assert "agency_os.machine_identity_lookup_id" in source
     assert "workspace_id IS NULL" in source
+
+
+
+def test_project_outcome_tables_are_added_to_current_rls_inventory():
+    migration_path = PATH.with_name("ab2c3d4e5f6a_project_outcomes.py")
+    source = migration_path.read_text()
+    from app.db import REQUIRED_RLS_TABLES
+
+    assert {"project_outcomes", "outcome_measurements"} <= REQUIRED_RLS_TABLES
+    assert "ENABLE ROW LEVEL SECURITY" in source
+    assert "FORCE ROW LEVEL SECURITY" in source
+    assert "user_has_workspace_access" in source
+    assert "outcome_measurements_append_only" in source
+    assert "REVOKE UPDATE, DELETE" in source
