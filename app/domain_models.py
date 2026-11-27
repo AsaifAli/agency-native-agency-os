@@ -4,6 +4,7 @@ All records are organization- and workspace-scoped. This module is imported by
 Alembic's environment so metadata autogeneration sees every model.
 """
 import uuid
+from decimal import Decimal
 from datetime import datetime, timezone
 
 from sqlalchemy import (
@@ -313,8 +314,8 @@ class ProjectOutcome(Base):
     metric_name: Mapped[str] = mapped_column(String(160), nullable=False)
     metric_unit: Mapped[str] = mapped_column(String(64), nullable=False)
     direction: Mapped[str] = mapped_column(String(16), nullable=False)
-    baseline_value: Mapped[object | None] = mapped_column(Numeric(20, 6), nullable=True)
-    target_value: Mapped[object] = mapped_column(Numeric(20, 6), nullable=False)
+    baseline_value: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    target_value: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
     target_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     measurement_method: Mapped[str] = mapped_column(Text, nullable=False)
     acceptance_criteria: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
