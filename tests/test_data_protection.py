@@ -549,6 +549,11 @@ def test_aadhaar_redaction_does_not_corrupt_uuid_identifiers():
     assert cleaned == attempt_id
     assert counts == {}
 
+    second_uuid = "4ef4f238-8836-4652-8950-b7076575daf6"
+    second_cleaned, second_counts = sanitize_text(second_uuid)
+    assert second_cleaned == second_uuid
+    assert second_counts == {}
+
     aadhaar, aadhaar_counts = sanitize_text("1234 5678 9012")
     assert aadhaar == "[REDACTED_GOVERNMENT_ID]"
     assert aadhaar_counts == {"GOVERNMENT_ID": 1}
