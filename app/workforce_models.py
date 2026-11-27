@@ -93,7 +93,7 @@ class Delegation(Base):
         CheckConstraint("review_status IN ('pending','approved','changes_requested','waived')", name="ck_delegation_review_status"),
         CheckConstraint("status IN ('blocked','ready','queued','running','awaiting_review','succeeded','failed','cancelled')", name="ck_delegation_status"),
         UniqueConstraint("parent_task_id", "child_task_id", name="uq_delegation_parent_child"),
-        UniqueConstraint("org_id", "workspace_id", "id", name="uq_delegation_scope_id"),
+        Index("uq_delegation_scope_id", "org_id", "workspace_id", "id", unique=True),
         Index("ix_delegation_scope_parent", "org_id", "workspace_id", "parent_task_id"),
         Index("ix_delegation_scope_assignee", "org_id", "workspace_id", "assigned_to_member_id"),
         Index("ix_delegation_scope_status", "org_id", "workspace_id", "status"),
@@ -120,7 +120,7 @@ class OrchestrationPlan(Base):
     __tablename__ = "orchestration_plans"
     __table_args__ = (
         CheckConstraint("status IN ('planned','in_progress','awaiting_review','succeeded','failed','cancelled')", name="ck_orchestration_plan_status"),
-        UniqueConstraint("org_id", "workspace_id", "id", name="uq_orchestration_plan_scope_id"),
+        Index("uq_orchestration_plan_scope_id", "org_id", "workspace_id", "id", unique=True),
         Index("ix_orchestration_plan_scope_status", "org_id", "workspace_id", "status"),
         Index("ix_orchestration_plan_root_task", "root_task_id"),
     )
