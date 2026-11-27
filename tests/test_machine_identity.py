@@ -1080,7 +1080,6 @@ def test_denied_tool_invocation_is_audited_without_raw_input(security_client):
         db.close()
 
 
-
 def test_agent_tool_discovery_requires_an_active_workforce_capability(security_client):
     from app.machine_identity import issue_machine_credential
     from app.models import Agent, DataClass
