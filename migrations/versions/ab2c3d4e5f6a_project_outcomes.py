@@ -15,9 +15,15 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.create_unique_constraint(
-        "uq_projects_scope_id", "projects", ["org_id", "workspace_id", "id"]
-    )
+    if op.get_bind().dialect.name == "sqlite":
+        with op.batch_alter_table("projects") as batch_op:
+            batch_op.create_unique_constraint(
+                "uq_projects_scope_id", ["org_id", "workspace_id", "id"]
+            )
+    else:
+        op.create_unique_constraint(
+            "uq_projects_scope_id", "projects", ["org_id", "workspace_id", "id"]
+        )
     op.create_table(
         "project_outcomes",
         sa.Column("id", sa.String(length=36), primary_key=True),
@@ -38,8 +44,8 @@ def upgrade() -> None:
         sa.Column("delivery_acceptance_status", sa.String(length=16), nullable=False, server_default="pending"),
         sa.Column("acceptance_results", sa.JSON(), nullable=False),
         sa.Column("acceptance_note", sa.Text(), nullable=False, server_default=""),
-        sa.Column("accepted_by_user_id", sa.String(length=36), sa.ForeignKey("users.id"), nullable=True),
-        sa.Column("accepted_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("decided_by_user_id", sa.String(length=36), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("decided_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("owner_user_id", sa.String(length=36), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
@@ -132,7 +138,10 @@ def upgrade() -> None:
                 SELECT r.rolsuper INTO is_superuser
                 FROM pg_catalog.pg_roles AS r WHERE r.rolname = session_user;
                 IF COALESCE(is_superuser, false) THEN
-                    RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+                    IF TG_OP = 'DELETE' THEN
+                        RETURN OLD;
+                    END IF;
+                    RETURN NEW;
                 END IF;
                 RAISE EXCEPTION 'outcome_measurements are append-only'
                     USING ERRCODE = '55000';
@@ -161,4 +170,8 @@ def downgrade() -> None:
         op.execute("ALTER TABLE public.project_outcomes DISABLE ROW LEVEL SECURITY")
     op.drop_table("outcome_measurements")
     op.drop_table("project_outcomes")
-    op.drop_constraint("uq_projects_scope_id", "projects", type_="unique")
+    if op.get_bind().dialect.name == "sqlite":
+        with op.batch_alter_table("projects") as batch_op:
+            batch_op.drop_constraint("uq_projects_scope_id", type_="unique")
+    else:
+        op.drop_constraint("uq_projects_scope_id", "projects", type_="unique")
