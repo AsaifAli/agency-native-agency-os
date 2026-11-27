@@ -112,3 +112,10 @@ Founder-reported results after updating the local branch to exact PR head `41ffd
 - This rerun resolves the earlier resume audit-token failures and the test expectation that previously lacked the required tool invocation scope.
 - The two warnings are Starlette/httpx and Authlib/httpx deprecations. GitHub Actions were intentionally not run per founder direction.
 - These are founder-reported local test results, not an independent execution by the reviewer. PR #68 remains draft until the remaining security review and final founder/maintainer merge decision. No production migration, deployment, provider activation or production data operation was performed.
+
+
+## Additional independent-review finding — 2026-11-27
+
+- Review found that the generic `protect_untrusted_payload` API still allowed callers to request a `resume_token` trusted-identifier exemption. Although `protect_execution_request` correctly limits resume-token acceptance to its flat, validated `control_request`, the generic API's allowlist also exposed that exemption to tool/connector callers. A regression test now requires the generic API to reject that trust request, and the allowlist has been narrowed to the registered resource identifiers `draft_id`, `lead_id` and `research_record_id`. The execution-control path retains its private, explicit resume-token validation. This code change is after the founder-reported green test head and therefore focused, full and PostgreSQL suites must be rerun before merge.
+- Review of the Tool Gateway confirms the per-session successful-call count is checked while holding the session row lock returned by `authorize_tool_session`, and invocation records are persisted with the session ID. The global 100-call ceiling remains an interim policy rather than a persisted per-session budget grant.
+- The PostgreSQL role bootstrap runs only on fresh database initialization; it transfers database and public-schema ownership to the dedicated migrator and grants the bootstrap role connection access. Existing-volume upgrades remain a separate, unapproved rehearsal and were not attempted.
