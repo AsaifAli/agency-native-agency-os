@@ -1,11 +1,12 @@
 # Agency OS — Consolidation and Readiness Execution Ledger
 
 **Last reconciled:** 2026-11-27  
-**Release candidate:** `main` at `4541626d6fffc904d8ee3131bb2f408efbe27acf`  
-**Merged work:** PR #58 — [Consolidate Agency OS execution controls and reliability changes](https://github.com/AsaifAli/agency-native-agency-os/pull/58)  
+**Release candidate:** `main` at `bc4eb0405fd1a07fcc75ab72828c0d76fc65f7d4`
+**Latest merged work:** PR #65 — [System, Light and Dark dashboard themes](https://github.com/AsaifAli/agency-native-agency-os/pull/65); PR #58 remains the prior backend consolidation baseline.
+**Active security PR:** [#66 — Data Protection Gateway hardening](https://github.com/AsaifAli/agency-native-agency-os/pull/66), draft pending full Python and PostgreSQL verification.
 **Release posture:** **NO-GO for production** — implementation and disposable-environment tests are not production acceptance.
 
-This document supersedes the pre-merge integration ledger below. PR #58 is merged. Its old candidate-branch queue, PR #58 merge blocker and workflow bootstrap failure are historical, not current merge tasks. GitHub Actions are intentionally excluded from this workstream per founder direction.
+This document supersedes the pre-merge integration ledger below. PR #58 is the prior backend consolidation baseline and PR #65 is the latest merged dashboard change. Their old candidate-branch queues, merge blockers and workflow bootstrap failures are historical, not current merge tasks. GitHub Actions are intentionally excluded from this workstream per founder direction.
 
 ## Evidence rules
 
@@ -18,13 +19,13 @@ This document supersedes the pre-merge integration ledger below. PR #58 is merge
 
 ## Merged baseline
 
-- PR #58 merged into `main` on 2026-11-27; merge commit `4541626d6fffc904d8ee3131bb2f408efbe27acf`.
-- The merged baseline includes the consolidated worker capability boundary, workspace-grant human authorization restoration, append-only audit-event protection, retention scrubbing foundations and RAAS project outcome management.
-- Backend suite on the merged candidate: **483 passed, 19 skipped, 2 warnings**.
-- Isolated PostgreSQL 16 Compose suite on the merged candidate: **105 passed, 2 warnings**.
-- Frontend lint/typecheck/build passed before final Founder Console UI reconciliation; a fresh run on exact merged `main` remains required.
+- PR #58 established the backend/security baseline; its recorded results were **483 passed, 19 skipped, 2 warnings** and **105 passed, 2 warnings** in isolated PostgreSQL 16 Compose.
+- PR #65 merged on 2026-11-27; merge commit `bc4eb0405fd1a07fcc75ab72828c0d76fc65f7d4`. It adds System/Light/Dark dashboard themes and repairs the frontend lockfile so `npm ci` succeeds.
+- Exact-main frontend checks after PR #65: `npm ci --ignore-scripts`, lint (0 errors; 7 existing hook warnings), TypeScript and production build passed; 32 static pages generated.
+- Headless browser theme checks passed for OS default, explicit overrides, persistence, live OS appearance changes and 320px layout overflow.
+- PR #66 is the current draft security bundle. Targeted isolated harnesses and Python compile checks pass, but repository pytest and PostgreSQL suites have not been rerun after its backend changes.
 - No production migration, deployment, provider activation or production data operation was performed.
-- No GitHub Actions run is claimed for PR #58.
+- GitHub Actions remain intentionally excluded per founder direction.
 
 ## Phase ledger
 
@@ -32,32 +33,32 @@ This document supersedes the pre-merge integration ledger below. PR #58 is merge
 |---|---|---|
 | 0. Architecture and consolidation | **Merged; baseline established** | Modular monolith and OS-owned state are retained. Refresh architecture/threat model and migration inventory against current main; no second control plane or queue engine. |
 | 1. Database, APIs and worker infrastructure | **Implemented; tested in disposable PostgreSQL** | PostgreSQL 16 isolated suite 105 passed. Still need empty-volume and existing-volume rehearsal, role/grant/function inventory, performance budgets and deployed topology verification. |
-| 2. Authentication and tenant isolation | **Partial** | OIDC/session lifecycle and workspace-grant authorization exist. Live Authentik MFA/JWKS assurance, full BOLA review and isolation across files/object storage/cache/RAG/logs/artifacts remain open. |
+| 2. Authentication and tenant isolation | **Partial** | OIDC/session lifecycle and exact workspace-grant authorization exist with route/PostgreSQL regression coverage. Live Authentik MFA/JWKS assurance, exhaustive BOLA review and isolation across future file/object-storage/RAG/artifact paths remain open. |
 | 3. Organization and Agent Registry | **Partial** | 16 departments, workforce/position catalog, curated skills and founder-gated capability/member lifecycle exist. Provider Agent provisioning, skill assignment, immutable runtime version promotion/rollback and delegated machine identities remain incomplete. |
 | 4. Revenue Engine | **Partial** | CRM, activity history, suppression records, opportunities, proposal drafts and founder pricing approval exist. Research/provenance at scale, dedupe/merge review, approved outbound dispatch, sender authorization, delivery receipts, reply/opt-out/bounce stops and attribution remain incomplete. |
 | 5. Claude runtime and tool governance | **Partial / live runtime unverified** | Managed Agents adapter is opt-in and synthetic-first; current Tool Gateway foundation exists, but only health and public lead-research draft tools are registered. Full OS MCP bridge, DPG-at-dispatch, cancellation/reconciliation and live account/environment verification remain open. `WorkforceCapability.budget_minor` is stored but not reserved/settled by tool dispatch, so it is not an enforceable spend cap. Claude Agent SDK adapter is not implemented. |
-| 6. Security and data protection | **Partial; mandatory blocker** | Worker capabilities, NOBYPASSRLS, append-only audit event protection and selected DPG/retention controls exist. Full DPG path coverage, artifact lifecycle, secret/egress/sandbox controls, independent security review and cryptographic audit checkpoints remain open. |
+| 6. Security and data protection | **Partial; mandatory blocker** | Worker capabilities, NOBYPASSRLS, append-only audit event protection and selected DPG/retention controls exist. PR #66 adds structured credential-key rejection, structured PII-field redaction, provider callback ID validation and broader token patterns; full pytest/PostgreSQL verification is pending. File/RAG/connector/artifact paths are not implemented; egress/sandbox controls, independent review and cryptographic audit checkpoints remain open. |
 | 7. Automation and events | **Partial** | PostgreSQL outbox and Python workers remain the chosen initial design. No production external outbox handlers are registered. Need end-to-end idempotency, replay/reconciliation, crash recovery and approved integration workflows. |
 | 8. Evaluation Harness | **Partial** | Deterministic RAG, agent-workflow, safety/security and regression packs exist. Trusted runner attestation, immutable test/commit/environment manifests and release-blocking orchestration remain incomplete. |
-| 9. Founder Console and approvals | **Partial** | Founder Console covers dashboard, workforce, processes, monitoring, revenue, delivery and outcomes. Fresh exact-main frontend checks and browser journeys remain pending; unify work queue, drill-down, budget/exception visibility and stop controls. |
+| 9. Founder Console and approvals | **Partial** | Founder Console covers dashboard, workforce, processes, monitoring, revenue, delivery and outcomes. PR #65 adds System/Light/Dark themes and exact-main frontend checks passed. Browser critical journeys, unified work queue, drill-down, budget/exception visibility and stop controls remain. |
 | 10. Delivery Engine and RAAS | **Partial** | Projects, milestones, delivery playbooks, scope approvals, time/cost records and project outcomes exist. Need KPI ingestion/evidence verification, requirement-to-test traceability, independent QA/rework, release/handover/support/SLA/renewal. |
 | 11. Finance and operations | **Partial** | Service catalogue, contracts, onboarding, invoice issue evidence and payment receipt ledger exist. No payment collection or statutory accounting; cost/margin/forecast reconciliation, provider spend and overage approval remain. |
 | 12. Hardening and release | **Not production-ready** | Need staging rehearsal, scans/SBOM, monitoring/alerts, backups/restore, measured RPO/RTO, runbooks, independent assessment and founder go/no-go. |
 
-## Security work now merged
+## Security controls on main and active hardening
 
 - Worker database role is intended to be `NOBYPASSRLS`; production startup verifies the role and process role.
 - Worker execution and maintenance scope is established by database-verified, capability-bound claim/renewal operations, not caller-forgeable machine GUCs.
 - Human workspace grants are restored after the worker RLS cutover.
 - Audit events reject UPDATE/DELETE for non-superuser application/worker roles. This is append-only protection, **not cryptographic tamper-evidence**; hash chaining or external integrity checkpoints remain future work.
-- Audit payload protection rejects invalid/oversized structures and redacts supported PII/secrets.
+- Audit payload protection on `main` rejects invalid/oversized structures and redacts supported PII/secrets. Draft PR #66 extends this to structured credential field names and structured PII keys, while preserving only explicitly validated internal resume IDs and machine token prefixes; full tests remain pending.
 - Browser session lifecycle includes server-side revocation/rotation/expiry; agent session and tool invocation retention scrubs are bounded and workspace-scoped.
 - Retention is incomplete for object artifacts, provider-side data, logs/traces and backups. Deletion/erasure must remain an explicit, approved, recoverable workflow.
 
 ## Immediate engineering sequence
 
-1. **Exact-main stabilization:** fresh frontend lint, typecheck and production build; review migrations, role grants and the full RLS/function inventory. Reconcile any failures before adding features.
-2. **Isolation and DPG completion:** enumerate every tenant-bearing model, route, function, file/object, cache, session, RAG, log and artifact path; add negative cross-workspace tests and fail-closed data classification at every external boundary.
+1. **Exact-main stabilization:** frontend lint, typecheck and production build are complete after PR #65. Review migrations, role grants and the full RLS/function inventory; rerun backend/PostgreSQL suites after PR #66.
+2. **Isolation and DPG completion:** PR #66 is the active draft. It covers provider request/result/callback IDs, structured credential keys, structured PII fields, audit payloads and structured logs. Enumerate every tenant-bearing model, route, function, future file/object, cache, session, RAG and artifact path; add negative cross-workspace tests and fail-closed policy at each new boundary.
 3. **OS Tool Gateway / MCP:** port a protocol-only MCP adapter against the current Tool Gateway; OS remains authority for identity, scope, policy, budgets, invocation, audit and durable state. Keep grants disabled until tests prove the boundary.
 4. **Execution and outbox recovery:** prove kill/restart, leases, heartbeats, retry, DLQ, cancellation, replay and reconciliation under multiple workers.
 5. **Revenue workflows:** implement synthetic prospect research/provenance and dedupe; only then build approved dispatch with sender authorization, consent/suppression and reply/opt-out/bounce stop guarantees. No live sending before explicit approval.
@@ -67,9 +68,11 @@ This document supersedes the pre-merge integration ledger below. PR #58 is merge
 
 ## Founder-environment tasks — defer until code work is complete
 
-- Local exact-main frontend commands:
+- After PR #66 is ready, run focused DPG/log/audit tests, the full backend pytest suite and the isolated PostgreSQL 16 Compose suite. The current sandbox has no project pytest/dependency environment.
+- Local exact-main frontend commands (already passed after PR #65; rerun only if frontend files change):
   ```bash
   cd frontend
+  npm ci
   npm run lint
   npx tsc --noEmit
   npm run build
@@ -83,7 +86,7 @@ This document supersedes the pre-merge integration ledger below. PR #58 is merge
 ## Architecture guardrails
 
 - PostgreSQL is the source of truth for business state, approvals, executions and audit.
-- Native Python workers and PostgreSQL outbox are the initial automation architecture. Redis remains cache/throttle/coordination; do not add Celery, Temporal or n8n without a demonstrated need and security/license review.
+- Native Python workers and PostgreSQL outbox are the initial automation architecture. Redis is currently used for rate limiting; do not add business-data caching, Celery, Temporal or n8n without a demonstrated need and security/license review.
 - Providers, MCP servers and automation tools are adapters; they never own critical business state or bypass OS authorization.
 - Managed Agents remains beta, isolated behind an adapter and synthetic-first. Do not send confidential/client data unless provider eligibility and all applicable controls are established.
 - No external communication, payment, contract, production release, destructive action or permission change without the required OS approval.

@@ -1,8 +1,9 @@
 # Agency OS — authoritative implementation status
 
 **Last reconciled:** 2026-11-27  
-**Source of truth:** `main` at `4541626d6fffc904d8ee3131bb2f408efbe27acf`  
-**Latest consolidation:** PR #58 merged on 2026-11-27.  
+**Source of truth:** `main` at `bc4eb0405fd1a07fcc75ab72828c0d76fc65f7d4`
+**Latest merged PR:** [#65 — System, Light and Dark dashboard themes](https://github.com/AsaifAli/agency-native-agency-os/pull/65).
+**Active security work:** [#66 — Data Protection Gateway hardening](https://github.com/AsaifAli/agency-native-agency-os/pull/66), draft pending the full Python test suite.
 **Release posture:** **NO-GO for production.** Implementation and isolated tests do not establish production readiness.
 
 This file is the current status summary. Historical branch comparisons, test logs and superseded PR checkpoints should not be treated as current blockers. See `docs/CONSOLIDATION_EXECUTION_LEDGER.md` for the active sequence and `docs/PRODUCTION_GRADE_MASTER_CHECKLIST.md` for the full release gates.
@@ -11,13 +12,15 @@ This file is the current status summary. Historical branch comparisons, test log
 
 | Check | Recorded result | Qualification |
 |---|---|---|
-| Backend pytest suite | **483 passed, 19 skipped, 2 warnings** | Merged PR #58 candidate; skipped tests are environment-dependent and are not counted as passes. |
-| Isolated PostgreSQL 16 Compose suite | **105 passed, 2 warnings** | Disposable isolated stack with dedicated roles; not a production migration/deployment rehearsal. |
-| Frontend ESLint | 0 errors; 7 existing React Hook dependency warnings | Passed before final Founder Console UI reconciliation. |
-| Frontend TypeScript | Passed | Passed before final Founder Console UI reconciliation. |
-| Next.js production build | Passed | Passed before final Founder Console UI reconciliation. |
-| Exact merged-main frontend recheck | **Awaiting founder environment** | Fresh lint, typecheck and build are required after the final UI reconciliation. |
-| GitHub Actions | Not run for this consolidation | Intentionally ignored per founder direction. |
+| Backend pytest suite | **483 passed, 19 skipped, 2 warnings** | PR #58 baseline; PR #65 was frontend-only. PR #66 changes backend security code, so this result must be rerun before merging #66. |
+| Isolated PostgreSQL 16 Compose suite | **105 passed, 2 warnings** | PR #58 baseline in a disposable isolated stack; rerun after PR #66 before treating it as current evidence. |
+| Frontend ESLint | 0 errors; 7 existing React Hook dependency warnings | Fresh run after PR #65; no warnings were suppressed. |
+| Frontend TypeScript | Passed | Fresh run after PR #65. |
+| Next.js production build | Passed; 32 static pages generated | Fresh run after PR #65. |
+| Dashboard theme browser checks | Passed | System/light/dark selection, persistence across reload, live OS light↔dark changes and 320px overflow check. |
+| PR #66 targeted DPG harnesses | Passed | Provider credential patterns, callback IDs, structured credential/PII fields, audit payloads and structured logs; these are focused harnesses, not the repository pytest suite. |
+| PR #66 full Python pytest suite | **Not run** | The coding sandbox has no project Python dependencies/pytest. Keep PR #66 draft until local focused, full and PostgreSQL suites pass. |
+| GitHub Actions | Not run | Intentionally ignored per founder direction. |
 
 No production database migration, production deployment, external provider activation, client-data operation or compliance assessment is claimed.
 
@@ -30,7 +33,7 @@ Agency OS is the founder-controlled internal operating system for an AI Solution
 
 The agency philosophy is **Results as a Service (RAAS)**: the client result is the product; AI is the means. RAAS does not automatically imply contingent/performance pricing. Outcome measurement, attribution, commercial model and risk allocation must be agreed explicitly.
 
-Architecture remains a modular monolith: Next.js/React Founder Console, Python FastAPI backend, PostgreSQL source of truth, Redis for cache/throttling/coordination, and independent Python workers. PostgreSQL owns business state, permissions, approvals, executions, sessions, artifacts and audit. Providers and automation tools are adapters, not sources of truth. No second queue/orchestration engine is required at this stage.
+Architecture remains a modular monolith: Next.js/React Founder Console, Python FastAPI backend, PostgreSQL source of truth, Redis for rate limiting, and independent Python workers. No business-record cache, object-storage artifact path or RAG ingestion path is currently implemented. PostgreSQL owns business state, permissions, approvals, executions, sessions, artifacts and audit. Providers and automation tools are adapters, not sources of truth. No second queue/orchestration engine is required at this stage.
 
 ## Implemented foundations
 
@@ -52,7 +55,7 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 - Workspace-scoped execution history and execution trace APIs; Founder Console Processes and Monitoring views.
 
 ### Audit, privacy and retention
-- Audit payloads reject invalid/oversized structures, detect secrets fail-closed and redact supported PII.
+- Audit payloads reject invalid/oversized structures, detect known credential-bearing fields fail-closed and redact supported free-text/structured PII. PR #66 extends provider token detection, structured field handling and provider callback validation; full pytest verification remains pending.
 - PostgreSQL audit events reject UPDATE/DELETE by application and worker roles. This is append-only protection, **not cryptographic tamper-evidence**; hash chaining or externally anchored integrity checkpoints are not implemented.
 - Browser sessions store a digest of the JWT identifier, support server-side revocation and rotation, and are pruned in bounded batches.
 - Agent sessions are constrained by machine identity data-class grants and cannot outlive the identity.
@@ -89,8 +92,8 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 ### P0 — security and data protection
 - Complete a table/route/function/role inventory for RLS, grants, ownership, SECURITY DEFINER functions and pooled-connection context.
 - Complete negative cross-workspace tests for every API and nested object; organization membership must not substitute for exact workspace grant.
-- Prove isolation across files, object storage, browser/agent sessions, caches, search/RAG, logs, tool outputs and generated artifacts.
-- Complete Data Protection Gateway classification/minimization/PII-secret detection/redaction for every ingestion, file extraction, RAG, connector, provider callback, tool, log, cache and artifact path.
+- Prove isolation across current browser/agent sessions, tool outputs and logs, then across files, object storage, caches, search/RAG and generated artifacts when those paths are implemented. No file upload/extraction, object storage, RAG ingestion or business-data cache path currently exists; the signed website lead intake is a fixed-workspace CRM ingestion and does not call an AI provider.
+- Complete Data Protection Gateway classification/minimization/PII-secret detection/redaction for every ingestion, file extraction, RAG, connector, provider callback, tool, log, cache and artifact path. Current implemented provider-facing boundaries cover Managed Agents requests/results/callbacks, Tool Gateway input/output, audit payloads and structured logs. PR #66 adds structured credential-key rejection, structured PII-field redaction and provider event-ID protection; it remains draft pending full tests. No file upload/extraction, object storage, RAG ingestion or general connector ingestion path is currently implemented. There is no automated content classifier; current runtime eligibility is a conservative data-class/authorization gate.
 - Enforce per-client policy and runtime eligibility before any provider receives data.
 - Complete scoped credential rotation, egress allowlists/SSRF defenses, sandbox isolation, resource limits, malware-safe file processing and secrets-history review.
 - Add cryptographic audit integrity checkpoints; current append-only trigger alone is not cryptographic tamper-evidence.
@@ -111,7 +114,7 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 - Complete provider routing/resilience, per-execution usage/cost accounting, budgets, margin/forecast and founder emergency disable controls.
 
 ### P2/P3 — Founder Console and operations
-- Fresh exact-main frontend lint, TypeScript and production build after final UI reconciliation; browser-based critical-flow/accessibility tests.
+- Dashboard `System` / `Light` / `Dark` theme support is merged in PR #65 and its frontend lint/typecheck/build/browser checks passed. Browser-based end-to-end critical-flow and accessibility tests remain.
 - Unified founder work queue across approvals, escalations, blocked tasks, failures, client risks and budget exceptions; drill-down to source record, execution, evidence and audit.
 - Metrics/logs/traces, alert routing, dashboards, cost visibility, dependency/container/SAST/secret/license scans and SBOM.
 - Encrypted PostgreSQL and object-artifact backups; isolated restore drill; measured RPO/RTO and recovery runbooks.
@@ -121,8 +124,8 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 
 ## Immediate work order
 
-1. Exact-main stabilization and frontend checks.
-2. Complete tenant/RLS and Data Protection Gateway inventory and negative tests.
+1. Exact-main stabilization and frontend checks: **complete for PR #65**. Re-run backend and PostgreSQL suites after PR #66 because it changes security code.
+2. Complete tenant/RLS and Data Protection Gateway inventory and negative tests; PR #66 is the current draft hardening bundle.
 3. Artifact/object storage isolation and retention lifecycle.
 4. OS MCP adapter over the Tool Gateway, with all grants fail-closed.
 5. Worker/outbox recovery and reconciliation acceptance.
@@ -142,9 +145,23 @@ git switch main
 git pull --ff-only origin main
 
 cd frontend
+npm ci
 npm run lint
 npx tsc --noEmit
 npm run build
+cd ..
+
+# Focused security regressions added in PR #66
+python -m pytest -q tests/test_data_protection.py tests/test_log_sanitization.py tests/test_audit_payload_protection.py
+
+# Full backend suite
+python -m pytest -q
+
+# Isolated PostgreSQL 16 suite
+docker compose -p agency-os-pg-test \
+  -f docker-compose.postgres-test.yml \
+  up --build --abort-on-container-exit \
+  --exit-code-from postgres-tests postgres-tests
 ```
 
-Then run the isolated PostgreSQL Compose suite and browser critical-flow tests. Live provider credentials, DNS, object storage, email/webhooks, staging deployment and backup restore require founder-environment access and will be presented as a final checklist. Production migration/deployment and destructive data actions require separate explicit approval.
+Then run browser critical-flow/accessibility tests and verify the exact merged commit. PR #66 remains draft until the focused, full and PostgreSQL suites pass. Live provider credentials, DNS, object storage, email/webhooks, staging deployment and backup restore require founder-environment access and will be presented as a final checklist. Production migration/deployment and destructive data actions require separate explicit approval.

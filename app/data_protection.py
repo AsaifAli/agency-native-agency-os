@@ -67,6 +67,50 @@ _SECRET_PATTERNS = (
         re.IGNORECASE,
     ),
 )
+_SENSITIVE_METADATA_KEY = re.compile(
+    r"(?:^|_)(?:authorization|api_key|api_token|access_token|refresh_token|"
+    r"id_token|auth_token|session_token|provider_token|client_secret|secret|"
+    r"secret_key|private_key|signing_key|encryption_key|password|passwd|"
+    r"credential|credentials|cookie|bearer|jwt|token)(?:$|_)",
+    re.IGNORECASE,
+)
+_PII_METADATA_KEY = re.compile(
+    r"(?:^|_)(?:email|phone|mobile|telephone|first_name|last_name|full_name|"
+    r"contact_name|customer_name|person_name|user_name|address|street_address|"
+    r"postal_address|home_address|billing_address|shipping_address|postal_code|"
+    r"zip_code|date_of_birth|birth_date|dob|aadhaar|pan|ssn|national_id|"
+    r"passport|passport_number|driver_license|driving_license|account_number|"
+    r"bank_account|iban|card_number|cvv|ip_address|geolocation|latitude|longitude)"
+    r"(?:$|_)",
+    re.IGNORECASE,
+)
+_SAFE_NONSECRET_METADATA_KEYS = frozenset({
+    "token_prefix", "token_count", "input_token_count", "output_token_count",
+    "input_tokens", "output_tokens", "tokens_used",
+})
+_TOKEN_USAGE_KEYS = _SAFE_NONSECRET_METADATA_KEYS - {"token_prefix"}
+_MACHINE_TOKEN_PREFIX = re.compile(r"^aos_mi_[A-Za-z0-9_-]{1,36}\.$")
+
+
+def _normalize_metadata_key(key: str) -> str:
+    normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", key)
+    normalized = re.sub(r"([A-Z])([A-Z][a-z])", r"\1_\2", normalized)
+    return normalized.lower().replace("-", "_").replace(".", "_").replace(" ", "_")
+
+
+def _is_structured_pii_key(key: str) -> bool:
+    return bool(_PII_METADATA_KEY.search(_normalize_metadata_key(key)))
+
+
+def _is_sensitive_metadata_key(
+    key: str, trusted_internal_id_keys: frozenset[str],
+) -> bool:
+    normalized = _normalize_metadata_key(key)
+    if normalized in _SAFE_NONSECRET_METADATA_KEYS or key in trusted_internal_id_keys:
+        return False
+    return bool(_SENSITIVE_METADATA_KEY.search(normalized))
+
+
 _EMAIL = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 _AADHAAR = re.compile(r"(?<!\d)(?:\d{4}[ -]?){2}\d{4}(?!\d)")
 _PAN = re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b", re.IGNORECASE)
@@ -164,11 +208,27 @@ def _sanitize_value(
         for key, item in value.items():
             if not isinstance(key, str):
                 raise DataProtectionBlocked("INVALID_METADATA_KEY")
+            normalized_key = _normalize_metadata_key(key)
+            if _is_sensitive_metadata_key(key, trusted_internal_id_keys):
+                raise DataProtectionBlocked("SECRET_FIELD_DETECTED")
+            if normalized_key == "token_prefix":
+                if not isinstance(item, str) or not _MACHINE_TOKEN_PREFIX.fullmatch(item):
+                    raise DataProtectionBlocked("INVALID_TOKEN_PREFIX")
+            if normalized_key in _TOKEN_USAGE_KEYS and (
+                isinstance(item, bool)
+                or not isinstance(item, (int, float))
+                or not math.isfinite(item)
+            ):
+                raise DataProtectionBlocked("INVALID_TOKEN_USAGE")
             safe_key, found = sanitize_text(key)
             for label, count in found.items():
                 counts[label] = counts.get(label, 0) + count
             if safe_key in cleaned:
                 raise DataProtectionBlocked("DUPLICATE_SANITIZED_METADATA_KEY")
+            if _is_structured_pii_key(key):
+                counts["STRUCTURED_PII"] = counts.get("STRUCTURED_PII", 0) + 1
+                cleaned[safe_key] = "[REDACTED_PII_FIELD]"
+                continue
             if safe_key in trusted_internal_id_keys:
                 if not isinstance(item, str):
                     raise DataProtectionBlocked("INVALID_RUNTIME_IDENTIFIER")
@@ -223,7 +283,9 @@ def protect_untrusted_payload(
     if _bounded_json_size(payload) > MAX_EXECUTION_REQUEST_BYTES:
         raise DataProtectionBlocked("UNTRUSTED_PAYLOAD_TOO_LARGE")
     counts: dict[str, int] = {}
-    allowed_internal_id_keys = {"draft_id", "lead_id", "research_record_id"}
+    allowed_internal_id_keys = {
+        "draft_id", "lead_id", "research_record_id", "resume_token",
+    }
     if not set(trusted_internal_id_keys).issubset(allowed_internal_id_keys):
         raise DataProtectionBlocked("INVALID_TRUSTED_IDENTIFIER_POLICY")
     protected = _sanitize_value(payload, counts, trusted_internal_id_keys=frozenset(trusted_internal_id_keys))
@@ -320,7 +382,9 @@ def protect_execution_request(
     raw_payload = {**safe_identifiers, **values, "request_metadata": metadata}
     if _bounded_json_size(raw_payload) > MAX_EXECUTION_REQUEST_BYTES:
         raise DataProtectionBlocked("EXECUTION_REQUEST_TOO_LARGE")
-    safe_metadata = _sanitize_value(metadata, counts)
+    safe_metadata = _sanitize_value(
+        metadata, counts, trusted_internal_id_keys=frozenset({"resume_token"}),
+    )
     if _bounded_json_size(safe_metadata) > MAX_METADATA_BYTES:
         raise DataProtectionBlocked("METADATA_TOO_LARGE")
     cleaned = {
