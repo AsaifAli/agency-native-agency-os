@@ -48,6 +48,7 @@ A checkbox is complete only when code/infrastructure, tests, operational evidenc
 - [x] Remove broad worker BYPASSRLS: production worker role is verified as NOBYPASSRLS and uses database-verified execution/workspace capabilities with narrowly scoped claim, renewal and maintenance functions.
 - [ ] Test tenant isolation across API, ORM, worker, queue, files, object storage, browser sessions, caches, search/RAG, logs and generated artifacts. The model-to-RLS inventory parity regression is included in PR #62; the only mapped-model exception is the global `users` identity directory, which needs a separate privacy/access review.
 - [ ] Complete Data Protection Gateway (DPG) classification, minimization, PII/secret detection and redaction for uploads, extracted files, retrieval context, connector responses, tool inputs/outputs and provider callbacks.
+- [ ] Review the shared global `users` identity directory: prove there is no cross-organization directory enumeration, inventory every query path, and decide whether direct application-role table access should be replaced with narrowly scoped identity lookup functions without breaking OIDC/session bootstrap.
 - [ ] Enforce per-client data policy and runtime eligibility before any external provider receives data.
 - [ ] Test prompt injection, indirect instructions in retrieved documents, malicious files, oversized/nested payloads and redaction collisions.
 - [ ] Ensure secrets and unnecessary personal/client data never enter prompts, traces, logs, analytics or source control.
