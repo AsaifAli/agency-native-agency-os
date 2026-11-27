@@ -153,6 +153,7 @@ class OrchestrationPlanDelegation(Base):
             name="fk_plan_delegation_delegation_workspace",
         ),
         Index("ix_orchestration_plan_delegations_scope_plan", "org_id", "workspace_id", "plan_id"),
+        Index("ix_orchestration_plan_delegations_scope_delegation", "org_id", "workspace_id", "delegation_id"),
     )
     org_id: Mapped[str] = mapped_column(String(36), nullable=False)
     workspace_id: Mapped[str] = mapped_column(String(36), nullable=False)
