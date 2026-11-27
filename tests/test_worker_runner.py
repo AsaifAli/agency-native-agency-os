@@ -120,6 +120,11 @@ def test_run_worker_runs_startup_maintenance_and_waits_when_idle(
     monkeypatch.setattr(runner, "queue_ready_delegations", queue)
     expire_sessions = Mock(return_value=0)
     monkeypatch.setattr(runner, "expire_due_agent_sessions", expire_sessions)
+    purge_retention = Mock(return_value={
+        "agent_sessions_scrubbed": 0,
+        "tool_payloads_purged": 0,
+    })
+    monkeypatch.setattr(runner, "purge_due_retention_data", purge_retention)
 
     monkeypatch.setattr(
         runner,
