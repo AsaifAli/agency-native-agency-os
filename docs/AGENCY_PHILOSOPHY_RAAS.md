@@ -48,7 +48,7 @@ Every engagement should make clear, as appropriate:
 - delivery milestones, budget, change control and support terms;
 - known limitations, risks and conditions outside our control.
 
-Pricing, contracts, scope commitments, sensitive communications and production releases remain subject to the OS's approval policy. RAAS is an operating philosophy, not permission to bypass approvals or promise unverified outcomes.
+Pricing, contracts, scope commitments, sensitive communications and production releases remain subject to the OS's approval policy. RAAS is an operating philosophy, not permission to bypass approvals or promise unverified outcomes. It does not automatically mean performance-based or contingent pricing; the commercial model, measurement obligations and allocation of risks must be explicitly agreed and approved in the contract.
 
 ## What RAAS is not
 
