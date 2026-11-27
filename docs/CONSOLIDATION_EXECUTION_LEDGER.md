@@ -20,7 +20,7 @@ This document supersedes the pre-merge integration ledger below. PR #58 is the p
 ## Merged baseline
 
 - PR #58 established the backend/security baseline; its recorded results were **483 passed, 19 skipped, 2 warnings** and **105 passed, 2 warnings** in isolated PostgreSQL 16 Compose.
-- PR #65 merged on 2026-11-27; merge commit `bc4eb0405fd1a07fcc75ab72828c0d76fc65f7d4`. It adds System/Light/Dark dashboard themes and repairs the frontend lockfile so `npm ci` succeeds.
+- PR #65 merged on 2026-11-27; merge commit `bc4eb0405fd1a07fcc75ab72828c0d76fc65f7d4`. It adds System/Light/Dark dashboard themes and repairs the frontend lockfile; `npm ci --ignore-scripts` passed, while the full lifecycle-script install remains a founder check.
 - Exact-main frontend checks after PR #65: `npm ci --ignore-scripts`, lint (0 errors; 7 existing hook warnings), TypeScript and production build passed; 32 static pages generated.
 - Headless browser theme checks passed for OS default, explicit overrides, persistence, live OS appearance changes and 320px layout overflow.
 - PR #66 is the current draft security bundle. Targeted isolated harnesses and Python compile checks pass, but repository pytest and PostgreSQL suites have not been rerun after its backend changes.
