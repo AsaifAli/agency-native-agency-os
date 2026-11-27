@@ -382,7 +382,7 @@ class AuditEvent(Base):
 class EvaluationRun(Base):
     __tablename__ = "evaluation_runs"
     __table_args__ = (
-        UniqueConstraint("org_id", "workspace_id", "id", name="uq_evaluation_runs_scope_id"),
+        Index("uq_evaluation_runs_scope_id", "org_id", "workspace_id", "id", unique=True),
         Index("ix_eval_org_workspace_created", "org_id", "workspace_id", "created_at"),
     )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
