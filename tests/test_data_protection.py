@@ -432,16 +432,20 @@ def test_protect_untrusted_payload_allows_explicit_nonsecret_token_metadata():
     }
 
 
-def test_resume_tokens_are_only_allowed_as_validated_internal_identifiers():
+def test_resume_tokens_cannot_be_exempted_by_untrusted_payload_callers():
     with pytest.raises(DataProtectionBlocked) as error:
         protect_untrusted_payload({"resume_token": "resume-token-123"})
     assert error.value.code == "SECRET_FIELD_DETECTED"
 
-    protected, _ = protect_untrusted_payload(
-        {"resume_token": "resume-token-123"},
-        trusted_internal_id_keys={"resume_token"},
-    )
-    assert protected["resume_token"] == "resume-token-123"
+    # Resume-token trust is private to protect_execution_request's validated,
+    # flat control_request boundary. Generic tool/connector callers cannot
+    # opt themselves into that exception.
+    with pytest.raises(DataProtectionBlocked) as error:
+        protect_untrusted_payload(
+            {"resume_token": "resume-token-123"},
+            trusted_internal_id_keys={"resume_token"},
+        )
+    assert error.value.code == "INVALID_TRUSTED_IDENTIFIER_POLICY"
 
 
 def test_resume_token_exception_is_limited_to_flat_resume_control_metadata():
