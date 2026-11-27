@@ -2,6 +2,20 @@
 
 > **Current authoritative checkpoint — 2026-11-26:** PR #47 (20-point security audit) and PR #48 (worker RLS hardening) are both merged into `main`. PR #47 merge commit: `caadb692741f7375ab5ab5c58c5295af8f978508`; PR #48 merge commit / current main head at this checkpoint: `cba0fce036ff8e4eceb590b7e15cecb6d044b67b`. The merged baseline includes persistent browser-session revocation/rotation/retention, JWT key overlap, 51 tenant RLS policies plus `execution_attempts` RLS, separate API/migrator/worker roles, worker `NOBYPASSRLS`, scoped worker sessions, bounded audited browser-session cleanup, route-auth inventory guards and centralized log redaction. User-run isolated PostgreSQL validation for PR #47 passed 5 tests; PR #48 migration/bootstrap plus its configured PostgreSQL test image passed 22/22. Earlier candidate evidence includes 364 backend tests passed, 5 PostgreSQL-only tests skipped, Python compilation, frontend lint (0 errors; 7 existing warnings) and Next.js production build. These results are not a fresh full-suite run on current `main`, not a production migration rehearsal, and not production approval. No GitHub Actions workflow was triggered for PR #47/#48 merges.
 
+
+## 2026-11-27 — RAAS outcome management (implementation committed; verification pending)
+
+- The agency philosophy is **Results as a Service (RAAS)**: the product is the result; AI is the means. See `docs/AGENCY_PHILOSOPHY_RAAS.md`.
+- Added project-scoped outcomes with a problem statement, desired outcome, metric/unit, baseline, target, direction, target date, measurement method and agreed acceptance criteria.
+- Added append-only, source-backed outcome measurements. Latest measurements are compared deterministically with the target; source metadata is not treated as independent verification.
+- Kept delivery acceptance distinct from measured business impact. Acceptance is founder-authority-only, locks the outcome row during the decision, requires an exact result for every agreed criterion and is audited. Delivery acceptance does not automatically mean the business-impact target has been met.
+- Outcome definitions are protected from silent edits in PostgreSQL. Outcome measurements are append-only at the database boundary. Both tables have workspace RLS; outcome-to-project, measurement-to-outcome, milestone and evaluation references carry composite workspace constraints.
+- Added the Founder Console Client Outcomes page with project selection/creation, outcome definition, measurement history and founder acceptance controls.
+- Added API, privacy, scope, acceptance, RLS and PostgreSQL append-only regression tests. The isolated PostgreSQL test image now includes the new RLS/immutability test.
+- Added an Alembic merge revision for the two previously separate migration heads, followed by the additive outcome schema migration.
+- **Verification status:** not yet run against the updated branch. The full backend suite, frontend lint/typecheck/build and isolated PostgreSQL migration/RLS suite remain pending. No production database, deployment, external integration or client data was touched.
+- **Known limits:** no automatic KPI ingestion, client portal sign-off, verified external impact attestations, outcome revision/scope-change workflow, statistical impact analysis or approved outcome-evidence erasure workflow. Outcome measurements currently record a source reference and narrative supplied by an authorized workspace user.
+
 ## Verified cleanup checkpoint
 - Branch: `feature/agency-os-native-runtime-cleanup`.
 - Commit: `80b989ae611b08d9a9c37925195517417ba79b05`.
