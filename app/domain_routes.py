@@ -556,8 +556,13 @@ def create_project_outcome(
     criteria = [value.strip() for value in body.acceptance_criteria]
     if any(not value for value in criteria) or len({value.casefold() for value in criteria}) != len(criteria):
         raise HTTPException(422, "Acceptance criteria must be non-empty and unique")
-    if body.baseline_value is not None and body.baseline_value == body.target_value:
-        raise HTTPException(422, "Baseline and target must differ")
+    if body.baseline_value is not None:
+        if body.baseline_value == body.target_value:
+            raise HTTPException(422, "Baseline and target must differ")
+        if body.direction == "increase" and body.target_value <= body.baseline_value:
+            raise HTTPException(422, "An increase target must exceed its baseline")
+        if body.direction == "decrease" and body.target_value >= body.baseline_value:
+            raise HTTPException(422, "A decrease target must be below its baseline")
     item = ProjectOutcome(
         org_id=org_id, workspace_id=body.workspace_id, project_id=project_id,
         title=body.title.strip(), problem_statement=body.problem_statement.strip(),
@@ -602,6 +607,8 @@ def create_outcome_measurement(
     outcome = _scoped_parent(db, ProjectOutcome, object_id=outcome_id, org_id=org_id,
                              workspace_id=body.workspace_id, label="Project outcome")
     measured_at = body.measured_at or datetime.now(timezone.utc)
+    if measured_at.tzinfo is None or measured_at.utcoffset() is None:
+        raise HTTPException(422, "Outcome measurement timestamps must include a timezone")
     if measured_at > datetime.now(timezone.utc):
         raise HTTPException(422, "Outcome measurements cannot be future-dated")
     if body.supporting_evaluation_run_id:
