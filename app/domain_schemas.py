@@ -331,7 +331,7 @@ class OutcomeMeasurementCreate(BaseModel):
     workspace_id: str
     value: Decimal = Field(max_digits=20, decimal_places=6)
     measured_at: datetime | None = None
-    source_type: str = Field(pattern="^(agency_measured|client_reported|system_measured|independently_verified)$")
+    source_type: str = Field(pattern="^(agency_measured|client_reported|system_measured)$")
     source_reference: str = Field(min_length=2, max_length=240)
     evidence_summary: str = Field(min_length=10, max_length=10000)
     supporting_evaluation_run_id: str | None = None
