@@ -380,8 +380,7 @@ def resume_execution(
     record_event(
         db, org_id, actor_user_id, "execution.resume_requested",
         "execution", execution.id, workspace_id,
-        {"resume_token": metadata["control_request"]["resume_token"],
-         "provider_session_reuse_required": True},
+        {"provider_session_reuse_required": True},
     )
     db.flush()
     return execution
