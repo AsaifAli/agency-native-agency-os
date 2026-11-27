@@ -78,9 +78,9 @@ The Agent Registry owns agent identity, runtime, grants, budgets, versions and r
 3. Founder leads discovery and confirms constraints/access.
 4. Draft scope, proposal and agreement artifacts.
 5. Obtain approval for pricing, commitments and sensitive communications.
-6. Create delivery project with requirements, milestones, budget and acceptance criteria.
+6. Define measurable client outcomes (baseline, target, KPI, measurement method) and delivery acceptance criteria; create the delivery project with traceable requirements, milestones and budget.
 7. Build a bounded pilot; run engineering review, independent QA and evaluation.
-8. Obtain acceptance; produce handover and support plan.
+8. Record founder delivery acceptance against every agreed criterion; continue measuring business impact separately; produce handover and support plan.
 9. Reconcile invoice/payment and project cost/margin.
 10. Capture reviewed lessons into the proof library and capability/evaluation backlog.
 
