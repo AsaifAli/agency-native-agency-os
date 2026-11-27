@@ -602,6 +602,26 @@ def test_project_outcome_rejects_cross_workspace_parent_and_mismatched_acceptanc
     )
     assert created.status_code == 201, created.text
     outcome_id = created.json()["id"]
+    from app.db import get_db
+    from app.models import FounderAuthority
+    generator = client.app.dependency_overrides[get_db]()
+    session = next(generator)
+    try:
+        session.add(FounderAuthority(
+            org_id=org, user_id=client.user_id, grant_source="test_outcome_criteria",
+        ))
+        session.commit()
+    finally:
+        generator.close()
+    cross_workspace_measurement = client.post(
+        f"/v1/orgs/{org}/outcomes/{outcome_id}/measurements",
+        headers=auth(), json={
+            "workspace_id": client.other_ws_id, "value": "1",
+            "source_type": "client_reported", "source_reference": "Foreign report",
+            "evidence_summary": "A cross-workspace measurement must be rejected.",
+        },
+    )
+    assert cross_workspace_measurement.status_code == 404
     mismatch = client.post(
         f"/v1/orgs/{org}/outcomes/{outcome_id}/acceptance",
         headers=auth(), json={
