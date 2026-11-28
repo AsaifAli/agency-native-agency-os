@@ -2,7 +2,7 @@
 
 ## Status
 
-**Implemented in code; automated CI verification pending. Not enabled for production.**
+**Implemented in code and CI-verified on 2026-11-28 (603 backend tests passed; frontend type-check and production build passed). External staging and Anthropic provider/Vault verification remain pending. Not enabled for production.**
 
 The gateway is an optional Streamable HTTP MCP transport mounted by the Agency OS API at:
 
@@ -56,7 +56,7 @@ The integration uses Anthropic's Managed Agents MCP pattern: agent configuration
 
 Before enabling the feature in a shared or production environment:
 
-- [ ] CI passes on the exact integration-branch head, including MCP protocol tests and PostgreSQL integration tests.
+- [x] CI passed on commit `f3a8a2228240dc7485e7c0a09d4254d689329f21`: 603 backend tests, PostgreSQL integration, frontend type-check and production build.
 - [ ] Deploy the API endpoint to a public HTTPS staging hostname with strict host routing and rate limiting.
 - [ ] Verify the endpoint from outside the deployment network; test initialize, tools/list, tools/call, wrong host, wrong origin, missing/expired/revoked credential and mismatched session path.
 - [ ] Verify that a credential from workspace A cannot list or invoke tools in workspace B.
