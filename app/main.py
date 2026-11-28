@@ -1210,6 +1210,10 @@ app.include_router(website_intake_router)
 from app.workforce_routes import router as workforce_router
 app.include_router(workforce_router)
 
+# Immutable, founder-approved workspace Agent configuration versions.
+from app.agent_registry_routes import router as agent_registry_router
+app.include_router(agent_registry_router)
+
 # Curated Agent Skills catalog (read-only; no runtime grants).
 from app.skills_routes import router as skills_router
 app.include_router(skills_router)
