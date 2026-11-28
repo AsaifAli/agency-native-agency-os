@@ -680,3 +680,68 @@ def test_managed_agents_recovers_persisted_interrupt_without_sending_another():
             control_check=lambda: "pause",
         ))
     assert ("POST", "/v1/sessions/sesn_pause_recover/events") not in calls
+
+
+def test_ambiguous_managed_agent_session_create_requires_manual_reconciliation():
+    calls = []
+
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        if req.method == "GET" and req.url.path == "/v1/agents/agent_test":
+            return httpx.Response(200, json={"id": "agent_test", "archived_at": None,
+                "tools": [], "mcp_servers": [], "skills": [], "multiagent": None})
+        if req.method == "POST" and req.url.path == "/v1/sessions":
+            # A gateway error does not prove that the provider failed to create
+            # the session; retrying could create a second billable session.
+            return httpx.Response(503, json={"error": "upstream timeout"})
+        return httpx.Response(404)
+
+    runtime = ManagedAgentsRuntime(
+        config(),
+        client_factory=lambda: httpx.Client(
+            base_url="https://api.anthropic.com",
+            transport=httpx.MockTransport(handler),
+        ),
+        sleep=lambda _seconds: None,
+    )
+
+    with pytest.raises(RuntimeManualReviewRequired, match="session creation"):
+        runtime.start(request())
+
+    assert calls == [
+        ("GET", "/v1/agents/agent_test"),
+        ("POST", "/v1/sessions"),
+    ]
+
+
+def test_managed_agent_created_session_must_be_persisted_before_polling():
+    calls = []
+
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        if req.method == "GET" and req.url.path == "/v1/agents/agent_test":
+            return httpx.Response(200, json={"id": "agent_test", "archived_at": None,
+                "tools": [], "mcp_servers": [], "skills": [], "multiagent": None})
+        if req.method == "POST" and req.url.path == "/v1/sessions":
+            return httpx.Response(200, json={"id": "sesn_created"})
+        return httpx.Response(404)
+
+    def fail_persistence(_session_id):
+        raise RuntimeError("database connection lost")
+
+    runtime = ManagedAgentsRuntime(
+        config(),
+        client_factory=lambda: httpx.Client(
+            base_url="https://api.anthropic.com",
+            transport=httpx.MockTransport(handler),
+        ),
+        sleep=lambda _seconds: None,
+    )
+
+    with pytest.raises(RuntimeManualReviewRequired, match="persist"):
+        runtime.start(request(persist_external_run_id=fail_persistence))
+
+    assert calls == [
+        ("GET", "/v1/agents/agent_test"),
+        ("POST", "/v1/sessions"),
+    ]
