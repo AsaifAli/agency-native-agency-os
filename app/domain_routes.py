@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_principal, has_founder_authority, require_membership, require_role, require_founder_authority, require_workspace_access_from_context, Principal
 from app.db import get_db
 from app.data_protection import DataProtectionBlocked, sanitize_text
-from app.models import Role, EvaluationRun
+from app.models import Role, EvaluationRun, Workspace
 from app.audit import record_event
 from app.telephony.models import OutboxEvent
 from app.domain_models import Client, Contact, ContactActivity, Lead, LeadResearchRecord, OutreachDraft, Opportunity, Project, Milestone, ProjectOutcome, OutcomeMeasurement
@@ -224,10 +224,35 @@ def create_lead(
         if body.client_id and contact.client_id and contact.client_id != body.client_id:
             raise HTTPException(422, "Lead contact must belong to the selected client")
     client_id = body.client_id or (contact.client_id if contact else None)
+    # Serialize duplicate checks per workspace so concurrent lead creation cannot
+    # both pass the check before either transaction commits.
+    db.query(Workspace).filter_by(id=body.workspace_id, org_id=org_id).with_for_update().first()
+    normalized_email = (body.email.strip() or (contact.email if contact else "")).lower().strip()
+    candidate_emails = {
+        value.lower().strip()
+        for value in (body.email, contact.email if contact else "")
+        if value and value.strip()
+    }
+    duplicate = None
+    if candidate_emails:
+        duplicate = db.query(Lead).filter(
+            Lead.org_id == org_id,
+            Lead.workspace_id == body.workspace_id,
+            Lead.email.in_(candidate_emails),
+        ).first()
+    if duplicate is None and body.contact_id:
+        duplicate = db.query(Lead).filter_by(
+            org_id=org_id, workspace_id=body.workspace_id, contact_id=body.contact_id,
+        ).first()
+    if duplicate is not None:
+        raise HTTPException(
+            409,
+            "Potential duplicate lead exists in this workspace; review and update the existing lead instead.",
+        )
     item = Lead(org_id=org_id, workspace_id=body.workspace_id,
                 client_id=client_id, contact_id=body.contact_id,
                 company_name=body.company_name, contact_name=body.contact_name,
-                email=body.email.lower().strip(), source=body.source,
+                email=normalized_email, source=body.source,
                 score=body.score, qualification_notes=body.qualification_notes,
                 created_by=p.user.id)
     db.add(item)
