@@ -446,6 +446,10 @@ class ManagedAgentsRuntime(AgentRuntime):
                         "agency_os_workspace_id": request.workspace_id[:512],
                         "agency_os_task_id": request.task_id[:512],
                         "agency_os_agent_id": request.agent_id[:512],
+                    **(
+                        {"agency_os_execution_id": request.execution_id[:512]}
+                        if request.execution_id else {}
+                    ),
                     },
                     "initial_events": [
                         {
@@ -456,17 +460,40 @@ class ManagedAgentsRuntime(AgentRuntime):
                         }
                     ],
                 }
-                created = self._request(client, "POST", "/v1/sessions", json=body)
+                try:
+                    created = self._request(client, "POST", "/v1/sessions", json=body)
+                except RuntimeNotConfiguredError:
+                    # A definitive provider rejection is not an ambiguous create.
+                    raise
+                except RuntimeExecutionError as exc:
+                    # A transport failure, 429/5xx, or malformed success response
+                    # does not prove the provider did not create a billable session.
+                    # Never let the worker blindly retry POST /sessions.
+                    raise RuntimeManualReviewRequired(
+                        "Claude Managed Agents session creation outcome is ambiguous; "
+                        "reconcile the provider session before retrying."
+                    ) from exc
+
                 session_id = created.get("id")
                 if not isinstance(session_id, str) or not session_id.strip():
-                    raise RuntimeExecutionError(
-                        "Claude Managed Agents did not return a session ID."
+                    raise RuntimeManualReviewRequired(
+                        "Claude Managed Agents may have created a session without "
+                        "returning a usable ID; provider reconciliation is required."
                     )
                 if request.persist_external_run_id is None:
-                    raise RuntimeExecutionError(
-                        "The worker did not provide a durable provider-session persistence callback."
+                    raise RuntimeManualReviewRequired(
+                        "The provider session was created but no durable OS persistence "
+                        "callback is available; reconcile before retrying."
                     )
-                request.persist_external_run_id(session_id)
+                try:
+                    request.persist_external_run_id(session_id)
+                except Exception:
+                    # The provider session exists, but the OS could not durably attach
+                    # its ID to this execution. Do not create another session on retry.
+                    raise RuntimeManualReviewRequired(
+                        "The provider session was created but its ID could not be "
+                        "persisted by Agency OS; reconcile before retrying."
+                    ) from None
 
             resume_request = (request.request_metadata or {}).get("control_request") or {}
             if resume_request.get("action") == "resume" and resuming_existing_session:
