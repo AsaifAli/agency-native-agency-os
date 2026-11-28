@@ -145,6 +145,48 @@ def test_revenue_delivery_vertical_slice_and_audit(client):
     assert r.json()["status"] == "completed"
 
 
+def test_lead_creation_rejects_duplicate_email_but_allows_distinct_prospects(client):
+    org, ws = client.org_id, client.ws_id
+    first = client.post(f"/v1/orgs/{org}/leads", headers=auth(), json={
+        "workspace_id": ws, "company_name": "Northstar Systems",
+        "email": "Sales@northstar.example", "source": "referral",
+    })
+    assert first.status_code == 201, first.text
+
+    duplicate = client.post(f"/v1/orgs/{org}/leads", headers=auth(), json={
+        "workspace_id": ws, "company_name": "Northstar Systems",
+        "email": "  SALES@NORTHSTAR.EXAMPLE ", "source": "website",
+    })
+    assert duplicate.status_code == 409
+    assert "duplicate lead" in duplicate.json()["detail"].lower()
+
+    distinct = client.post(f"/v1/orgs/{org}/leads", headers=auth(), json={
+        "workspace_id": ws, "company_name": "Northstar Systems",
+        "email": "different-buyer@northstar.example", "source": "event",
+    })
+    assert distinct.status_code == 201, distinct.text
+
+
+def test_lead_creation_rejects_reusing_same_contact(client):
+    org, ws = client.org_id, client.ws_id
+    contact = client.post(f"/v1/orgs/{org}/contacts", headers=auth(), json={
+        "workspace_id": ws, "first_name": "Mira",
+        "email": "mira-lead@example.test",
+    })
+    assert contact.status_code == 201, contact.text
+    payload = {
+        "workspace_id": ws, "company_name": "Contact-linked Prospect",
+        "contact_id": contact.json()["id"], "email": "first-buyer@example.test",
+        "source": "referral",
+    }
+    first = client.post(f"/v1/orgs/{org}/leads", headers=auth(), json=payload)
+    assert first.status_code == 201, first.text
+    duplicate_payload = {**payload, "email": "different-buyer@example.test"}
+    duplicate = client.post(f"/v1/orgs/{org}/leads", headers=auth(), json=duplicate_payload)
+    assert duplicate.status_code == 409
+    assert "duplicate lead" in duplicate.json()["detail"].lower()
+
+
 def test_agent_research_and_outreach_drafts_are_source_backed_and_never_send(client):
     org, ws = client.org_id, client.ws_id
     lead = client.post(f"/v1/orgs/{org}/leads", headers=auth(), json={
@@ -637,3 +679,115 @@ def test_project_outcome_rejects_cross_workspace_parent_and_mismatched_acceptanc
         },
     )
     assert mismatch.status_code == 422
+
+
+
+def test_outcome_measurement_links_only_a_milestone_from_its_own_project(client):
+    org, ws = client.org_id, client.ws_id
+    projects = []
+    for name in ("Primary delivery", "Unrelated delivery"):
+        created = client.post(f"/v1/orgs/{org}/projects", headers=auth(), json={
+            "workspace_id": ws, "name": name,
+        })
+        assert created.status_code == 201, created.text
+        projects.append(created.json()["id"])
+
+    outcome = client.post(
+        f"/v1/orgs/{org}/projects/{projects[0]}/outcomes",
+        headers=auth(), json={
+            "workspace_id": ws, "title": "Improve workflow throughput",
+            "problem_statement": "Manual processing is slow and inconsistent.",
+            "desired_outcome": "Increase reliable workflow throughput.",
+            "metric_name": "Processed items", "metric_unit": "items per day",
+            "direction": "increase", "target_value": "100",
+            "measurement_method": "Count completed items over a full operating day.",
+            "acceptance_criteria": ["The workflow completes the agreed test cases."],
+        },
+    )
+    assert outcome.status_code == 201, outcome.text
+    milestones = []
+    for project_id in projects:
+        created = client.post(f"/v1/orgs/{org}/milestones", headers=auth(), json={
+            "workspace_id": ws, "project_id": project_id, "title": "QA verification",
+        })
+        assert created.status_code == 201, created.text
+        milestones.append(created.json()["id"])
+
+    payload = {
+        "workspace_id": ws, "value": "110", "source_type": "agency_measured",
+        "source_reference": "QA run evidence bundle",
+        "evidence_summary": "The measured throughput was recorded during the agreed QA window.",
+        "milestone_id": milestones[0],
+    }
+    linked = client.post(
+        f"/v1/orgs/{org}/outcomes/{outcome.json()['id']}/measurements",
+        headers=auth(), json=payload,
+    )
+    assert linked.status_code == 201, linked.text
+    assert linked.json()["milestone_id"] == milestones[0]
+
+    cross_project = client.post(
+        f"/v1/orgs/{org}/outcomes/{outcome.json()['id']}/measurements",
+        headers=auth(), json={**payload, "milestone_id": milestones[1]},
+    )
+    assert cross_project.status_code == 404
+
+
+def test_outcome_measurement_links_workspace_scoped_evaluation_run(client):
+    org, ws = client.org_id, client.ws_id
+    project = client.post(f"/v1/orgs/{org}/projects", headers=auth(), json={
+        "workspace_id": ws, "name": "Evaluation evidence delivery",
+    })
+    assert project.status_code == 201, project.text
+    outcome = client.post(
+        f"/v1/orgs/{org}/projects/{project.json()['id']}/outcomes",
+        headers=auth(), json={
+            "workspace_id": ws, "title": "Improve agent workflow reliability",
+            "problem_statement": "Workflow completion is not consistently verified.",
+            "desired_outcome": "Verify the workflow against an agreed evaluation pack.",
+            "metric_name": "Workflow evaluation score", "metric_unit": "score",
+            "direction": "increase", "target_value": "1",
+            "measurement_method": "Run the agent workflow evaluation pack against synthetic evidence.",
+            "acceptance_criteria": ["The agreed workflow evaluation is reviewed."],
+        },
+    )
+    assert outcome.status_code == 201, outcome.text
+
+    evaluation = client.post(
+        f"/v1/orgs/{org}/evaluations", headers=auth(), json={
+            "workspace_id": ws, "pack_name": "agent_workflow",
+            "expected": {"required_steps": ["plan"]},
+            "actual": {
+                "status": "completed", "completed_steps": ["plan"],
+                "tool_call_validity": 1, "policy_pass_rate": 1,
+                "approval_compliant": True, "execution_reliability": 1,
+                "fallback_rate": 0,
+            },
+        },
+    )
+    assert evaluation.status_code == 201, evaluation.text
+    assert evaluation.json()["evidence_trust"] == "self_reported"
+    assert evaluation.json()["release_eligible"] is False
+
+    measurement = client.post(
+        f"/v1/orgs/{org}/outcomes/{outcome.json()['id']}/measurements",
+        headers=auth(), json={
+            "workspace_id": ws, "value": "1", "source_type": "agency_measured",
+            "source_reference": "Evaluation run " + evaluation.json()["id"],
+            "evidence_summary": "Evaluation result attached for review; not independent release verification.",
+            "supporting_evaluation_run_id": evaluation.json()["id"],
+        },
+    )
+    assert measurement.status_code == 201, measurement.text
+    assert measurement.json()["supporting_evaluation_run_id"] == evaluation.json()["id"]
+
+    wrong_scope = client.post(
+        f"/v1/orgs/{org}/outcomes/{outcome.json()['id']}/measurements",
+        headers=auth(), json={
+            "workspace_id": ws, "value": "1", "source_type": "agency_measured",
+            "source_reference": "Foreign evaluation reference",
+            "evidence_summary": "This evaluation identifier must not cross workspace boundaries.",
+            "supporting_evaluation_run_id": "not-a-run-in-this-workspace",
+        },
+    )
+    assert wrong_scope.status_code == 404
