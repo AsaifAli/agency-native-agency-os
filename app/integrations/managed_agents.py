@@ -654,6 +654,34 @@ class ManagedAgentsRuntime(AgentRuntime):
             normalized["server_tool_use"] = counts
         return normalized or None
 
+    def fetch_idle_session_usage(self, session_id: str) -> dict | None:
+        """Fetch an authoritative cumulative usage snapshot only after the provider session is idle."""
+        if (
+            not isinstance(session_id, str)
+            or re.fullmatch(r"[A-Za-z0-9_-]{1,200}", session_id) is None
+        ):
+            raise ValueError("session_id must be a bounded provider identifier")
+        if (
+            not self.config.claude_managed_agents_enabled
+            or not self.config.anthropic_api_key
+        ):
+            raise RuntimeNotConfiguredError(
+                "Claude Managed Agents is not fully configured for usage reconciliation."
+            )
+        with self.client_factory() as client:
+            session = self._request(
+                client, "GET", f"/v1/sessions/{session_id}"
+            )
+        if not isinstance(session, dict):
+            raise RuntimeManualReviewRequired(
+                "Claude Managed Agents returned a malformed session snapshot."
+            )
+        # A running session's usage is still changing. Never persist it as a
+        # terminal recovery snapshot; the next bounded maintenance pass retries.
+        if session.get("status") != "idle":
+            return None
+        return self._normalize_usage(session.get("usage"))
+
     def _extract_result(
         self, events: list[dict], session_id: str, session_usage: object = None,
     ) -> ExecutionResult:
