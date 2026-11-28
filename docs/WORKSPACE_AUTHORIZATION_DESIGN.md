@@ -140,3 +140,4 @@ Route families found during the initial audit include core workspace/bootstrap a
 - Do not claim production isolation from unit tests or policy-presence checks alone.
 
 - Machine identity provisioning and revocation also require a matching, single-use `security.permission.change` approval. Provisioning approvals bind the exact identity name, subject, scopes, allowed data classes and TTL; revocation approvals bind the exact identity ID. The approval is consumed in the same transaction as the identity mutation and audit event.
+- Workforce capability configuration, capability enablement, and workforce-member activation require matching single-use `security.permission.change` approvals. The approved payload is an exact snapshot of the proposed scope/actions/tools/data classes/budget (and, for activation, the linked agent plus enabled capability set). Pausing a member remains immediately available to founders as a restrictive containment action.

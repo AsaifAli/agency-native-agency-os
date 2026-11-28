@@ -53,6 +53,25 @@ def machine_identity_revocation_resource_id(identity_id: str) -> str:
     ))
 
 
+def workforce_capability_resource_id(
+    workspace_id: str, member_id: str, capability_key: str, operation: str,
+) -> str:
+    """Stable resource key for one workforce capability configuration or enablement."""
+    if operation not in {"configure", "enable"}:
+        raise ValueError("Workforce capability operation must be configure or enable")
+    return str(uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"agency-os:workforce-capability:v1:{operation}:{workspace_id}:{member_id}:{capability_key}",
+    ))
+
+
+def workforce_member_activation_resource_id(workspace_id: str, member_id: str) -> str:
+    """Stable resource key for activating one workspace workforce member."""
+    return str(uuid.uuid5(
+        uuid.NAMESPACE_URL, f"agency-os:workforce-member:v1:activate:{workspace_id}:{member_id}",
+    ))
+
+
 def is_approval_required(action_type: str) -> bool:
     return action_type in MANDATORY_APPROVAL_ACTIONS
 

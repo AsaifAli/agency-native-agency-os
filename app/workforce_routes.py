@@ -14,6 +14,7 @@ from app.autonomy_policy import action_disposition, ActionDisposition
 from app.integrations.runtime_registry import is_runtime_available
 from app.policy import assert_managed_agents_eligible
 from app.audit import record_event
+from app.action_policy import require_approved_action, workforce_capability_resource_id, workforce_member_activation_resource_id
 from app.workforce_models import (WorkforceUnit, WorkforceMember, WorkforceCapability, WorkforcePosition, Delegation, OrchestrationPlan, OrchestrationPlanDelegation, OrchestrationPlanDraft)
 from app.workforce_schemas import (
     WorkforceInit, WorkforceCapabilityCreate, WorkforceCapabilityOut,
@@ -116,7 +117,8 @@ def list_workforce(org_id: str, workspace_id: str = Query(min_length=1),
 
 @router.post("/{member_id}/capabilities", response_model=WorkforceCapabilityOut, status_code=201)
 def add_capability(org_id: str, member_id: str, body: WorkforceCapabilityCreate,
-                   workspace_id: str = Query(min_length=1), db: Session = Depends(get_db),
+                   workspace_id: str = Query(min_length=1), approval_id: str = Query(min_length=1),
+                   db: Session = Depends(get_db),
                    p: Principal = Depends(get_principal)):
     require_membership(org_id, p, db)
     require_founder_authority(db, org_id, p.user.id)
@@ -125,6 +127,22 @@ def add_capability(org_id: str, member_id: str, body: WorkforceCapabilityCreate,
     invalid = set(body.allowed_data_classes) - {"synthetic", "public", "commercial", "confidential", "regulated"}
     if invalid:
         raise HTTPException(422, "Unsupported data class")
+    expected_payload = {
+        "operation": "configure", "member_id": member_id,
+        "capability_key": body.capability_key, "scope": body.scope,
+        "allowed_data_classes": sorted(body.allowed_data_classes),
+        "allowed_actions": sorted(body.allowed_actions),
+        "tool_allowlist": sorted(body.tool_allowlist),
+        "budget_minor": body.budget_minor, "currency": body.currency,
+    }
+    require_approved_action(
+        db, approval_id=approval_id, org_id=org_id,
+        workspace_id=workspace_id, action_type="security.permission.change",
+        resource_id=workforce_capability_resource_id(
+            workspace_id, member_id, body.capability_key, "configure",
+        ), actor_user_id=p.user.id,
+        expected_request_payload=expected_payload,
+    )
     row = db.query(WorkforceCapability).filter_by(member_id=member_id, capability_key=body.capability_key).one_or_none()
     if row is None:
         row = WorkforceCapability(org_id=org_id, workspace_id=workspace_id, member_id=member_id,
@@ -146,7 +164,8 @@ def add_capability(org_id: str, member_id: str, body: WorkforceCapabilityCreate,
 
 @router.post("/{member_id}/capabilities/{capability_id}/enable", response_model=WorkforceCapabilityOut)
 def enable_capability(org_id: str, member_id: str, capability_id: str,
-                      workspace_id: str = Query(min_length=1), db: Session = Depends(get_db),
+                      workspace_id: str = Query(min_length=1), approval_id: str = Query(min_length=1),
+                      db: Session = Depends(get_db),
                       p: Principal = Depends(get_principal)):
     require_membership(org_id, p, db)
     require_founder_authority(db, org_id, p.user.id)
@@ -195,6 +214,23 @@ def enable_capability(org_id: str, member_id: str, capability_id: str,
             assert_managed_agents_eligible(agent.data_class, client_authorized=False)
         except HTTPException as exc:
             raise HTTPException(403, "Managed Agents is not eligible for this data class") from exc
+    expected_payload = {
+        "operation": "enable", "member_id": member.id,
+        "capability_id": capability.id, "capability_key": capability.capability_key,
+        "scope": capability.scope,
+        "allowed_data_classes": sorted(capability.allowed_data_classes or []),
+        "allowed_actions": sorted(capability.allowed_actions or []),
+        "tool_allowlist": sorted(capability.tool_allowlist or []),
+        "budget_minor": capability.budget_minor, "currency": capability.currency,
+    }
+    require_approved_action(
+        db, approval_id=approval_id, org_id=org_id,
+        workspace_id=workspace_id, action_type="security.permission.change",
+        resource_id=workforce_capability_resource_id(
+            workspace_id, member.id, capability.capability_key, "enable",
+        ), actor_user_id=p.user.id,
+        expected_request_payload=expected_payload,
+    )
     capability.enabled = True
     record_event(db, org_id, p.user.id, "workforce.capability_enabled", "workforce_capability",
                  capability.id, workspace_id, {"member_id": member.id, "actions": capability.allowed_actions})
@@ -205,7 +241,8 @@ def enable_capability(org_id: str, member_id: str, capability_id: str,
 
 @router.post("/{member_id}/activate")
 def activate_member(org_id: str, member_id: str,
-                    workspace_id: str = Query(min_length=1), db: Session = Depends(get_db),
+                    workspace_id: str = Query(min_length=1), approval_id: str = Query(min_length=1),
+                    db: Session = Depends(get_db),
                     p: Principal = Depends(get_principal)):
     require_membership(org_id, p, db)
     require_founder_authority(db, org_id, p.user.id)
@@ -240,6 +277,28 @@ def activate_member(org_id: str, member_id: str,
     ]
     if not eligible:
         raise HTTPException(409, "An enabled, data-eligible execution capability is required")
+    activation_snapshot = {
+        "operation": "activate_member", "member_id": member.id,
+        "agent_id": agent.id, "runtime": agent.runtime,
+        "data_class": agent.data_class.value,
+        "capabilities": [
+            {
+                "id": grant.id, "capability_key": grant.capability_key,
+                "scope": grant.scope,
+                "allowed_data_classes": sorted(grant.allowed_data_classes or []),
+                "allowed_actions": sorted(grant.allowed_actions or []),
+                "tool_allowlist": sorted(grant.tool_allowlist or []),
+                "budget_minor": grant.budget_minor, "currency": grant.currency,
+            }
+            for grant in sorted(eligible, key=lambda item: item.id)
+        ],
+    }
+    require_approved_action(
+        db, approval_id=approval_id, org_id=org_id,
+        workspace_id=workspace_id, action_type="security.permission.change",
+        resource_id=workforce_member_activation_resource_id(workspace_id, member.id),
+        actor_user_id=p.user.id, expected_request_payload=activation_snapshot,
+    )
     if agent.runtime == "mock" and agent.data_class.value != "synthetic":
         raise HTTPException(403, "Mock runtime is restricted to synthetic data")
     if agent.runtime == "claude_managed_agents":
