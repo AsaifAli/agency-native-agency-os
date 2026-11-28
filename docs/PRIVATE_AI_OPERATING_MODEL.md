@@ -10,6 +10,14 @@ The Agency OS remains the sole business control plane and source of truth. Postg
 
 Do not add Hermes, Twenty, Invoice Ninja, Firefly III, Akaunting, Chatwoot, Typebot, Qdrant, Langfuse, Mattermost, Ntfy, Cal.com or another orchestration platform merely to reproduce the article. Reconsider a provider only when a specific integration gap is demonstrated and its security, licensing, operational cost and data path are reviewed.
 
+## First implementation tranche — integrated branch, pending CI
+
+The current consolidation branch now contains the first OS-side Private Operations foundation: workspace-scoped versioned knowledge records with source/provenance and classification metadata; founder-authorized knowledge approval; sanitized, source-linked business drafts for front-desk enquiries, meeting-to-proposal preparation and receivables follow-up; read-only receivables aging grouped by currency; a read-only founder count snapshot; audit events; and a Founder Console page with workspace selection and source-record pickers.
+
+The new tables use forced PostgreSQL RLS. Human OS/API access is workspace-scoped. The worker role is explicitly excluded from policy predicates and has all table privileges revoked until a separately designed and tested execution-capability integration exists. This avoids relying on caller-set machine/user GUCs for worker authorization. The migration depends on security revision `e8a1c3d5f7b9`.
+
+This tranche does not generate model content, invoke Claude, send messages, issue proposals/invoices, execute payments, ingest binary files or transcripts, run retention cleanup, or perform external actions. Those capabilities remain planned and require their own lifecycle, approval and integration evidence.
+
 ## 2. Patterns worth adopting
 
 ### A. Governed business knowledge layer
