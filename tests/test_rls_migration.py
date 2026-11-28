@@ -208,3 +208,15 @@ def test_public_schema_cannot_be_used_for_object_injection_by_runtime_roles():
     assert "FROM PUBLIC, agency_os_app, agency_os_worker" in migration
     assert "GRANT USAGE ON SCHEMA public TO agency_os_app, agency_os_worker" in migration
     assert "REVOKE CREATE ON SCHEMA public FROM PUBLIC, agency_os_app, agency_os_worker" in bootstrap
+
+
+def test_worker_machine_identity_rls_is_execution_scoped_not_disabled():
+    migration = PATH.with_name("e8a1c3d5f7b9_worker_execution_machine_identity_scope.py").read_text()
+    assert "worker_has_execution_context" in migration
+    assert "machine_identities.subject_id" in migration
+    assert "e.agent_id" in migration
+    assert "revoked_at IS NULL" in migration
+    assert "expires_at > clock_timestamp()" in migration
+    assert "e.machine_session_id" in migration
+    assert "agency_os.machine_identity_lookup_id" in migration
+    assert "CREATE POLICY tenant_isolation ON public.machine_identities" in migration
