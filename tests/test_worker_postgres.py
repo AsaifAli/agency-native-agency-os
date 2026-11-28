@@ -31,7 +31,13 @@ from app.worker_service import (
 from datetime import datetime, timedelta, timezone
 import app.security_models  # noqa: F401 — register security FK metadata
 from app.telephony.models import OutboxEvent
-from app.outbox_service import reconcile_outbox_events, claim_outbox_batch
+from app.outbox_service import (
+    OutboxOwnershipError,
+    _acknowledge,
+    _record_failure,
+    reconcile_outbox_events,
+    claim_outbox_batch,
+)
 
 
 def test_postgres_workers_claim_different_executions(monkeypatch):
@@ -803,3 +809,141 @@ finally:
             finally:
                 cleanup.close()
         engine.dispose()
+
+def test_postgres_outbox_claim_generation_fences_reused_worker_id():
+    """A previous delivery cannot mutate a reclaimed row even with the same worker ID."""
+    database_url = os.getenv("AGENCY_OS_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("Set AGENCY_OS_TEST_DATABASE_URL to run PostgreSQL outbox fencing test")
+
+    parsed_url = make_url(database_url)
+    assert parsed_url.get_backend_name() == "postgresql"
+    assert parsed_url.database == "agency_os_worker_test", (
+        "Safety check: this test may only use agency_os_worker_test"
+    )
+
+    engine = create_engine(database_url, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    suffix = uuid.uuid4().hex[:12]
+    org_id = workspace_id = event_id = None
+    event_type = f"test.postgres.outbox.fencing.{suffix}"
+    worker_id = f"same-worker-{suffix}"
+
+    try:
+        setup = Session()
+        try:
+            org = Organization(name=f"Outbox Fencing Test {suffix}")
+            setup.add(org)
+            setup.flush()
+            workspace = Workspace(
+                id=f"outbox-fencing-{suffix}",
+                org_id=org.id,
+                name="Outbox Fencing Test Workspace",
+            )
+            setup.add(workspace)
+            setup.flush()
+            org_id, workspace_id = org.id, workspace.id
+
+            event = OutboxEvent(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                event_type=event_type,
+                schema_version=1,
+                aggregate_type="test",
+                aggregate_id=f"aggregate-{suffix}",
+                idempotency_key=f"outbox-fencing-{suffix}",
+                payload={"synthetic": True},
+                status="pending",
+                attempts=0,
+                max_attempts=5,
+            )
+            setup.add(event)
+            setup.flush()
+            event_id = event.id
+            setup.commit()
+        finally:
+            setup.close()
+
+        first_claim = Session()
+        try:
+            old_messages = claim_outbox_batch(
+                first_claim,
+                worker_id=worker_id,
+                event_types={event_type},
+                limit=1,
+                lease_seconds=60,
+            )
+            assert len(old_messages) == 1
+            old_message = old_messages[0]
+            first_claim.commit()
+        finally:
+            first_claim.close()
+
+        expire = Session()
+        try:
+            row = expire.query(OutboxEvent).filter_by(id=event_id).one()
+            row.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=5)
+            expire.commit()
+        finally:
+            expire.close()
+
+        second_claim = Session()
+        try:
+            new_messages = claim_outbox_batch(
+                second_claim,
+                worker_id=worker_id,
+                event_types={event_type},
+                limit=1,
+                lease_seconds=60,
+            )
+            assert len(new_messages) == 1
+            new_message = new_messages[0]
+            assert new_message.id == old_message.id
+            assert new_message.attempts == old_message.attempts + 1
+            second_claim.commit()
+        finally:
+            second_claim.close()
+
+        with pytest.raises(OutboxOwnershipError):
+            _acknowledge(Session, message=old_message, worker_id=worker_id)
+
+        recorded = _record_failure(
+            Session,
+            message=old_message,
+            worker_id=worker_id,
+            error=RuntimeError("stale synthetic failure"),
+            base_retry_seconds=1,
+            max_retry_seconds=2,
+        )
+        assert recorded is False
+
+        with Session() as verification:
+            current = verification.query(OutboxEvent).filter_by(id=event_id).one()
+            assert current.status == "processing"
+            assert current.claimed_by == worker_id
+            assert current.attempts == new_message.attempts
+            assert current.lease_expires_at > datetime.now(timezone.utc)
+            assert current.last_error is None
+    finally:
+        if org_id is not None:
+            cleanup = Session()
+            try:
+                if event_id:
+                    cleanup.query(OutboxEvent).filter_by(id=event_id).delete(
+                        synchronize_session=False
+                    )
+                if workspace_id:
+                    cleanup.query(Workspace).filter_by(id=workspace_id).delete(
+                        synchronize_session=False
+                    )
+                cleanup.query(Organization).filter_by(id=org_id).delete(
+                    synchronize_session=False
+                )
+                cleanup.commit()
+            except Exception:
+                cleanup.rollback()
+                raise
+            finally:
+                cleanup.close()
+        engine.dispose()
+
