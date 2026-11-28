@@ -35,6 +35,8 @@ jobs:
       DATABASE_URL: sqlite:///./ci_agency_os.db
       AGENCY_OS_TEST_DATABASE_URL: postgresql+psycopg://agency_os:agency_os_test_password@localhost:5432/agency_os_worker_test
       AGENCY_OS_TEST_RLS_ADMIN_DATABASE_URL: postgresql+psycopg://agency_os_migrator:local-only-test-migrator-password@localhost:5432/agency_os_worker_test
+      AGENCY_OS_TEST_RLS_DATABASE_URL: postgresql+psycopg://agency_os_test_app:local-only-test-app-password@localhost:5432/agency_os_worker_test
+      AGENCY_OS_TEST_MIGRATOR_DATABASE_URL: postgresql+psycopg://agency_os_migrator:local-only-test-migrator-password@localhost:5432/agency_os_worker_test
       AGENCY_OS_TEST_RLS_WORKER_DATABASE_URL: postgresql+psycopg://agency_os_worker:local-only-test-worker-password@localhost:5432/agency_os_worker_test
     steps:
       - name: Checkout
