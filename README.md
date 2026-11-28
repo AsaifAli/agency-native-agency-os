@@ -86,6 +86,8 @@ Never commit `.env`. Use separate dev, staging and production configuration. Rev
 ## Key operating documents
 
 - `docs/AGENCY_PHILOSOPHY_RAAS.md` — Results as a Service philosophy and outcome-led delivery standard.
+- `docs/AGENCY_LEARNING_AND_MEMORY_MODEL.md` — scoped operational learning, memory boundaries and controlled skill evolution.
+- `docs/CLAUDE_CODE_AND_COWORK_OPERATING_MODEL.md` — Claude Code engineering, Cowork knowledge-work and Agency OS authority boundaries.
 - `docs/FINAL_SCOPE_AND_ACCEPTANCE.md` — frozen product boundary and acceptance criteria.
 - `docs/AGENCY_ORGANIZATION_WORKFORCE_BLUEPRINT.md` — departments, teams, positions and reporting structure.
 - `docs/WORKFORCE_AUTONOMY_AND_FOUNDER_AUTHORITY.md` and `docs/FOUNDER_AUTONOMY_MODEL.md` — founder authority and governed autonomy.
