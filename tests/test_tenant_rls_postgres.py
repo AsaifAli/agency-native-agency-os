@@ -241,7 +241,7 @@ def test_machine_identity_lookup_is_id_scoped_before_org_context_is_established(
             )
             other_identity = MachineIdentity(
                 org_id=other_org.id, workspace_id=other_workspace.id, name="Other identity",
-                subject_type="service", subject_id=f"other-service-{suffix[:24]}",
+                subject_type="service", subject_id=f"other-service-{suffix[:22]}",
                 token_hash="b" * 64, token_prefix="aos_mi_test",
                 scopes=["sessions:create"], allowed_data_classes=["public"],
                 expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
