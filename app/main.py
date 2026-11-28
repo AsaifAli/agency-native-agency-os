@@ -97,8 +97,10 @@ async def lifespan(app: FastAPI):
         if settings.process_role != "api":
             raise RuntimeError("API process must use PROCESS_ROLE=api in production")
         verify_postgres_role(engine, expected_bypassrls=False, require_rls=True, expected_role="agency_os_app")
-    if _mcp_subapp is not None:
-        async with _mcp_subapp.router.lifespan_context(_mcp_subapp):
+    if _mcp_server is not None:
+        # Mounted Starlette sub-app lifespans do not run automatically.
+        # Own the MCP session manager explicitly in the host API lifespan.
+        async with _mcp_server.session_manager.run():
             yield
     else:
         yield
