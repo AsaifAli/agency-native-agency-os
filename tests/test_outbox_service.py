@@ -275,3 +275,25 @@ def test_outbox_summary_evaluates_configurable_warning_thresholds(outbox_context
         "expired_lease_warning_count": 1,
         "dead_letter_warning_count": 1,
     }
+
+
+def test_outbox_summary_warns_when_pending_events_have_exhausted_attempts(outbox_context, monkeypatch):
+    from app.config import settings
+    from app.outbox_service import summarize_outbox
+
+    ctx = outbox_context
+    add_event(ctx, attempts=4, max_attempts=4)
+    monkeypatch.setattr(settings, "outbox_pending_age_warning_seconds", 900)
+    monkeypatch.setattr(settings, "outbox_expired_lease_warning_count", 10)
+    monkeypatch.setattr(settings, "outbox_dead_letter_warning_count", 10)
+    monkeypatch.setattr(settings, "outbox_exhausted_pending_warning_count", 1)
+
+    summary = summarize_outbox(
+        ctx["db"], org_id=ctx["org_id"], workspace_id=ctx["workspace_id"],
+        now=datetime.now(timezone.utc),
+    )
+
+    assert summary["health"] == "warning"
+    assert summary["alerts"] == ["exhausted_pending_detected"]
+    assert summary["exhausted_pending"] == 1
+    assert summary["thresholds"]["exhausted_pending_warning_count"] == 1
