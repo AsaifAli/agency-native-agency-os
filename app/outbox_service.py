@@ -183,6 +183,80 @@ def claim_outbox_batch(
     return claimed
 
 
+def _renew_lease(
+    session_factory, *, message: OutboxMessage, worker_id: str, lease_seconds: int,
+) -> bool:
+    """Extend only the still-live lease for this exact delivery generation."""
+    if not 15 <= lease_seconds <= 3600:
+        raise ValueError("lease_seconds must be between 15 and 3600")
+    now = datetime.now(timezone.utc)
+    with session_factory() as db:
+        updated = (
+            db.query(OutboxEvent)
+            .filter(
+                OutboxEvent.id == message.id,
+                OutboxEvent.status == "processing",
+                OutboxEvent.claimed_by == worker_id,
+                OutboxEvent.attempts == message.attempts,
+                OutboxEvent.lease_expires_at.is_not(None),
+                OutboxEvent.lease_expires_at > now,
+            )
+            .update(
+                {OutboxEvent.lease_expires_at: now + timedelta(seconds=lease_seconds)},
+                synchronize_session=False,
+            )
+        )
+        db.commit()
+        return updated == 1
+
+
+class _OutboxLeaseHeartbeat:
+    """Renew a delivery lease while its handler runs, using independent sessions."""
+
+    def __init__(
+        self, session_factory, *, message: OutboxMessage, worker_id: str,
+        lease_seconds: int, interval_seconds: float,
+    ) -> None:
+        self.session_factory = session_factory
+        self.message = message
+        self.worker_id = worker_id
+        self.lease_seconds = lease_seconds
+        self.interval_seconds = interval_seconds
+        self._stop = Event()
+        self._thread: Thread | None = None
+
+    def start(self) -> None:
+        self._thread = Thread(
+            target=self._run,
+            name=f"outbox-lease-{self.message.id[:8]}",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval_seconds):
+            try:
+                if not _renew_lease(
+                    self.session_factory,
+                    message=self.message,
+                    worker_id=self.worker_id,
+                    lease_seconds=self.lease_seconds,
+                ):
+                    return
+            except Exception:
+                # The final ack/failure operation performs the authoritative
+                # ownership check. If renewal could not be confirmed, never
+                # bypass that check or assume the lease is still ours.
+                return
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=max(5.0, self.interval_seconds * 2))
+            if self._thread.is_alive():
+                raise RuntimeError("Outbox lease heartbeat did not stop cleanly")
+
+
 def _acknowledge(session_factory, *, message: OutboxMessage, worker_id: str) -> None:
     with session_factory() as db:
         row = db.query(OutboxEvent).filter(OutboxEvent.id == message.id).with_for_update().one_or_none()
@@ -242,6 +316,7 @@ def dispatch_outbox_batch(
     handlers: Mapping[str, OutboxHandler],
     limit: int = 25,
     lease_seconds: int = 120,
+    heartbeat_interval_seconds: float | None = None,
     base_retry_seconds: int = 15,
     max_retry_seconds: int = 3600,
 ) -> tuple[int, int, int]:
@@ -254,6 +329,12 @@ def dispatch_outbox_batch(
         return 0, 0, 0
     if base_retry_seconds < 1 or max_retry_seconds < base_retry_seconds:
         raise ValueError("Invalid outbox retry delay bounds")
+    if not 15 <= lease_seconds <= 3600:
+        raise ValueError("lease_seconds must be between 15 and 3600")
+    if heartbeat_interval_seconds is None:
+        heartbeat_interval_seconds = min(30.0, lease_seconds / 3.0)
+    if not 0 < heartbeat_interval_seconds < lease_seconds:
+        raise ValueError("heartbeat_interval_seconds must be positive and shorter than the lease")
 
     with session_factory() as db:
         messages = claim_outbox_batch(
@@ -264,28 +345,44 @@ def dispatch_outbox_batch(
 
     published = retried = dead = 0
     for message in messages:
+        heartbeat = _OutboxLeaseHeartbeat(
+            session_factory,
+            message=message,
+            worker_id=worker_id,
+            lease_seconds=lease_seconds,
+            interval_seconds=heartbeat_interval_seconds,
+        )
+        heartbeat.start()
         try:
-            handlers[message.event_type](message)
-            _acknowledge(session_factory, message=message, worker_id=worker_id)
-            published += 1
+            try:
+                handlers[message.event_type](message)
+            except Exception as exc:
+                heartbeat.stop()
+                recorded = _record_failure(
+                    session_factory, message=message, worker_id=worker_id,
+                    error=exc, base_retry_seconds=base_retry_seconds,
+                    max_retry_seconds=max_retry_seconds,
+                )
+                if not recorded:
+                    continue
+                # Count based on the persisted state, not the exception type.
+                with session_factory() as db:
+                    row = db.query(OutboxEvent).filter_by(id=message.id).one_or_none()
+                    if row is not None and row.status == "dead_letter":
+                        dead += 1
+                    else:
+                        retried += 1
+            else:
+                heartbeat.stop()
+                _acknowledge(session_factory, message=message, worker_id=worker_id)
+                published += 1
         except OutboxOwnershipError:
             # A stale worker must not overwrite a newer owner's state.
+            heartbeat.stop()
             continue
-        except Exception as exc:
-            recorded = _record_failure(
-                session_factory, message=message, worker_id=worker_id,
-                error=exc, base_retry_seconds=base_retry_seconds,
-                max_retry_seconds=max_retry_seconds,
-            )
-            if not recorded:
-                continue
-            # Count based on the persisted state, not the exception type.
-            with session_factory() as db:
-                row = db.query(OutboxEvent).filter_by(id=message.id).one_or_none()
-                if row is not None and row.status == "dead_letter":
-                    dead += 1
-                else:
-                    retried += 1
+        finally:
+            if heartbeat._thread is not None and heartbeat._thread.is_alive():
+                heartbeat.stop()
     return published, retried, dead
 
 
