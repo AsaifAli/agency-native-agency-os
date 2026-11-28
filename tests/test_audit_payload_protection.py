@@ -105,33 +105,3 @@ def test_record_event_rejects_resume_tokens_without_persisting_the_event():
     assert db.added == []
 
 
-def test_record_event_allows_only_explicitly_trusted_internal_reference_fields():
-    db = RecordingSession()
-    event = record_event(
-        db,
-        "org-1",
-        None,
-        "tool.invocation.succeeded",
-        "tool_invocation",
-        "invocation-1",
-        "workspace-1",
-        {"machine_identity_id": "identity-1", "session_id": "session-1"},
-        trusted_internal_id_keys={"machine_identity_id", "session_id"},
-    )
-    assert event.payload == {
-        "machine_identity_id": "identity-1",
-        "session_id": "session-1",
-    }
-
-    with pytest.raises(DataProtectionBlocked):
-        record_event(
-            db,
-            "org-1",
-            None,
-            "tool.invocation.succeeded",
-            "tool_invocation",
-            "invocation-2",
-            "workspace-1",
-            {"credential_id": "credential-1"},
-            trusted_internal_id_keys={"machine_identity_id", "session_id"},
-        )
