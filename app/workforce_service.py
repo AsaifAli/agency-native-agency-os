@@ -63,6 +63,7 @@ def _agent(db: Session, *, org_id: str, workspace_id: str, name: str,
         )
         db.add(row)
         db.flush()
+    ensure_initial_agent_version(db, row, created_by=None)
     return row
 
 
