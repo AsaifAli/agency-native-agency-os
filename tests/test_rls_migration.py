@@ -388,7 +388,9 @@ def test_qa_issue_table_has_workspace_rls_and_no_worker_access():
     assert "ENABLE ROW LEVEL SECURITY" in source
     assert "FORCE ROW LEVEL SECURITY" in source
     assert "user_has_workspace_access" in source
-    assert "GRANT SELECT, INSERT, UPDATE ON TABLE public.qa_issues TO agency_os_app" in source
+    assert "GRANT SELECT, INSERT ON TABLE public.qa_issues TO agency_os_app" in source
+    assert "REVOKE UPDATE, DELETE ON TABLE public.qa_issues FROM agency_os_app" in source
+    assert "GRANT UPDATE (" in source and "closed_by_user_id" in source
     assert "REVOKE ALL ON TABLE public.qa_issues FROM agency_os_worker" in source
     assert "REVOKE DELETE ON TABLE public.qa_issues FROM agency_os_app" in source
     assert "fk_qa_issues_task_scope" in source
