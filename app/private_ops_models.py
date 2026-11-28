@@ -65,3 +65,32 @@ class BusinessDraft(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class LearningCandidate(Base):
+    """Evidence-backed workspace lesson awaiting founder-controlled promotion."""
+    __tablename__ = "learning_candidates"
+    __table_args__ = (
+        UniqueConstraint("org_id", "workspace_id", "idempotency_key", name="uq_learning_candidate_idempotency"),
+        Index("ix_learning_candidate_scope_status", "org_id", "workspace_id", "status", "created_at"),
+        CheckConstraint("status IN ('pending_review','promoted','rejected')", name="ck_learning_candidate_status"),
+        CheckConstraint("data_class IN ('synthetic','public','internal')", name="ck_learning_candidate_data_class"),
+        CheckConstraint("confidence >= 0 AND confidence <= 1", name="ck_learning_candidate_confidence"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_reference: Mapped[str] = mapped_column(String(240), nullable=False)
+    data_class: Mapped[str] = mapped_column(String(16), nullable=False)
+    confidence: Mapped[float] = mapped_column(nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="pending_review", server_default="pending_review", nullable=False)
+    knowledge_item_id: Mapped[str | None] = mapped_column(ForeignKey("knowledge_items.id", ondelete="RESTRICT"))
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    reviewed_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)

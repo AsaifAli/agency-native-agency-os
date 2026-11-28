@@ -213,9 +213,11 @@ A checkbox is complete only when code/infrastructure, tests, operational evidenc
 - [ ] Run end-to-end browser tests for critical founder journeys. Frontend lint (0 errors; 7 pre-existing React Hook dependency warnings), TypeScript validation and Next.js production build passed before the final Founder Console UI reconciliation. A fresh run against current `main` checkpoint `9e42fbe49d0c9bff2553d0c8b2b77412e889fc0d` and browser-level critical-flow tests remain pending.
 
 ### 17. Learning and operational improvement
-- [ ] Capture incidents, corrections, successful playbooks and postmortems as reviewed knowledge.
-- [ ] Separate verified facts from agent-generated hypotheses and preserve source/evidence.
-- [ ] Add approval-controlled promotion of lessons into skills, prompts, policies and workflows.
+- [x] Capture evidence-backed workspace learning candidates through an audited, idempotent API; source execution/evaluation lineage is verified and sensitive source classes are blocked.
+- [x] Separate candidate evidence and confidence from reusable knowledge; promotion requires founder authority and remains in the same workspace.
+- [ ] Automatic extraction from completed executions; currently candidates are explicitly submitted.
+- [ ] Retrieve/inject approved knowledge into runtime sessions with tenant authorization at retrieval time.
+- [ ] Add approval-controlled promotion of lessons into versioned skills, prompts, policies and workflows.
 - [ ] Track recurring failure patterns and regression tests to prevent recurrence.
 - [ ] Review agent permissions, budgets, workflow performance and data access periodically.
 

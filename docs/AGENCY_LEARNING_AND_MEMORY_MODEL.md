@@ -1,6 +1,6 @@
 # Agency Learning and Memory Model
 
-**Status:** Operating model and implementation target. The capture skill exists; a complete persistent learning service, automatic extraction, memory retrieval/injection and governed skill-promotion workflow are **not yet verified as implemented**.
+**Status:** **Partial implementation.** Workspace-scoped learning candidates, verified source lineage, sanitized capture, idempotency, audit and founder-only promotion into versioned workspace knowledge are implemented. Automatic extraction, retrieval/injection into runtimes, cross-scope promotion, skill proposals and effectiveness measurement remain unimplemented.
 
 ## 1. Why the agency learns
 
@@ -123,21 +123,32 @@ A rise in captured lessons is not itself improvement. Track regressions and fals
 - Operational-learning-capture skill describing evidence-backed scoped lesson capture.
 - Workforce, execution and evaluation foundations that can provide source events and review signals.
 
-**Not verified as implemented:**
-- Durable OS-owned memory records and retrieval.
-- Automatic extraction/capture from completed executions.
-- Memory injection into Claude Code, Cowork or Managed Agents sessions.
-- Cross-scope promotion workflow and skill proposal lifecycle.
+**Implemented in this release candidate:**
+- `learning_candidates` stores workspace-scoped candidate lessons with evidence summary, source type/reference, data class, confidence, idempotency key and review lifecycle.
+- Candidate sources are verified against a completed execution in the same workspace. Evaluation runs are currently excluded because their evidence is self-reported and not independently attested.
+- Source data class is derived from the source execution lineage. Commercial, confidential and regulated sources are rejected; callers cannot downgrade a source to synthetic/public.
+- Candidate text passes the Data Protection Gateway sanitizer. Candidate creation and promotion/rejection are audited.
+- Founder authority is required to promote a candidate. Promotion creates a versioned, approved `KnowledgeItem` in the same workspace only; no cross-workspace or organization-wide promotion exists.
+- The table is tenant-RLS protected and inaccessible to the ordinary worker role. Migration joins both existing Alembic heads.
+- API: `POST/GET /v1/orgs/{org_id}/learning/candidates` and `POST /v1/orgs/{org_id}/learning/candidates/{candidate_id}/review`.
+
+**Still not implemented:**
+- Automatic extraction/capture from completed executions; candidates are explicitly submitted through the API.
+- Retrieval/injection of approved knowledge into Claude Code, Cowork or Managed Agents sessions.
+- Founder/department/organization-wide memory scopes and cross-scope promotion.
+- Skill proposal lifecycle, versioned skill publishing and rollback integration.
 - Learning dashboard, effectiveness tracking and regression gates for skill changes.
+- Retention/expiry automation specific to learning candidates and effectiveness outcomes.
 
 Do not report these as live until code, migrations, authorization tests, lifecycle behavior and end-to-end evidence prove them.
 
-## 10. Acceptance criteria for the future implementation
+## 10. Acceptance criteria and current limitations
 
 - Client workspace A cannot retrieve any memory or artifact from workspace B through API, worker, cache, search or provider context.
 - A client lesson cannot become organization-wide without de-identification, policy review and founder approval.
 - Every lesson has provenance, scope, data class, confidence, validity/review date and source references.
-- Duplicate execution events do not create duplicate lessons.
+- Duplicate candidate submissions with the same source/title are idempotent; a conflicting payload under the same key returns HTTP 409.
+- Source lineage is verified against a completed execution/evaluation record in the same workspace; caller-supplied labels alone are not trusted.
 - Retention, expiry, correction and deletion cover memory records, derived indexes, caches and linked artifacts.
 - A skill proposal cannot publish itself; failed evaluations block promotion.
 - Founder can inspect, approve, reject, supersede and roll back shared learning.

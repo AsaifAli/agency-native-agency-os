@@ -1,5 +1,7 @@
 """Private AI business workflows: durable OS records, no model/runtime ownership."""
 from datetime import datetime, timezone
+import hashlib
+import re
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
@@ -7,10 +9,10 @@ from app.auth import Principal, get_principal, has_founder_authority, require_me
 from app.db import get_db
 from app.data_protection import DataProtectionBlocked, sanitize_text, protect_untrusted_payload
 from app.audit import record_event
-from app.models import Role, Approval, Workspace
+from app.models import Role, Approval, Workspace, Execution, ExecutionStatus
 from app.domain_models import Client, Lead, Opportunity, Project
 from app.operations_models import Proposal, InvoiceRecord
-from app.private_ops_models import KnowledgeItem, BusinessDraft
+from app.private_ops_models import KnowledgeItem, BusinessDraft, LearningCandidate
 
 router = APIRouter(prefix="/v1/orgs/{org_id}", tags=["private-operations"])
 WRITERS = {Role.owner, Role.admin, Role.operator}
@@ -48,6 +50,36 @@ class KnowledgeCreate(BaseModel):
         if self.effective_from and self.effective_until and self.effective_until < self.effective_from:
             raise ValueError("effective_until must not precede effective_from")
         return self
+
+
+class LearningCandidateCreate(BaseModel):
+    workspace_id: str = Field(min_length=1, max_length=36)
+    title: str = Field(min_length=3, max_length=240)
+    content: str = Field(min_length=10, max_length=12000)
+    evidence_summary: str = Field(min_length=10, max_length=6000)
+    source_type: str = Field(pattern=r"^execution$")
+    source_reference: str = Field(min_length=3, max_length=240)
+    confidence: float = Field(ge=0, le=1)
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=160)
+
+
+class LearningCandidateReview(BaseModel):
+    workspace_id: str = Field(min_length=1, max_length=36)
+    decision: str = Field(pattern=r"^(approve|reject)$")
+
+
+def _learning_candidate_out(item: LearningCandidate) -> dict:
+    return {
+        "id": item.id, "workspace_id": item.workspace_id, "title": item.title,
+        "content": item.content, "evidence_summary": item.evidence_summary,
+        "source_type": item.source_type, "source_reference": item.source_reference,
+        "data_class": item.data_class, "confidence": item.confidence,
+        "scope": "workspace", "provenance_status": "source_record_verified", "status": item.status,
+        "knowledge_item_id": item.knowledge_item_id, "created_by": item.created_by,
+        "reviewed_by": item.reviewed_by, "reviewed_at": item.reviewed_at,
+        "created_at": item.created_at,
+    }
+
 
 class WorkspaceBody(BaseModel):
     workspace_id: str = Field(min_length=1, max_length=36)
@@ -116,6 +148,118 @@ def approve_knowledge(item_id: str, body: WorkspaceBody, org_id: str, db: Sessio
     record_event(db, org_id, p.user.id, "knowledge.approved", "knowledge_item", item.id, body.workspace_id, {"version": item.version})
     db.commit(); db.refresh(item)
     return _knowledge_out(item)
+
+
+@router.post("/learning/candidates", status_code=201)
+def create_learning_candidate(body: LearningCandidateCreate, org_id: str, db: Session = Depends(get_db), p: Principal = Depends(get_principal)):
+    _access(db, org_id, body.workspace_id, p, write=True)
+    # Learning is workspace-scoped in this first release. Confidential and
+    # regulated material cannot enter the learning pipeline.
+    safe_title = _safe(body.title, 240)
+    safe_content = _safe(body.content, 12000)
+    safe_evidence = _safe(body.evidence_summary, 6000)
+    safe_reference = _safe(body.source_reference, 240)
+    source = db.query(Execution).filter_by(
+        id=safe_reference, org_id=org_id, workspace_id=body.workspace_id
+    ).first()
+    if source is None or source.status != ExecutionStatus.succeeded:
+        raise HTTPException(404, "A completed source execution was not found in this workspace")
+    source_class = source.data_class.value if hasattr(source.data_class, "value") else str(source.data_class)
+    source_classes = [source_class]
+    class_rank = {"synthetic": 0, "public": 1, "internal": 2}
+    if any(value not in class_rank for value in source_classes):
+        raise HTTPException(403, "Learning from commercial, confidential or regulated sources is disabled")
+    actual_class = max(source_classes, key=lambda value: class_rank[value])
+    effective_data_class = actual_class
+    # Serialize duplicate submissions in this workspace before checking the
+    # idempotency key; the unique constraint remains the final concurrency guard.
+    db.query(Workspace).filter_by(id=body.workspace_id, org_id=org_id).with_for_update().first()
+    key = body.idempotency_key or hashlib.sha256(
+        f"{body.source_type}:{safe_reference}:{safe_title}".encode("utf-8")
+    ).hexdigest()[:64]
+    existing = db.query(LearningCandidate).filter_by(
+        org_id=org_id, workspace_id=body.workspace_id, idempotency_key=key
+    ).first()
+    if existing is not None:
+        same = (existing.title == safe_title and existing.content == safe_content
+                and existing.evidence_summary == safe_evidence
+                and existing.source_reference == safe_reference
+                and existing.source_type == body.source_type
+                and existing.data_class == effective_data_class
+                and existing.confidence == body.confidence)
+        if not same:
+            raise HTTPException(409, "Learning candidate idempotency key conflicts with existing content")
+        return _learning_candidate_out(existing)
+    candidate = LearningCandidate(
+        org_id=org_id, workspace_id=body.workspace_id, title=safe_title,
+        content=safe_content, evidence_summary=safe_evidence,
+        source_type=body.source_type, source_reference=safe_reference,
+        data_class=effective_data_class, confidence=body.confidence,
+        idempotency_key=key, created_by=p.user.id,
+    )
+    db.add(candidate); db.flush()
+    record_event(db, org_id, p.user.id, "learning_candidate.created", "learning_candidate", candidate.id,
+                 body.workspace_id, {"source_type": candidate.source_type, "data_class": candidate.data_class,
+                                     "confidence": candidate.confidence})
+    db.commit(); db.refresh(candidate)
+    return _learning_candidate_out(candidate)
+
+
+@router.get("/learning/candidates")
+def list_learning_candidates(org_id: str, workspace_id: str = Query(min_length=1),
+                             status: str | None = Query(default=None, pattern=r"^(pending_review|promoted|rejected)$"),
+                             db: Session = Depends(get_db), p: Principal = Depends(get_principal)):
+    _access(db, org_id, workspace_id, p)
+    query = db.query(LearningCandidate).filter_by(org_id=org_id, workspace_id=workspace_id)
+    if status:
+        query = query.filter(LearningCandidate.status == status)
+    return [_learning_candidate_out(row) for row in query.order_by(LearningCandidate.created_at.desc()).limit(200).all()]
+
+
+@router.post("/learning/candidates/{candidate_id}/review")
+def review_learning_candidate(candidate_id: str, body: LearningCandidateReview, org_id: str,
+                              db: Session = Depends(get_db), p: Principal = Depends(get_principal)):
+    _access(db, org_id, body.workspace_id, p, write=True)
+    if body.decision == "approve" and not has_founder_authority(db, org_id, p.user.id):
+        raise HTTPException(403, "Founder authority is required to promote reusable learning")
+    candidate = db.query(LearningCandidate).filter_by(
+        id=candidate_id, org_id=org_id, workspace_id=body.workspace_id
+    ).with_for_update().first()
+    if candidate is None:
+        raise HTTPException(404, "Learning candidate not found")
+    if candidate.status != "pending_review":
+        raise HTTPException(409, "Learning candidate has already been reviewed")
+    now = datetime.now(timezone.utc)
+    if body.decision == "reject":
+        candidate.status, candidate.reviewed_by, candidate.reviewed_at = "rejected", p.user.id, now
+        record_event(db, org_id, p.user.id, "learning_candidate.rejected", "learning_candidate",
+                     candidate.id, body.workspace_id, {"source_type": candidate.source_type})
+    else:
+        # Promotion remains in the same workspace; this endpoint cannot promote
+        # client-specific or confidential knowledge into organization scope.
+        db.query(Workspace).filter_by(id=body.workspace_id, org_id=org_id).with_for_update().first()
+        slug = re.sub(r"[^a-z0-9]+", ".", candidate.title.lower()).strip(".")[:120] or "learning.lesson"
+        key = f"learning.{slug}"[:160]
+        latest = db.query(KnowledgeItem).filter_by(
+            org_id=org_id, workspace_id=body.workspace_id, key=key
+        ).order_by(KnowledgeItem.version.desc()).first()
+        knowledge = KnowledgeItem(
+            org_id=org_id, workspace_id=body.workspace_id, client_id=None, key=key,
+            version=(latest.version + 1 if latest else 1), title=candidate.title,
+            content=(candidate.content + "\n\nEvidence: " + candidate.evidence_summary),
+            source_type=candidate.source_type, source_reference=candidate.source_reference,
+            classification="public" if candidate.data_class in {"public", "synthetic"} else "internal",
+            owner_user_id=p.user.id, effective_from=now, status="approved",
+            approved_by=p.user.id, approved_at=now, created_by=p.user.id,
+        )
+        db.add(knowledge); db.flush()
+        candidate.status, candidate.knowledge_item_id = "promoted", knowledge.id
+        candidate.reviewed_by, candidate.reviewed_at = p.user.id, now
+        record_event(db, org_id, p.user.id, "learning_candidate.promoted", "learning_candidate",
+                     candidate.id, body.workspace_id, {"knowledge_item_id": knowledge.id,
+                                                        "classification": knowledge.classification})
+    db.commit(); db.refresh(candidate)
+    return _learning_candidate_out(candidate)
 
 def _verify_sources(db: Session, org_id: str, workspace_id: str, refs: list[dict]) -> None:
     allowed = {"lead": Lead, "opportunity": Opportunity, "invoice": InvoiceRecord, "project": Project, "proposal": Proposal}

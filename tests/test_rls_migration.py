@@ -30,6 +30,7 @@ def test_rls_migration_covers_every_model_table_with_org_id():
     expected.pop("orchestration_plan_delegations", None)
     expected.pop("knowledge_items", None)
     expected.pop("business_drafts", None)
+    expected.pop("learning_candidates", None)
     # Session credentials are protected by a dedicated execution-bound insert policy
     # and a SECURITY DEFINER authentication function, not the general tenant policy.
     expected.pop("machine_session_credentials", None)
@@ -97,7 +98,7 @@ def test_startup_rls_inventory_matches_all_migration_tables():
         "organizations", "browser_sessions", "execution_attempts",
         "project_outcomes", "outcome_measurements",
         "orchestration_plan_delegations", "knowledge_items", "business_drafts",
-        "machine_session_credentials",
+        "machine_session_credentials", "learning_candidates",
     }
     assert REQUIRED_RLS_TABLES == expected | {"workspace_grants"}
 
@@ -131,7 +132,7 @@ def test_workspace_authorization_migration_covers_every_workspace_owned_table():
     expected.difference_update({
         "project_outcomes", "outcome_measurements",
         "orchestration_plan_delegations", "knowledge_items", "business_drafts",
-        "machine_session_credentials",
+        "machine_session_credentials", "learning_candidates",
     })
     assert set(migration.WORKSPACE_TABLES) == expected
 
@@ -241,6 +242,19 @@ def test_private_operations_migration_enforces_workspace_rls_and_denies_worker_r
     assert "session_user <> 'agency_os_worker'" in source
     assert "TO agency_os_app" in source
     assert "REVOKE ALL ON public." in source and "FROM agency_os_worker" in source
+
+
+def test_learning_candidate_migration_is_workspace_rls_protected_and_worker_denied():
+    path = PATH.with_name("a1b2c3d4e5f6_workspace_learning_candidates.py")
+    source = path.read_text()
+    assert 'revision = "a1b2c3d4e5f6"' in source
+    assert '"z6f1b3d8a2c5", "b7d4c9a2e6f1"' in source
+    assert '"learning_candidates"' in source
+    assert "ENABLE ROW LEVEL SECURITY" in source
+    assert "FORCE ROW LEVEL SECURITY" in source
+    assert "user_has_workspace_access" in source
+    assert "session_user <> 'agency_os_worker'" in source
+    assert "REVOKE ALL ON public.learning_candidates FROM agency_os_worker" in source
 
 
 def test_ci_runs_human_rls_tests_with_a_dedicated_least_privilege_app_login():

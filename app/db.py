@@ -127,7 +127,7 @@ REQUIRED_RLS_TABLES = frozenset({
     "workforce_members", "workforce_positions", "workforce_units", "workspaces",
     "workspace_grants",
     "organizations", "browser_sessions", "execution_attempts",
-    "knowledge_items", "business_drafts",
+    "knowledge_items", "business_drafts", "learning_candidates",
 })
 
 
