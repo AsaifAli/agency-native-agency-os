@@ -1,25 +1,25 @@
 # Agency OS — authoritative implementation status
 
-**Last reconciled:** 2026-11-28 17:18 UTC  
+**Last reconciled:** 2026-11-28 17:35 UTC  
 **Working branch:** `main` is the single active integration branch for founder-authorized work. Do not create parallel feature branches or PRs unless explicitly requested.  
-**Verified code baseline:** PR #71 was merged into `main` at 2026-11-28 16:28:33 UTC. The last fully verified code baseline is `6d70292596beeea86eb778a09fa04faeed06305e`; additional Phase 4 provider-usage recovery changes are now on `main` through code commit `8c500996b7bba6930bdd5d8ebb77e1a46104218a`. Reviewed Revenue/Delivery/Outreach changes from the historical integration branch have been ported onto `main`, and `main` remains the sole active working branch.  
+**Verified code baseline:** PR #71 was merged into `main` at 2026-11-28 16:28:33 UTC. The current verified code/test baseline is `0a8c923110bd47b5566a72dcf58305353034229c`. Phase 4 provider-usage recovery, retry session linking and migration-graph convergence are included. `main` is the authorized integration branch. A historical `integration/agency-os-consolidated-2026-11` branch still exists and received recent commits; it has not been merged into `main`, so single-branch cleanup is not yet complete.
 **Latest code-baseline CI:** [Run 46168046099](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46168046099) completed successfully: **687 backend tests passed in 54.82 seconds**, including PostgreSQL 16 integration, and frontend typecheck/production build passed. The subsequent commit `43c5e0f5c22594450e8fbd88bc75e607035c4e13` only reconciles the failure-injection documentation.  
 **Release posture:** **NO-GO for production.** Green CI does not establish live provider compatibility, staging isolation, backup restore, operational readiness or compliance.  
 **Release posture:** **NO-GO for production.** Green CI does not establish live provider compatibility, staging isolation, backup restore, operational readiness or compliance.
 
-This file describes the merged `main` baseline. Historical PR/branch checkpoints remain historical evidence, not active integration work. See `docs/CONSOLIDATION_EXECUTION_LEDGER.md` and `docs/PRODUCTION_GRADE_MASTER_CHECKLIST.md` for historical integration and release gates.
+This file describes the verified `main` baseline. The historical integration branch is not an approved parallel workstream and must not be merged without a fresh audit and explicit authorization. See `docs/CONSOLIDATION_EXECUTION_LEDGER.md` and `docs/PRODUCTION_GRADE_MASTER_CHECKLIST.md` for historical integration and release gates.
 
 ## Verification evidence on merged `main`
 
 | Check | Recorded result | Qualification |
 |---|---|---|
-| Backend pytest + PostgreSQL 16 integration | Passed | Main CI run [46165349483](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46165349483); backend job completed successfully, including isolated PostgreSQL 16 integration. |
+| Backend pytest + PostgreSQL 16 integration | <badge color="success">713 passed</badge> | Latest CI run [46171022293](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46171022293); includes outbox crash recovery, provider usage reconciliation and retry-session accounting tests. |
 | Human tenant/workspace RLS | Passed in live PostgreSQL 16 CI | Dedicated `agency_os_test_app` NOBYPASSRLS login; cross-org/workspace access, grants/revocation and pooled-context behavior executed. |
 | Worker capability boundary | Passed in live PostgreSQL 16 CI | Actual `agency_os_worker` NOBYPASSRLS login; capability, forged-GUC, direct-table/function privilege and scope checks executed. |
 | Browser-session retention, orchestration-link RLS, outcome isolation and audit immutability | Passed in live PostgreSQL 16 CI | Previously skipped suites now execute; append-only evidence is preserved by fixtures. |
-| PostgreSQL role bootstrap and migration upgrade | Passed | PostgreSQL 16 role setup, Alembic graph validation, full upgrade to head and Python compilation passed. Disposable CI database only. |
+| PostgreSQL role bootstrap and migration upgrade | Passed | PostgreSQL 16 role setup, single-head Alembic graph test, full upgrade to head and Python compilation passed. Disposable CI database only. |
 | Frontend TypeScript and Next.js production build | Passed | Main CI run above; no frontend lint result is claimed by this workflow. |
-| Main push CI | Passed | [Run 46165349483](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46165349483) completed successfully after PR #71 was merged. |
+| Main push CI | Passed | [Run 46171022293](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46171022293) completed successfully on the current verified baseline. |
 | Live Claude/Anthropic provider compatibility | Not verified | No live provider provisioning, credentials or production provider execution claimed. |
 | Production migration, deployment, restore drill or compliance assessment | Not performed | Requires separate staging/production controls and explicit founder go/no-go. |
 
@@ -115,7 +115,7 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 - Complete Delivery requirement-to-test traceability, independent QA/rework metrics, production release gates, handover, support cases, SLA and renewal workflows.
 - Add automatic KPI ingestion, verified impact evidence, outcome revision/scope-change workflow and client acceptance/sign-off.
 - Add trusted Evaluation Harness runner attestation, immutable test/commit/environment manifests and non-bypassable release-blocking gates. Caller-supplied booleans are not trusted evidence.
-- Provider usage recovery is now implemented as a bounded workspace-scoped maintenance pass: it fetches Claude session usage only after the provider reports idle, keeps HTTP outside DB transactions, rechecks abandoned execution state under lock, persists normalized snapshots with a hash/timestamp/audit event, and backs off pending/error reads for five minutes. Unit tests cover idempotency, non-idle deferral, read-failure cooldown and execution-state fencing; latest code CI remains pending. A separate append-only usage-observation ledger, provider reconciliation for sessions without durable IDs, per-execution USD settlement, workspace reservations, cumulative budgets, margin/forecast and founder emergency disable controls remain incomplete.
+- Provider usage recovery is implemented and CI-tested as a bounded workspace-scoped maintenance pass. It reconciles failed/abandoned attempts with durable Managed Agents session IDs; accepts snapshots only from idle/terminated sessions with no open workflow runs; performs provider HTTP outside DB transactions; rechecks execution/attempt state under lock; persists normalized cumulative snapshots with hash/timestamp/audit; refreshes them on a five-minute cooldown; and backs off pending/error reads. Retries now persist the existing same-runtime session ID onto the new attempt so cumulative snapshots are not double-counted. Unit tests cover idempotency, non-idle/open-workflow deferral, terminal sessions, read-failure cooldown, execution-state fencing, failed attempts and same-session retry accounting. Run 46171022293 passed. A separate append-only usage-observation ledger, provider reconciliation for sessions without durable IDs, per-execution USD settlement, workspace reservations, cumulative budgets, margin/forecast and founder emergency disable controls remain incomplete.
 
 ### P2/P3 — Founder Console and operations
 - Dashboard `System` / `Light` / `Dark` theme support is merged in PR #65 and its frontend lint/typecheck/build/browser checks passed. Browser-based end-to-end critical-flow and accessibility tests remain.
