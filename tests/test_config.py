@@ -74,3 +74,53 @@ def test_production_api_rejects_worker_database_role():
     values.update(process_role="api")
     with pytest.raises(ValidationError, match="NOBYPASSRLS"):
         Settings(_env_file=None, **values)
+
+
+def test_generic_agency_mcp_does_not_require_managed_agents_or_anthropic_vault():
+    settings = Settings(
+        _env_file=None,
+        agency_mcp_enabled=True,
+        agency_mcp_public_base_url="https://agency.example.com",
+        agency_mcp_enabled_tool_keys="workspace.knowledge.search",
+    )
+    assert settings.agency_mcp_enabled is True
+    assert settings.claude_managed_agents_enabled is False
+    assert settings.claude_managed_mcp_vault_id == ""
+
+
+def test_generic_agency_mcp_rejects_local_or_non_https_origins():
+    with pytest.raises(ValidationError, match="public HTTPS origin"):
+        Settings(
+            _env_file=None,
+            agency_mcp_enabled=True,
+            agency_mcp_public_base_url="http://localhost:8000",
+            agency_mcp_enabled_tool_keys="workspace.knowledge.search",
+        )
+
+def test_production_generic_agency_mcp_does_not_require_anthropic_vault():
+    base = _production_worker_settings(
+        "postgresql+psycopg://agency_os_worker:" + "p" * 40 + "@db.example.com/agency"
+    ).model_dump()
+    base.update(
+        agency_mcp_enabled=True,
+        agency_mcp_public_base_url="https://agency.example.com",
+        agency_mcp_enabled_tool_keys="workspace.knowledge.search",
+    )
+    settings = Settings(_env_file=None, **base)
+    assert settings.agency_mcp_enabled is True
+    assert settings.claude_managed_mcp_vault_id == ""
+
+
+def test_agency_and_managed_agents_mcp_must_share_origin_and_allowlist_when_both_enabled():
+    with pytest.raises(ValidationError, match="share one public base URL"):
+        Settings(
+            _env_file=None,
+            agency_mcp_enabled=True,
+            agency_mcp_public_base_url="https://agency.example.com",
+            agency_mcp_enabled_tool_keys="workspace.knowledge.search",
+            claude_managed_agents_enabled=True,
+            claude_managed_mcp_enabled=True,
+            claude_managed_mcp_public_base_url="https://other.example.com",
+            claude_managed_mcp_vault_id="vlt_test",
+            claude_managed_mcp_enabled_tool_keys="workspace.knowledge.search",
+        )

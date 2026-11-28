@@ -1,8 +1,9 @@
-"""Claude Managed Agents MCP transport over the OS-owned Tool Gateway.
+"""Agency OS Streamable HTTP MCP transport over the OS-owned Tool Gateway.
 
-The transport is intentionally read-only in its first release. Authentication is
-session-scoped; every tool call revalidates the OS credential and then delegates
-to the same registered-tool authorization and persistence path as HTTP callers.
+The transport exposes only explicitly allowlisted read-only and pending-draft
+operations. Service machine bearers are bound to an active path session; agent
+session credentials remain execution-bound. Every list/call revalidates OS
+identity, session, workspace and tool policy before using the shared gateway.
 """
 from __future__ import annotations
 
@@ -11,6 +12,8 @@ import contextvars
 import hashlib
 import json
 import re
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 
@@ -29,8 +32,9 @@ from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.config import settings
-from app.db import SessionLocal
-from app.machine_identity import MachinePrincipal
+from app.db import SessionLocal, set_rls_context
+from app.machine_identity import MachinePrincipal, authenticate_machine_token
+from app.security_models import AgentSession, MachineIdentity
 from app.session_credentials import (
     SessionCredentialContext,
     authenticate_session_credential,
@@ -40,21 +44,148 @@ from app.tool_gateway import invoke_registered_tool
 from app.tool_gateway_routes import _agent_authorized_tool_data_classes
 from app.tool_registry import ToolSpec, get_tool, list_tools
 
+MCP_ALLOWED_TOOL_RISK_LEVELS = frozenset({"read_only", "write_draft"})
+
 _SESSION_PATH_RE = re.compile(r"^/(?P<session_id>[0-9a-fA-F-]{36})/?$")
-_CURRENT_SESSION: contextvars.ContextVar[SessionCredentialContext | None] = (
+@dataclass(frozen=True)
+class MachineIdentitySessionContext:
+    org_id: str
+    workspace_id: str
+    machine_identity_id: str
+    session_id: str
+    token_hash: str
+
+
+MCPAuthContext = SessionCredentialContext | MachineIdentitySessionContext
+_CURRENT_SESSION: contextvars.ContextVar[MCPAuthContext | None] = (
     contextvars.ContextVar("agency_os_mcp_session", default=None)
 )
 
 
-def _configured_tool_keys(config=settings) -> frozenset[str]:
-    return frozenset(
-        item.strip()
-        for item in config.claude_managed_mcp_enabled_tool_keys.split(",")
-        if item.strip()
+def authenticate_machine_session(
+    db, authorization: str | None, session_id: str,
+) -> MachineIdentitySessionContext:
+    """Authenticate a Cowork/Code service bearer against one active OS session path."""
+    principal = authenticate_machine_token(authorization, db)
+    identity = principal.identity
+    if identity.subject_type != "service" or not {
+        "sessions:create", "tools:invoke"
+    }.issubset(set(identity.scopes or [])):
+        raise HTTPException(401, "Invalid machine session credential")
+    session = db.query(AgentSession).filter_by(
+        id=session_id,
+        org_id=identity.org_id,
+        workspace_id=identity.workspace_id,
+        machine_identity_id=identity.id,
+    ).with_for_update().first()
+    now = datetime.now(timezone.utc)
+    if session is None:
+        raise HTTPException(401, "Invalid machine session credential")
+    expires_at = session.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if (
+        session.status != "active"
+        or expires_at <= now
+        or session.data_class not in {"synthetic", "public"}
+        or session.data_class not in (identity.allowed_data_classes or [])
+    ):
+        raise HTTPException(401, "Invalid machine session credential")
+    session.last_seen_at = now
+    db.commit()
+    return MachineIdentitySessionContext(
+        org_id=identity.org_id,
+        workspace_id=identity.workspace_id,
+        machine_identity_id=identity.id,
+        session_id=session.id,
+        token_hash=identity.token_hash,
     )
 
 
-def _visible_read_only_specs(
+def load_mcp_session_context(db, context: MCPAuthContext):
+    """Revalidate a session-bound bearer or a service machine bearer on every call."""
+    if isinstance(context, SessionCredentialContext):
+        return load_active_session_context(db, context)
+    set_rls_context(
+        db, machine_org_id=context.org_id, machine_workspace_id=context.workspace_id,
+    )
+    identity = db.query(MachineIdentity).filter_by(
+        id=context.machine_identity_id,
+        org_id=context.org_id,
+        workspace_id=context.workspace_id,
+    ).with_for_update().first()
+    session = db.query(AgentSession).filter_by(
+        id=context.session_id,
+        org_id=context.org_id,
+        workspace_id=context.workspace_id,
+        machine_identity_id=context.machine_identity_id,
+    ).with_for_update().first()
+    now = datetime.now(timezone.utc)
+    identity_expires_at = identity.expires_at if identity is not None else None
+    session_expires_at = session.expires_at if session is not None else None
+    if identity_expires_at is not None and identity_expires_at.tzinfo is None:
+        identity_expires_at = identity_expires_at.replace(tzinfo=timezone.utc)
+    if session_expires_at is not None and session_expires_at.tzinfo is None:
+        session_expires_at = session_expires_at.replace(tzinfo=timezone.utc)
+    if (
+        identity is None or identity.subject_type != "service"
+        or identity.token_hash != context.token_hash
+        or identity.revoked_at is not None or identity_expires_at <= now
+        or not {"sessions:create", "tools:invoke"}.issubset(set(identity.scopes or []))
+        or session is None or session.status != "active" or session_expires_at <= now
+        or session.data_class not in {"synthetic", "public"}
+        or session.data_class not in (identity.allowed_data_classes or [])
+    ):
+        raise HTTPException(401, "Invalid machine session credential")
+    return MachinePrincipal(identity=identity), session
+
+
+def _uses_agency_mcp_config(config=settings) -> bool:
+    return bool(getattr(config, "agency_mcp_enabled", False))
+
+
+def _configured_tool_keys(config=settings) -> frozenset[str]:
+    configured = (
+        config.agency_mcp_enabled_tool_keys
+        if _uses_agency_mcp_config(config)
+        else config.claude_managed_mcp_enabled_tool_keys
+    )
+    return frozenset(item.strip() for item in configured.split(",") if item.strip())
+
+
+def _configured_public_base_url(config=settings) -> str:
+    return (
+        config.agency_mcp_public_base_url
+        if _uses_agency_mcp_config(config)
+        else config.claude_managed_mcp_public_base_url
+    )
+
+
+def _configured_request_limit(config=settings) -> int:
+    return (
+        config.agency_mcp_requests_per_minute
+        if _uses_agency_mcp_config(config)
+        else config.claude_managed_mcp_requests_per_minute
+    )
+
+
+def _configured_concurrency(config=settings) -> int:
+    return (
+        config.agency_mcp_max_concurrent_requests
+        if _uses_agency_mcp_config(config)
+        else config.claude_managed_mcp_max_concurrent_requests
+    )
+
+
+def _configured_body_limit(config=settings) -> int:
+    return (
+        config.agency_mcp_max_request_body_bytes
+        if _uses_agency_mcp_config(config)
+        else config.claude_managed_mcp_max_request_body_bytes
+    )
+
+
+def _visible_mcp_specs(
     db,
     principal: MachinePrincipal,
     session,
@@ -62,25 +193,32 @@ def _visible_read_only_specs(
     enabled_tool_keys: frozenset[str],
 ) -> list[ToolSpec]:
     identity = principal.identity
-    if identity.subject_type != "agent":
+    if identity.subject_type not in {"agent", "worker", "service"}:
         return []
     if "tools:invoke" not in (identity.scopes or []):
         return []
-    workforce_grants = _agent_authorized_tool_data_classes(db, identity) or {}
+    # Agent identities need both machine scopes and a live workforce grant.
+    # Founder-provisioned worker/service identities use their explicit machine
+    # scopes as the grant; they never inherit another agent's capabilities.
+    workforce_grants = (
+        (_agent_authorized_tool_data_classes(db, identity) or {})
+        if identity.subject_type == "agent"
+        else None
+    )
     visible: list[ToolSpec] = []
     for spec in list_tools():
         if (
             spec.key not in enabled_tool_keys
             or f"tool:{spec.key}" not in (identity.scopes or [])
-            or spec.risk_level != "read_only"
+            or spec.risk_level not in MCP_ALLOWED_TOOL_RISK_LEVELS
             or spec.requires_approval
         ):
             continue
-        eligible_classes = (
-            set(identity.allowed_data_classes or [])
-            .intersection(spec.allowed_data_classes)
-            .intersection(workforce_grants.get(spec.key, set()))
+        eligible_classes = set(identity.allowed_data_classes or []).intersection(
+            spec.allowed_data_classes
         )
+        if workforce_grants is not None:
+            eligible_classes.intersection_update(workforce_grants.get(spec.key, set()))
         if session.data_class not in eligible_classes:
             continue
         visible.append(spec)
@@ -106,7 +244,7 @@ class SessionPathAuthMiddleware:
             or parsed.username or parsed.password or parsed.query or parsed.fragment
             or parsed.path not in ("", "/") or parsed.port not in (None, 443)
         ):
-            raise ValueError("Claude MCP public URL must be a public HTTPS origin")
+            raise ValueError("Agency MCP public URL must be a public HTTPS origin")
         self.origin = f"https://{parsed.netloc}"
         self.hosts = {parsed.netloc.lower(), f"{parsed.hostname.lower()}:443"}
         self.session_factory = session_factory
@@ -147,9 +285,14 @@ class SessionPathAuthMiddleware:
         authorization = headers.get("authorization")
         db = self.session_factory()
         try:
-            context = authenticate_session_credential(
-                db, authorization, requests_per_minute=self.requests_per_minute
-            )
+            if isinstance(authorization, str) and authorization.startswith("Bearer aos_mi_"):
+                context = authenticate_machine_session(
+                    db, authorization, match.group("session_id")
+                )
+            else:
+                context = authenticate_session_credential(
+                    db, authorization, requests_per_minute=self.requests_per_minute
+                )
         except HTTPException as exc:
             db.close()
             await PlainTextResponse(
@@ -182,27 +325,29 @@ class SessionPathAuthMiddleware:
 
 def create_mcp_gateway(config=settings, session_factory=SessionLocal):
     """Create the low-level MCP server, its ASGI app and the auth/path wrapper."""
-    if not config.claude_managed_mcp_enabled:
-        raise RuntimeError("Claude Managed Agents MCP is disabled")
+    if not (getattr(config, "agency_mcp_enabled", False) or config.claude_managed_mcp_enabled):
+        raise RuntimeError("Agency MCP transport is disabled")
     enabled_tool_keys = _configured_tool_keys(config)
     if not enabled_tool_keys:
-        raise RuntimeError("Claude Managed Agents MCP requires an explicit tool allowlist")
+        raise RuntimeError("Agency MCP requires an explicit tool allowlist")
     registry = {spec.key: spec for spec in list_tools()}
     unknown = enabled_tool_keys.difference(registry)
     unsafe = {
         key for key in enabled_tool_keys.intersection(registry)
-        if registry[key].risk_level != "read_only" or registry[key].requires_approval
+        if registry[key].risk_level not in MCP_ALLOWED_TOOL_RISK_LEVELS
+        or registry[key].requires_approval
     }
     if unknown or unsafe:
-        raise ValueError("Claude MCP allowlist may contain only registered read-only tools")
+        raise ValueError("Agency MCP allowlist may contain only registered read-only or pending-draft tools")
 
-    parsed = urlparse(config.claude_managed_mcp_public_base_url)
+    public_base_url = _configured_public_base_url(config)
+    parsed = urlparse(public_base_url)
     if (
         parsed.scheme != "https" or not parsed.hostname
         or parsed.username or parsed.password or parsed.query or parsed.fragment
         or parsed.path not in ("", "/") or parsed.port not in (None, 443)
     ):
-        raise ValueError("Claude MCP public URL must be a public HTTPS origin")
+        raise ValueError("Agency MCP public URL must be a public HTTPS origin")
     origin = f"https://{parsed.netloc}"
 
     async def list_tools_handler(
@@ -214,8 +359,8 @@ def create_mcp_gateway(config=settings, session_factory=SessionLocal):
             return ListToolsResult(tools=[])
         with session_factory() as db:
             try:
-                principal, session = load_active_session_context(db, context)
-                specs = _visible_read_only_specs(
+                principal, session = load_mcp_session_context(db, context)
+                specs = _visible_mcp_specs(
                     db, principal, session, enabled_tool_keys=enabled_tool_keys
                 )
                 return ListToolsResult(tools=[
@@ -259,8 +404,8 @@ def create_mcp_gateway(config=settings, session_factory=SessionLocal):
         payload: dict[str, Any] = params.arguments if isinstance(params.arguments, dict) else {}
         with session_factory() as db:
             try:
-                principal, session = load_active_session_context(db, context)
-                visible = _visible_read_only_specs(
+                principal, session = load_mcp_session_context(db, context)
+                visible = _visible_mcp_specs(
                     db, principal, session, enabled_tool_keys=enabled_tool_keys
                 )
                 if spec.key not in {item.key for item in visible}:
@@ -291,7 +436,7 @@ def create_mcp_gateway(config=settings, session_factory=SessionLocal):
     server = Server(
         "Agency OS",
         version="0.1.0",
-        instructions="Read-only tools are authorized by Agency OS for this exact workspace session.",
+        instructions="Only OS-authorized read-only tools and reviewable pending-draft submissions are available for this exact workspace session.",
         on_list_tools=list_tools_handler,
         on_call_tool=call_tool_handler,
     )
@@ -304,14 +449,14 @@ def create_mcp_gateway(config=settings, session_factory=SessionLocal):
         streamable_http_path="/",
         stateless_http=True,
         json_response=True,
-        max_request_body_size=config.claude_managed_mcp_max_request_body_bytes,
+        max_request_body_size=_configured_body_limit(config),
         transport_security=transport_security,
     )
     wrapped = SessionPathAuthMiddleware(
         mcp_app,
-        public_base_url=config.claude_managed_mcp_public_base_url,
+        public_base_url=public_base_url,
         session_factory=session_factory,
-        requests_per_minute=config.claude_managed_mcp_requests_per_minute,
-        semaphore=asyncio.Semaphore(config.claude_managed_mcp_max_concurrent_requests),
+        requests_per_minute=_configured_request_limit(config),
+        semaphore=asyncio.Semaphore(_configured_concurrency(config)),
     )
     return server, mcp_app, wrapped

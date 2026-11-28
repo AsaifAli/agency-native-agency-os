@@ -22,6 +22,7 @@ The OS Tool Gateway is the only intended path for machine identities to invoke A
 
 | Key | Version | Risk | Behavior |
 |---|---|---|---|
+| `workspace.knowledge.search` | `1.0.0` | Read-only | Searches approved, workspace-wide public knowledge only; excludes client-linked and non-public knowledge |
 | `system.health.read` | `1.0.0` | Read-only | Executes `SELECT 1` and returns API/database health; does not access client records |
 | `revenue.lead.research.capture` | `1.0.0` | Write draft | Saves public-source company research for founder review; does not create a CRM lead/contact or send outreach |
 
@@ -43,7 +44,8 @@ Example request body:
 
 ## Explicit limitations
 
-- No arbitrary shell, SQL, filesystem, browser, URL-fetch, MCP or provider tool execution is exposed.
+- No arbitrary shell, SQL, filesystem, browser, URL-fetch or provider tool execution is exposed.
+- MCP is an optional transport over the same gateway, disabled by default. It permits only explicitly allowlisted read-only or pending-draft tools.
 - Only the limited public research-draft tool is registered for Revenue. No other Revenue/Delivery business tools are enabled yet.
 - No external provider adapters or side-effecting tools are enabled.
 - Tools marked as requiring approval are rejected until a transactionally consumed approval adapter exists.

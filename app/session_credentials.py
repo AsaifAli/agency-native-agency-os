@@ -62,7 +62,7 @@ def issue_session_credential(
     provider_vault_id: str | None = None,
     max_active_vault_credentials: int = 16,
 ) -> IssuedSessionCredential:
-    """Create one short-lived credential under the caller's live execution transaction."""
+    """Create one short-lived credential for a live agent execution or service session."""
     now = now or datetime.now(timezone.utc)
     if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int) or not 60 <= ttl_seconds <= 3600:
         raise HTTPException(status_code=422, detail="Session credential TTL must be between 60 and 3600 seconds.")
@@ -91,6 +91,15 @@ def issue_session_credential(
         .with_for_update()
         .first()
     )
+    if identity is None:
+        raise HTTPException(status_code=403, detail="Machine identity is unavailable.")
+    if identity.subject_type == "service" and not {"sessions:create", "tools:invoke"}.issubset(
+        set(identity.scopes or [])
+    ):
+        raise HTTPException(status_code=403, detail="Service identity lacks MCP session scopes.")
+    if identity.subject_type == "service" and provider_vault_id is not None:
+        raise HTTPException(status_code=403, detail="Service MCP credentials cannot be attached to a provider Vault.")
+
     if (
         session is None
         or session.status != "active"
@@ -145,8 +154,34 @@ def issue_session_credential(
         request_count_window=0,
         provider_vault_id=provider_vault_id,
     )
-    db.add(credential)
-    db.flush()
+    if db.get_bind().dialect.name == "postgresql" and identity.subject_type == "service":
+        inserted = db.execute(
+            text("""
+                SELECT agency_os_private.issue_service_mcp_session_credential(
+                    :credential_id, :org_id, :workspace_id, :machine_identity_id,
+                    :session_id, :token_hash, :token_prefix, :expires_at, :created_at
+                )
+            """),
+            {
+                "credential_id": credential.id,
+                "org_id": identity.org_id,
+                "workspace_id": identity.workspace_id,
+                "machine_identity_id": identity.id,
+                "session_id": session.id,
+                "token_hash": credential.token_hash,
+                "token_prefix": credential.token_prefix,
+                "expires_at": credential.expires_at,
+                "created_at": now,
+            },
+        ).scalar_one()
+        if inserted is not True:
+            raise HTTPException(
+                status_code=409,
+                detail="OS could not issue a service session credential under the current identity/session policy.",
+            )
+    else:
+        db.add(credential)
+        db.flush()
     from app.audit import record_event
     record_event(
         db, identity.org_id, None, "machine_session_credential.issued",

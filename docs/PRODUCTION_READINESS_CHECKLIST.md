@@ -323,7 +323,7 @@ A feature is **production-ready** only when implementation, authorization, tenan
 - [ ] Complete unit, PostgreSQL 16, cross-workspace isolation, duplicate-call, stale-lease, revocation, crash-recovery and synthetic end-to-end tests before enabling.
 - [ ] First pilot is limited to `system.health.read` and public-only `revenue.lead.research.capture`; no CRM promotion, contacts, outbound dispatch, payments or production actions.
 
-**Current verified boundary:** The main branch has a REST Tool Gateway; the Managed Agents adapter still rejects provider custom tools and MCP servers. No provider tools have been enabled and no runtime code or production configuration has changed. The first implementation candidate is worker-mediated custom tools; MCP endpoint/vault work is deferred.
+**Historical baseline (before the November 2026 consolidated integration PR):** At that point, main had a REST Tool Gateway and the Managed Agents adapter rejected provider custom tools/MCP servers. The later consolidated integration branch adds the generic Agency MCP transport for founder-provisioned Code/Cowork service identities and keeps provider Vault-backed Managed Agents MCP separately disabled. This does not establish production activation or a live Cowork connection.
 
 
 ## Founder research review UI — 2026-11-25 (merged PR #39)

@@ -101,3 +101,8 @@ Cowork capabilities vary by plan, platform, rollout and settings. Local-file acc
 ## 10. Implementation status
 
 This document defines our intended operating model. It does not install Cowork plugins/connectors, provision Cowork Projects, synchronize OS memory, create an OS-Cowork integration or authorize client-data processing. Those require separate configuration, review and evidence.
+
+
+## Shared OS integration boundary
+
+Claude Code and Cowork must connect through the founder-provisioned, workspace-scoped Agency OS integration contract. See [Agent Integration Contract](AGENT_INTEGRATION_CONTRACT.md) for machine identities, short-lived session credentials, MCP/API scopes, public knowledge access, draft handoffs and verification gates. Cowork native connectors and local files remain separate trust boundaries and are not governed automatically by Agency OS RLS.

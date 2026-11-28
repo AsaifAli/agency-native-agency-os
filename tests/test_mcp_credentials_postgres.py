@@ -300,3 +300,131 @@ def test_mcp_credential_hash_is_not_readable_and_auth_is_database_owned():
         worker_engine.dispose()
         app_engine.dispose()
         admin_engine.dispose()
+
+
+def test_service_identity_mcp_credential_uses_narrow_database_capabilities():
+    """Interactive service credentials must not grant app-role table access."""
+    from app.machine_identity import authenticate_machine_token, create_agent_session
+    from app.session_credentials import (
+        authenticate_session_credential,
+        issue_session_credential,
+    )
+
+    admin_engine = create_engine(ADMIN_URL, pool_pre_ping=True)
+    app_engine = create_engine(APP_URL, pool_pre_ping=True)
+    Admin = sessionmaker(bind=admin_engine, expire_on_commit=False)
+    App = sessionmaker(bind=app_engine, expire_on_commit=False)
+    suffix = uuid.uuid4().hex[:12]
+    user = User(email=f"mcp-service-{suffix}@example.test")
+    org = Organization(name=f"MCP service boundary {suffix}")
+    now = datetime.now(timezone.utc)
+    raw_secret = "service-machine-secret-" + uuid.uuid4().hex
+    token_hash = hashlib.sha256(raw_secret.encode("utf-8")).hexdigest()
+    identity_id = str(uuid.uuid4())
+    session_id = str(uuid.uuid4())
+    credential_id = None
+    try:
+        with Admin() as db:
+            db.add_all([user, org])
+            db.flush()
+            workspace = Workspace(
+                id=f"mcp-service-ws-{suffix}", org_id=org.id,
+                name="MCP service workspace",
+            )
+            db.add(workspace)
+            db.flush()
+            identity = MachineIdentity(
+                id=identity_id, org_id=org.id, workspace_id=workspace.id,
+                name="Claude Code integration", subject_type="service",
+                subject_id="claude-code", token_hash=token_hash,
+                token_prefix=f"aos_mi_{identity_id}.",
+                scopes=["sessions:create", "tools:invoke", "tool:workspace.knowledge.search"],
+                allowed_data_classes=["public"],
+                expires_at=now + timedelta(hours=2), created_by_user_id=user.id,
+            )
+            db.add(identity)
+            db.commit()
+            org_id, workspace_id = org.id, workspace.id
+
+        with App() as db:
+            principal = authenticate_machine_token(
+                f"Bearer aos_mi_{identity_id}.{raw_secret}", db
+            )
+            session = create_agent_session(
+                db, principal, purpose="Claude Code integration session",
+                data_class="public", ttl_seconds=1800,
+            )
+            db.commit()
+            session_id = session.id
+            issued = issue_session_credential(
+                db, principal, session_id=session_id, ttl_seconds=600
+            )
+            credential_id = issued.credential_id
+            db.commit()
+
+            context = authenticate_session_credential(
+                db, "Bearer " + issued.token, requests_per_minute=30
+            )
+            assert context.org_id == org_id
+            assert context.workspace_id == workspace_id
+            assert context.machine_identity_id == identity_id
+            assert context.session_id == session_id
+
+            with pytest.raises(DBAPIError):
+                db.execute(text("SELECT token_hash FROM public.machine_session_credentials")).all()
+            db.rollback()
+
+            revoked_session = db.query(AgentSession).filter_by(
+                id=session_id, org_id=org_id, workspace_id=workspace_id,
+                machine_identity_id=identity_id,
+            ).with_for_update().one()
+            revoked_session.status = "cancelled"
+            revoked_session.ended_at = datetime.now(timezone.utc)
+            revoked_count = db.execute(text("""
+                SELECT agency_os_private.revoke_service_mcp_session_credentials(
+                    :org_id, :workspace_id, :identity_id, :session_id
+                )
+            """), {
+                "org_id": org_id, "workspace_id": workspace_id,
+                "identity_id": identity_id, "session_id": session_id,
+            }).scalar_one()
+            assert revoked_count == 1
+            db.commit()
+
+            with pytest.raises(Exception):
+                authenticate_session_credential(db, "Bearer " + issued.token)
+
+        with app_engine.connect() as connection:
+            privileges = connection.execute(text("""
+                SELECT
+                    has_table_privilege(current_user, 'public.machine_session_credentials', 'SELECT'),
+                    has_table_privilege(current_user, 'public.machine_session_credentials', 'INSERT'),
+                    has_table_privilege(current_user, 'public.machine_session_credentials', 'UPDATE'),
+                    has_function_privilege(current_user,
+                      'agency_os_private.issue_service_mcp_session_credential(text,text,text,text,text,text,text,timestamptz,timestamptz)', 'EXECUTE'),
+                    has_function_privilege(current_user,
+                      'agency_os_private.revoke_service_mcp_session_credentials(text,text,text,text)', 'EXECUTE')
+            """)).one()
+            assert tuple(privileges) == (False, False, False, True, True)
+
+        with Admin() as db:
+            credential = db.get(MachineSessionCredential, credential_id)
+            assert credential is not None
+            assert credential.token_hash == hashlib.sha256(
+                issued.token.split(".", 1)[1].encode("utf-8")
+            ).hexdigest()
+            assert credential.revoked_at is not None
+            assert credential.provider_credential_id is None
+    finally:
+        with Admin() as db:
+            if credential_id:
+                db.query(MachineSessionCredential).filter_by(id=credential_id).delete(synchronize_session=False)
+            if session_id:
+                db.query(AgentSession).filter_by(id=session_id).delete(synchronize_session=False)
+            db.query(MachineIdentity).filter_by(id=identity_id).delete(synchronize_session=False)
+            db.query(Workspace).filter(Workspace.id == f"mcp-service-ws-{suffix}").delete(synchronize_session=False)
+            db.query(User).filter(User.id == user.id).delete(synchronize_session=False)
+            db.query(Organization).filter(Organization.id == org.id).delete(synchronize_session=False)
+            db.commit()
+        app_engine.dispose()
+        admin_engine.dispose()

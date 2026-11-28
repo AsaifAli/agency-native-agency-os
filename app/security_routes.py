@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel, Field, field_validator
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth import Principal, get_principal, require_founder_authority, require_workspace_access_from_context
@@ -13,7 +14,8 @@ from app.machine_identity import (
     create_agent_session, get_machine_principal, issue_machine_credential,
 )
 from app.models import Agent, Workspace
-from app.security_models import AgentSession, MachineIdentity
+from app.security_models import AgentSession, MachineIdentity, MachineSessionCredential
+from app.session_credentials import MCPVaultCapacityError, issue_session_credential
 
 router = APIRouter(tags=["machine-security"])
 
@@ -68,6 +70,10 @@ class MachineSessionCreate(BaseModel):
     purpose: str = Field(min_length=2, max_length=240)
     data_class: str = "synthetic"
     ttl_seconds: int = Field(default=3600, ge=60, le=86400)
+
+
+class MachineSessionCredentialCreate(BaseModel):
+    ttl_seconds: int = Field(default=900, ge=60, le=3600)
 
 
 @router.post("/v1/orgs/{org_id}/machine-identities", status_code=201)
@@ -161,3 +167,103 @@ def create_machine_session(
     return {"id": session.id, "org_id": session.org_id, "workspace_id": session.workspace_id,
             "machine_identity_id": session.machine_identity_id, "purpose": session.purpose,
             "data_class": session.data_class, "status": session.status, "expires_at": session.expires_at}
+
+
+@router.post("/v1/machine/sessions/{session_id}/mcp-credential", status_code=201)
+def create_machine_session_mcp_credential(
+    session_id: str,
+    body: MachineSessionCredentialCreate,
+    db: Session = Depends(get_db),
+    principal: MachinePrincipal = Depends(get_machine_principal),
+):
+    """Mint one short-lived, one-session MCP bearer for a provisioned identity."""
+    if principal.identity.subject_type != "service":
+        raise HTTPException(403, "Only founder-provisioned service identities may mint interactive MCP credentials")
+    if not {"sessions:create", "tools:invoke"}.issubset(set(principal.identity.scopes or [])):
+        raise HTTPException(403, "Machine identity cannot create session credentials")
+    try:
+        issued = issue_session_credential(
+            db, principal, session_id=session_id, ttl_seconds=body.ttl_seconds
+        )
+    except MCPVaultCapacityError as exc:
+        raise HTTPException(503, "MCP credential capacity is unavailable") from exc
+    except HTTPException:
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    db.commit()
+    return {
+        "credential_id": issued.credential_id,
+        "session_id": session_id,
+        "token": issued.token,
+        "expires_at": issued.expires_at,
+        "credential_version": issued.credential_version,
+        "warning": "This session credential is shown once. Store it in the MCP client's secret store; do not place it in prompts, source control, or logs.",
+    }
+
+
+@router.post("/v1/machine/sessions/{session_id}/revoke")
+def revoke_machine_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+    principal: MachinePrincipal = Depends(get_machine_principal),
+):
+    """Revoke one session and all of its credentials for the owning identity."""
+    identity = principal.identity
+    session = (
+        db.query(AgentSession)
+        .filter_by(
+            id=session_id, org_id=identity.org_id,
+            workspace_id=identity.workspace_id, machine_identity_id=identity.id,
+        )
+        .first()
+    )
+    if session is None:
+        raise HTTPException(404, "Machine session not found")
+    if identity.subject_type != "service":
+        raise HTTPException(403, "Only founder-provisioned service identities may revoke interactive MCP sessions")
+    if not {"sessions:create", "tools:invoke"}.issubset(set(identity.scopes or [])):
+        raise HTTPException(403, "Machine identity cannot revoke MCP sessions")
+    now = datetime.now(timezone.utc)
+    if db.get_bind().dialect.name == "postgresql":
+        revoked_count = db.execute(
+            text("""
+                SELECT agency_os_private.revoke_service_mcp_session_credentials(
+                    :org_id, :workspace_id, :machine_identity_id, :session_id
+                )
+            """),
+            {
+                "org_id": identity.org_id,
+                "workspace_id": identity.workspace_id,
+                "machine_identity_id": identity.id,
+                "session_id": session.id,
+            },
+        ).scalar_one()
+        if revoked_count < 0:
+            raise HTTPException(403, "Session revocation was denied by OS policy")
+    else:
+        credentials = (
+            db.query(MachineSessionCredential)
+            .filter_by(
+                org_id=identity.org_id, workspace_id=identity.workspace_id,
+                machine_identity_id=identity.id, session_id=session.id,
+            )
+            .with_for_update()
+            .all()
+        )
+        revoked_count = 0
+        for credential in credentials:
+            if credential.revoked_at is None:
+                credential.revoked_at = now
+                revoked_count += 1
+    if session.status == "active":
+        session.status = "cancelled"
+        session.ended_at = now
+    record_event(
+        db, identity.org_id, None, "agent_session.revoked",
+        "agent_session", session.id, identity.workspace_id,
+        {"revoked_count": revoked_count},
+    )
+    db.commit()
+    return {"session_id": session.id, "revoked": True, "credentials_revoked": revoked_count}

@@ -45,7 +45,7 @@ The former Command Center and Evaluation Harness repositories are **not separate
 - Workers execute through OS authorization and persisted execution records.
 - Runtime/provider adapters cannot bypass OS policy or write business state independently.
 - Workforce activation and capability enablement are founder-only, opt-in operations. Capabilities default disabled.
-- Tool grants remain disabled until the OS MCP gateway and scoped tool authorization are implemented.
+- Optional Streamable HTTP MCP integration for founder-provisioned Code/Cowork/service identities is disabled by default (`AGENCY_MCP_ENABLED`); see [Agent Integration Contract](docs/AGENT_INTEGRATION_CONTRACT.md). Managed Agents provider MCP remains a separate Vault-backed integration.
 - The Chief of Staff can prepare a bounded Claude plan draft through a dedicated tool-free capability; drafts require explicit founder review and assignment before any tasks are materialized. This integration is merged to main via PR #11 (`9674c40f08228b032ae79f8e9df590609d8463df`).
 - Claude plan drafting is a proposal workflow, not autonomous execution. Managed Agents remains disabled by default; no live provider configuration or client-data eligibility is implied.
 - Managed Agents is beta and is not eligible for ZDR or HIPAA BAA. The current adapter is opt-in and synthetic-first; live provider setup and production eligibility are not claimed.

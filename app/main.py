@@ -86,7 +86,7 @@ from app.execution_service import (
 _mcp_server = None
 _mcp_subapp = None
 _mcp_asgi_app = None
-if settings.claude_managed_mcp_enabled:
+if settings.agency_mcp_enabled or settings.claude_managed_mcp_enabled:
     from app.mcp_server import create_mcp_gateway
     _mcp_server, _mcp_subapp, _mcp_asgi_app = create_mcp_gateway()
 
@@ -111,10 +111,18 @@ app = FastAPI(
     description="Founder-controlled Agency OS foundation", lifespan=lifespan,
 )
 if _mcp_asgi_app is not None:
+    # Generic OS integration endpoint for founder-provisioned Code, Cowork,
+    # and service identities. Keep the Claude-specific path as a compatibility
+    # alias; both mounts share the same authentication and Tool Gateway.
+    app.mount(
+        "/v1/integrations/agency/mcp/sessions",
+        _mcp_asgi_app,
+        name="agency-mcp",
+    )
     app.mount(
         "/v1/integrations/claude/mcp/sessions",
         _mcp_asgi_app,
-        name="claude-managed-mcp",
+        name="claude-managed-mcp-compat",
     )
 
 configure_oidc()

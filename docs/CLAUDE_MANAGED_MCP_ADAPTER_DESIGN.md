@@ -12,7 +12,7 @@ MCP transport belongs to the Claude Managed Agents integration layer. It is not 
 - The OS owns machine identity, AgentSession, session credentials, workspace scope, RBAC/ABAC, workforce grants, data-class eligibility, approvals, idempotency, tool execution, persisted results and audit.
 - Every MCP invocation must call the existing `app.tool_gateway.invoke_registered_tool`. Do not duplicate policy checks in the MCP server or create a second tool registry.
 - The MCP endpoint is a transport façade over the Tool Gateway. It cannot access core business tables directly.
-- Start read-only. Tools requiring approval or external side effects remain unavailable until an approval adapter can consume the approval and protected action atomically.
+- The transport permits only explicitly allowlisted `read_only` or `write_draft` tools. Draft tools must stop at a persisted review state; tools requiring approval or external side effects remain unavailable until an approval adapter can consume the approval and protected action atomically.
 
 ## 2. Provider contract and constraints
 
@@ -41,7 +41,7 @@ A long-lived MachineIdentity bearer token alone is insufficient for MCP because 
 1. The worker, under its live execution capability, creates an OS AgentSession bound to the execution's exact org, workspace, agent MachineIdentity and allowed data class.
 2. The OS generates a high-entropy session token. Only its SHA-256 digest and non-secret display prefix are stored. The raw token exists only in worker memory until it is sent over TLS to the Anthropic Vault API; it must never enter prompts, logs, traces, audit payloads or source control.
 3. The credential is bound to the AgentSession and expires no later than the AgentSession or MachineIdentity. Revocation/expiry of either parent makes the credential unusable.
-4. The public MCP URL is session-specific, for example `https://<configured-host>/v1/integrations/claude/mcp/sessions/<agent_session_id>`. The path identifies the OS session; the bearer token authenticates it. The path is not a secret.
+4. The public MCP URL is session-specific, for example `https://<configured-host>/v1/integrations/agency/mcp/sessions/<agent_session_id>`. The path identifies the OS session; the bearer token authenticates it. The path is not a secret.
 5. The MCP authentication boundary validates the path session ID and bearer digest together, then establishes the exact org/workspace/machine identity context before loading any tenant data.
 6. The credential lookup must use a narrowly scoped SECURITY DEFINER function that returns only minimal session context. The app role must not receive direct SELECT access to the credential table. Worker writes must be bound to the current execution capability and that execution's agent.
 7. Store provider Vault credential ID and provider session ID as non-secret external references on OS-owned session/execution records. Never store the raw bearer token.
@@ -76,7 +76,7 @@ External calls occur outside database transactions. Persist intent and reference
   - explicitly scoped to the MachineIdentity;
   - allowed by the active workforce member and capability grant for this tool/action/scope;
   - allowed for the AgentSession data class;
-  - read-only and not approval-gated.
+  - registered as `read_only` or `write_draft` and not approval-gated.
 - Discovery is advisory. Invocation rechecks all authorization under the existing Tool Gateway's database locks and persists the ToolInvocation plus audit event.
 - Derive the MCP idempotency key from the stable AgentSession ID, MCP request ID and tool key. Reuse of a key with a different request hash must fail closed.
 - Return generic policy-denial text to the provider. Do not disclose tenant existence, internal IDs, database errors, credentials or policy implementation details.
@@ -86,7 +86,7 @@ External calls occur outside database transactions. Persist intent and reference
 - MachineIdentity and AgentSession allowed data classes are authoritative; MCP configuration cannot widen them.
 - Initial eligibility is synthetic/public only. Commercial, confidential and regulated data remain denied until a separately reviewed runtime eligibility policy and provider contract permit them.
 - Apply the Data Protection Gateway to every tool input and output using the existing Tool Gateway path.
-- The session credential must be scoped to one AgentSession and one workspace. Wrong path, wrong token, expired/revoked session, revoked MachineIdentity, mismatched workspace or missing workforce grant must all be denied.
+- The session credential must be scoped to one AgentSession and one workspace. Interactive `service` identities are provisioned by the founder and use exact machine scopes; `agent` identities additionally require workforce grants. Wrong path, wrong token, expired/revoked session, revoked MachineIdentity, mismatched workspace or missing grant must all be denied.
 - No arbitrary MCP URLs, caller-selected tools, user-controlled headers, custom network targets or provider-supplied tool permissions are trusted.
 - No direct MCP access to PostgreSQL models, filesystem, object storage, provider secrets or worker internals.
 
@@ -139,14 +139,14 @@ External calls occur outside database transactions. Persist intent and reference
 
 ### Implemented in the consolidated branch
 
-- Optional Streamable HTTP MCP ASGI transport mounted at `/v1/integrations/claude/mcp/sessions/{agent_session_id}`; the route is absent unless explicitly enabled.
+- Optional Streamable HTTP MCP ASGI transport mounted at `/v1/integrations/agency/mcp/sessions/{agent_session_id}`; the route is absent unless explicitly enabled. The former Claude-specific route remains a compatibility alias.
 - Session-path plus high-entropy bearer authentication. Only a SHA-256 token digest is persisted; raw bearer material is returned once to the worker adapter and sent only to Anthropic Vault over HTTPS.
 - PostgreSQL-backed authentication, expiry, revocation and request-rate limiting. Worker issuance is execution-capability-bound; provider Vault references are loaded and updated through worker-only SECURITY DEFINER functions. Neither API nor worker roles receive direct SELECT access to credential hashes.
 - Host and Origin validation, MCP SDK DNS-rebinding protection, request-body limit and per-process concurrency limit.
-- Read-only MCP discovery and invocation through the existing Tool Gateway. Discovery filters by agent scopes, workforce grants, allowed data class, explicit tool allowlist and tool risk. The server does not have a second tool registry or direct business-table access.
+- MCP discovery and invocation through the existing Tool Gateway. Discovery filters service identities by founder-granted machine scopes and agent identities by machine scopes plus workforce grants, allowed data class, explicit tool allowlist and tool risk. The server does not have a second tool registry or direct business-table access.
 - Managed Agents adapter support for environment-network validation, Vault static-bearer creation, exact metadata reconciliation after ambiguous Vault creates, session-local `agent_with_overrides`, `mcp_toolset`, `mcp_servers`, `vault_ids`, and credential archive/revocation.
 - Interrupted credential setup is detected through the OS-owned execution lookup. The adapter revokes/archives an orphan rather than blindly creating a second provider session.
-- The route and provider integration remain disabled by default; only explicitly configured read-only tools can be enabled.
+- The route and provider integration remain disabled by default; only explicitly configured read-only or pending-draft tools can be enabled. Founder-provisioned service/worker identities may use their exact machine scopes; agent identities additionally require workforce grants.
 
 ### Not yet verified
 
@@ -160,7 +160,7 @@ External calls occur outside database transactions. Persist intent and reference
 - Add a bounded cleanup/reconciliation worker for credentials left in `delete_pending` after a provider archive failure. Until then, the OS bearer is revoked immediately and provider-side archival failures require manual reconciliation.
 - Add a staging smoke test against a dedicated Anthropic Vault and limited-network cloud Environment using synthetic data.
 - Add multi-replica concurrency, crash-after-provider-call, lease-expiry and provider credential cleanup drills.
-- Keep write tools, approval-bearing tools, client-data tools and external side effects disabled until an OS approval adapter consumes approval and action atomically and passes negative tests.
+- Keep approval-bearing tools, client-data tools and external side effects disabled until an OS approval adapter consumes approval and action atomically and passes negative tests. The only current write-draft tool is public-source research capture, which remains `pending_review`.
 - Workforce `budget_minor` is not yet a fully enforced runtime spend cap; provider spend reservation/settlement remains a separate gap.
 - The initial transport concurrency semaphore is per API process; database request-rate limiting is shared. A global in-flight concurrency cap across multiple API replicas is not yet implemented.
 
@@ -169,5 +169,5 @@ External calls occur outside database transactions. Persist intent and reference
 1. Configure a public HTTPS API origin that routes the MCP session path to the Agency OS API.
 2. Create a dedicated Anthropic Vault for this environment and set `CLAUDE_MANAGED_MCP_VAULT_ID`.
 3. Configure the Managed Agents Environment as `cloud` with `networking.type=limited`, `allow_mcp_servers=false`, and the exact MCP hostname in `allowed_hosts`.
-4. Set `CLAUDE_MANAGED_MCP_PUBLIC_BASE_URL` and a reviewed comma-separated `CLAUDE_MANAGED_MCP_ENABLED_TOOL_KEYS` allowlist. The current first-release surface is read-only.
+4. Set `CLAUDE_MANAGED_MCP_PUBLIC_BASE_URL` and a reviewed comma-separated `CLAUDE_MANAGED_MCP_ENABLED_TOOL_KEYS` allowlist. The supported transport permits only read-only or pending-draft tools; see [Agent Integration Contract](AGENT_INTEGRATION_CONTRACT.md).
 5. Keep `CLAUDE_MANAGED_MCP_ENABLED=false` until a synthetic-data staging smoke test verifies the full provider/Vault/MCP/Tool Gateway lifecycle.

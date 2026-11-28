@@ -1,6 +1,6 @@
 # Claude Managed Agents — OS Tool Bridge Design
 
-**Status:** Design decision only. No provider-side tools, MCP connection, session credential, or autonomous side effect is enabled. The first integration candidate is Managed Agents custom tools handled by the OS worker; the MCP connector path is deferred pending a specific need for provider-initiated HTTP connectivity.
+**Status:** The Managed Agents provider-side custom-tool bridge remains a design/adapter boundary and is not activated against Anthropic. The generic Agency OS MCP transport is implemented for founder-provisioned Code/Cowork service identities and can also serve execution-bound OS agents when explicitly configured. Provider Vault-backed MCP remains separately disabled until its end-to-end lifecycle is verified.
 
 ## 1. Objective
 
@@ -178,4 +178,9 @@ This is an architecture review only. No custom tools have been enabled and no co
 
 ## Claude-side MCP boundary
 
-MCP is implemented, if required by the selected Claude experience, as a thin Claude integration adapter. It is not a standalone core OS service or an alternative tool authorization plane. The adapter forwards tool calls to the authenticated OS Tool Gateway; the OS rechecks the workforce member, exact enabled tool/action/data-class/scope grant, machine identity/session, workspace, data-protection policy, budget and approvals. The adapter owns only protocol translation and connection lifecycle. The OS remains authoritative for executions, results, business records, idempotency and audit. Native Managed Agents custom-tool event callbacks remain a distinct transport and do not imply that an MCP server must be exposed.
+The generic Streamable HTTP MCP transport is implemented as a thin integration adapter, not a standalone core OS service or alternative authorization plane. It forwards calls to the authenticated OS Tool Gateway. The OS rechecks service machine scopes or, for agent identities, the exact workforce capability grant; it also enforces session, workspace, data-class, DPG, idempotency and audit policy. The adapter owns only protocol translation and connection lifecycle. The OS remains authoritative for executions, results, business records, approvals and audit. Native Managed Agents custom-tool event callbacks remain a distinct transport and do not imply that provider-side MCP/Vault integration must be enabled.
+
+
+## Shared client integration note
+
+The provider-specific Managed Agents worker callback remains the preferred autonomous execution path and is not enabled merely by adding the generic MCP transport. Claude Code and Cowork use the shared, founder-provisioned Agency OS integration boundary described in [Agent Integration Contract](AGENT_INTEGRATION_CONTRACT.md). The generic MCP transport does not replace Managed Agents execution leases, provider event reconciliation or worker-owned execution state.
