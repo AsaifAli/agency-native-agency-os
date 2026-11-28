@@ -309,8 +309,7 @@ def upgrade() -> None:
                AND agency_os_private.worker_has_execution_context(e.org_id, e.workspace_id, e.id)
                AND cred.revoked_at IS NULL
                AND cred.expires_at > clock_timestamp()
-               AND cred.provider_credential_status = 'active'
-               AND cred.provider_credential_id IS NOT NULL
+               AND cred.provider_credential_status IN ('not_created', 'active')
              FOR UPDATE OF cred;
         END
         $function$
