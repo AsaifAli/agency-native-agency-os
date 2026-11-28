@@ -1,10 +1,9 @@
 # Agency OS — authoritative implementation status
 
-**Last reconciled:** 2026-11-28 16:30 UTC  
-**Source of truth:** `main` at `f07a8b7b8a864cbc08da35bf4b4c422cd4baf25e`.  
-**Consolidation:** [PR #71](https://github.com/AsaifAli/agency-native-agency-os/pull/71) was merged into `main` at 2026-11-28 16:28:33 UTC. Its integration branch is historical; continue work on `main` rather than opening parallel feature branches.  
-**Included work:** PRs #68, #69 and #70, plus the learning/Cowork/Code integration work in PR #71, are now on `main`.  
-**Latest main CI:** [Run 46165349483](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46165349483) completed successfully. Backend and frontend jobs passed, including PostgreSQL role bootstrap/migrations/integration tests, Python compilation, hardened runtime image checks, frontend typecheck and production build. No new test count is inferred from job status alone.  
+**Last reconciled:** 2026-11-28 16:40 UTC  
+**Working branch:** `main` is the single active integration branch for founder-authorized work. Do not create parallel feature branches or PRs unless explicitly requested.  
+**Verified code baseline:** PR #71 was merged into `main` at 2026-11-28 16:28:33 UTC; merged code commit `f07a8b7b8a864cbc08da35bf4b4c422cd4baf25e`. PRs #68, #69 and #70, plus the learning/Cowork/Code integration work in PR #71, are included.  
+**Code-baseline CI:** [Run 46165349483](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46165349483) completed successfully. Backend and frontend jobs passed, including PostgreSQL role bootstrap/migrations/integration tests, Python compilation, hardened runtime image checks, frontend typecheck and production build. Subsequent changes to `IMPLEMENTATION_STATUS.md` and `CLAUDE.md` are documentation-only; follow-up CI is triggered by those commits. No new test count is inferred from job status alone.  
 **Release posture:** **NO-GO for production.** Green CI does not establish live provider compatibility, staging isolation, backup restore, operational readiness or compliance.
 
 This file describes the merged `main` baseline. Historical PR/branch checkpoints remain historical evidence, not active integration work. See `docs/CONSOLIDATION_EXECUTION_LEDGER.md` and `docs/PRODUCTION_GRADE_MASTER_CHECKLIST.md` for historical integration and release gates.
@@ -122,6 +121,7 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 - Metrics/logs/traces, alert routing, dashboards, cost visibility, dependency/container/SAST/secret/license scans and SBOM.
 - Encrypted PostgreSQL and object-artifact backups; isolated restore drill; measured RPO/RTO and recovery runbooks.
 - Separate dev/staging/production configuration and credentials; staging synthetic acceptance; controlled migration/release/rollback.
+- External deployment inspection on 2026-11-28: the connected Render workspace has no Agency OS API service, Render-managed PostgreSQL instance or Render Key Value instance. The Cloudflare `studio` Worker has no Agency OS API URL/service binding in its runtime settings. The live Code/Cowork MCP smoke test therefore remains blocked until a controlled staging API ingress and its database/cache/secrets are provisioned and verified. A suspended n8n service exists in Render, but the current native Python worker + PostgreSQL outbox design does not require reactivating it.
 - Configure and verify Authentik, Claude, research sources, email/webhooks, object storage and website intake only with synthetic data and explicit authorization.
 - Website signed lead bridge is implemented in both repositories but remains disabled until matching server-only secrets, fixed org/workspace mapping, HTTPS, external configuration and synthetic idempotency/recovery tests are complete.
 
