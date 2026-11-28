@@ -302,12 +302,19 @@ class Execution(Base):
             ondelete="RESTRICT",
             name="fk_execution_agent_version_scope",
         ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "workforce_member_id"],
+            ["workforce_members.org_id", "workforce_members.workspace_id", "workforce_members.id"],
+            ondelete="RESTRICT",
+            name="fk_execution_workforce_member_scope",
+        ),
         Index(
             "ix_execution_org_workspace_status_created",
             "org_id", "workspace_id", "status", "created_at",
         ),
         Index("ix_execution_task_id", "task_id"),
         Index("ix_execution_agent_version_id", "agent_version_id"),
+        Index("ix_execution_workforce_member_id", "workforce_member_id"),
         Index(
             "ix_execution_status_retry_queued",
             "status",
@@ -331,6 +338,7 @@ class Execution(Base):
     )
     agent_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     required_capability_action: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    workforce_member_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     requested_by: Mapped[str] = mapped_column(
         ForeignKey("users.id"), nullable=False
     )
