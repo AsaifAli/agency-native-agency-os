@@ -261,7 +261,8 @@ def process_one_execution(
         request = ExecutionRequest(
             org_id=execution.org_id, workspace_id=execution.workspace_id,
             task_id=execution.task_id, agent_id=execution.agent_id,
-            data_class=execution.data_class, client_authorized=execution.client_authorized,
+            data_class=execution.data_class, execution_id=execution.id,
+            client_authorized=execution.client_authorized,
             agent_name=agent.name, agent_department=agent.department,
             agent_instructions=agent.instructions, task_title=task.title,
             task_description=task.description,
