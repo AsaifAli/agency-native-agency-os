@@ -135,3 +135,16 @@ The code confirms `WorkforceCapability.budget_minor` is a per-member/per-capabil
 A safe implementation recommendation is a **separate workspace provider-spend account denominated in USD cents**, because current Anthropic list-cost usage is USD. A future ledger should reserve the configured maximum session cost before dispatch, settle each provider attempt from validated usage, keep ambiguous outcomes reserved pending reconciliation, and use a PostgreSQL-serialized reservation so concurrent workers cannot overspend. Member/capability sublimits can be layered later without converting or reinterpreting INR capability metadata.
 
 Before enforcement is implemented, the founder must choose whether the workspace account is a hard cumulative lifetime cap or a calendar-month cap (UTC), and set its USD-cent limit. No default limit or FX conversion is inferred. The existing per-session provider cap remains the only enforced monetary ceiling today.
+
+## 7. Thread-scope integrity limitation
+
+The current `Artifact` metadata model stores `scope_type='thread'` with a bounded opaque `scope_id`, but this repository does not currently define a canonical conversation/thread table to which that identifier can be foreign-keyed. PostgreSQL RLS proves organization/workspace isolation; it does **not** prove that an arbitrary thread ID belongs to that workspace. There is no upload/download route today, so this is not an enabled access path, but it is a required gate before thread-scoped artifacts can be created or retrieved.
+
+Before enabling thread-scoped uploads, one of these must be implemented and tested:
+
+1. An OS-owned thread registry with a composite `(org_id, workspace_id, thread_id)` foreign key from artifacts; or
+2. A trusted integration-owned thread registry/authorization adapter that resolves the exact thread and workspace on every create/read/delete operation, with a durable ownership binding in OS metadata.
+
+Never authorize thread access from a caller-supplied thread ID, provider session ID, URL path, or metadata field alone. A thread artifact must remain inaccessible to sibling threads in the same workspace unless a separate explicit workspace-level artifact reference is created. Until this binding exists, treat `scope_type='thread'` as a metadata placeholder only and do not expose it in an API.
+
+The scanner gate was tightened in commit `d0b4067`: scanner responses must be mappings with exactly three string fields (`status`, `scanner`, `version`) and an explicit `clean` status. Malformed types, extra/contradictory fields, missing scanner identity, and non-clean outcomes fail closed. The upload validator also rejects boolean/non-integer size limits and missing/non-string declared media types.
