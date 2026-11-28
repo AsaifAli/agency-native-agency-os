@@ -6,7 +6,7 @@ Migration `t0a1b2c3d4e5` enables and FORCEs RLS for organization-scoped model ta
 
 **Validation status:** the user applied migration `u1b2c3d4e5f6` and completed the worker role grant/bootstrap step against the isolated PostgreSQL Compose test database. The configured `postgres-tests` image then passed **22 tests (22 passed, 0 failed)**, including the worker-role RLS integration tests. This is isolated local test evidence, not a production migration rehearsal or production approval. The assistant-side development environment has no Docker daemon or live PostgreSQL service.
 
-Human organization membership currently grants access to all workspaces in that organization. There is no per-user workspace membership/assignment model yet; human workspace restrictions still rely on route-level `org_id`/`workspace_id` checks. Machine identities are database-enforced to their exact workspace.
+Human access requires both active organization membership and an explicit, auditable `workspace_grants` row. Existing membership access was backfilled when the workspace-grant migration was introduced; future workspace access changes are explicit. Machine identities are database-enforced to their exact workspace. Worker data access uses a separate execution- or maintenance-capability context.
 
 ## Roles
 
@@ -48,7 +48,7 @@ Do not reset/delete the volume. Back up first.
 - Signed website intake binds only its configured org/workspace after signature and idempotency checks.
 - SQLAlchemy reapplies context after each new transaction. `set_config(..., true)` resets at commit/rollback so pooled connections do not retain a previous request's tenant identity.
 - A restricted `SECURITY DEFINER` membership predicate is owned by `agency_os_migrator`; execute is revoked from PUBLIC and granted to API and worker roles. For `session_user = 'agency_os_worker'`, it always returns false so the worker cannot use it as a membership oracle.
-- Worker scope enumeration returns only org/workspace identifiers. All worker data queries use a workspace-scoped session factory. Execution attempts inherit their parent execution's RLS scope.
+- Worker scope discovery is an atomic, bounded claim, not a global workspace list. Execution work uses a PID/transaction-bound lease capability; maintenance uses a separate short-lived workspace capability. Execution attempts inherit their parent execution's RLS scope.
 - Browser-session retention is a bounded, audited SECURITY DEFINER operation; the worker has no direct browser-session table privileges.
 - Default privileges no longer automatically grant future public tables or sequences to the worker; new worker dependencies require explicit reviewed grants.
 
