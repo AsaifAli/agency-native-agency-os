@@ -223,37 +223,39 @@ def upgrade() -> None:
             p_machine_identity_id text,
             p_session_id text
         ) RETURNS boolean
-        LANGUAGE sql
+        LANGUAGE plpgsql
         VOLATILE
         SECURITY DEFINER
         SET search_path = pg_catalog, public, agency_os_private
         AS $function$
-            SELECT EXISTS (
-                SELECT 1
-                FROM public.machine_session_credentials AS cred
-                JOIN public.machine_identities AS mi
-                  ON mi.id = cred.machine_identity_id
-                 AND mi.org_id = cred.org_id
-                 AND mi.workspace_id = cred.workspace_id
-                JOIN public.agent_sessions AS s
-                  ON s.id = cred.session_id
-                 AND s.org_id = cred.org_id
-                 AND s.workspace_id = cred.workspace_id
-                 AND s.machine_identity_id = mi.id
-                WHERE cred.id = p_credential_id
-                  AND cred.token_hash = p_token_hash
-                  AND cred.org_id = p_org_id
-                  AND cred.workspace_id = p_workspace_id
-                  AND cred.machine_identity_id = p_machine_identity_id
-                  AND cred.session_id = p_session_id
-                  AND cred.revoked_at IS NULL
-                  AND cred.expires_at > clock_timestamp()
-                  AND mi.revoked_at IS NULL
-                  AND mi.expires_at > clock_timestamp()
-                  AND s.status = 'active'
-                  AND s.expires_at > clock_timestamp()
-                  AND s.data_class IN ('synthetic', 'public')
-            )
+        BEGIN
+            PERFORM 1
+              FROM public.machine_session_credentials AS cred
+              JOIN public.machine_identities AS mi
+                ON mi.id = cred.machine_identity_id
+               AND mi.org_id = cred.org_id
+               AND mi.workspace_id = cred.workspace_id
+              JOIN public.agent_sessions AS s
+                ON s.id = cred.session_id
+               AND s.org_id = cred.org_id
+               AND s.workspace_id = cred.workspace_id
+               AND s.machine_identity_id = mi.id
+             WHERE cred.id = p_credential_id
+               AND cred.token_hash = p_token_hash
+               AND cred.org_id = p_org_id
+               AND cred.workspace_id = p_workspace_id
+               AND cred.machine_identity_id = p_machine_identity_id
+               AND cred.session_id = p_session_id
+               AND cred.revoked_at IS NULL
+               AND cred.expires_at > clock_timestamp()
+               AND mi.revoked_at IS NULL
+               AND mi.expires_at > clock_timestamp()
+               AND s.status = 'active'
+               AND s.expires_at > clock_timestamp()
+               AND s.data_class IN ('synthetic', 'public')
+             FOR UPDATE OF cred, mi, s;
+            RETURN FOUND;
+        END
         $function$
     """)
     op.execute("""
