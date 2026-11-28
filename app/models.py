@@ -200,6 +200,13 @@ class Agent(Base):
     __table_args__ = (
         UniqueConstraint("org_id", "workspace_id", "name", name="uq_agent_workspace_name"),
         Index("uq_agent_scope_id", "org_id", "workspace_id", "id", unique=True),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "id", "current_version_id"],
+            ["agent_versions.org_id", "agent_versions.workspace_id", "agent_versions.agent_id", "agent_versions.id"],
+            ondelete="RESTRICT",
+            name="fk_agents_current_version_scope",
+            use_alter=True,
+        ),
     )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True, nullable=False)
