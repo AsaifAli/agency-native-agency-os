@@ -1,5 +1,7 @@
 # 20-Point Pre-Deploy Security Audit — Agency OS
 
+> **Historical snapshot (2026-11-26):** This audit predates the consolidated PR #71 merge on 2026-11-28. Its point-in-time findings (including workspace-grant and PostgreSQL RLS status) must not be treated as current implementation status. Use `IMPLEMENTATION_STATUS.md`, `POSTGRES_RLS_OPERATIONS.md` and `WORKSPACE_AUTHORIZATION_DESIGN.md` for the merged baseline; the remaining production gates in this audit still require fresh verification.
+
 **Audit date:** 2026-11-26
 **Scope:** `agency-native-agency-os` current reconciled PR branch, backend, frontend source, migrations, Docker Compose and declared dependencies.
 **Disposition:** **NOT APPROVED FOR PRODUCTION**. This is a source/configuration review plus automated dependency and backend-test evidence, not a penetration test, production-environment review or compliance assessment.
