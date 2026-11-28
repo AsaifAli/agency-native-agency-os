@@ -15,8 +15,9 @@ This confirms CI success for that commit. It does not establish a worker process
 - Outbox delivery is at-least-once. A handler can complete an external side effect and the process can die before the acknowledgement commits. Consumers must deduplicate with the stable `OutboxMessage.idempotency_key`.
 - The handler registry is intentionally empty; no external side-effect handler is enabled.
 - Expired processing leases can be reconciled and reclaimed.
-- Outbox delivery currently does not renew a lease while a handler is running. A handler longer than its lease can be reclaimed by another worker. Ownership checks prevent the stale worker from acknowledging a newer owner's delivery, but they cannot undo an external side effect.
-- Existing expired-lease PostgreSQL coverage simulates an expired row; it is not equivalent to killing and restarting a worker process.
+- Outbox delivery now renews active leases from an independent session while a handler runs. Renewal is conditional on processing status, worker ID, claim-generation attempt count, and an unexpired current lease.
+- If renewal fails or ownership is reclaimed, the handler is not forcibly interrupted. Its eventual acknowledgement/failure is rejected by the authoritative ownership check. Any external side effect still requires consumer-side idempotency.
+- New PostgreSQL coverage simulates a real subprocess crash after claim commit, then reclaims the expired synthetic event. This does not simulate a process crash after an external side effect has committed.
 - Health summaries are workspace-scoped and payload-free. Alert delivery and metrics export are not yet implemented.
 
 ## Required failure-injection matrix
@@ -36,13 +37,13 @@ Run every case against a disposable PostgreSQL database with the same role separ
 
 ## Long-running handler lease acceptance
 
-Before any handler is registered:
+Lease renewal is implemented, but handlers remain disabled until all remaining acceptance points pass:
 
 1. Choose and document a strict handler timeout and maximum execution duration.
-2. Decide whether the handler can be safely interrupted when ownership is lost. If not, document that it may finish but must not acknowledge after losing ownership.
-3. Implement lease renewal only if it can be made ownership-conditional: renew only when the event is still `processing`, the claimant is the same worker, and the previous lease has not already expired.
-4. Stop renewal on completion, failure, cancellation, or ownership loss; surface renewal failure to the dispatcher.
-5. Test renewal/ownership races with PostgreSQL, not SQLite alone.
+2. Python handlers are not forcibly interrupted when ownership is lost. They may finish, but must not acknowledge or mutate outbox state after losing ownership.
+3. Implemented: renew only when the event is still `processing`, the claimant and claim-generation attempt count match, and the current lease has not already expired.
+4. Implemented: use an independent session for renewal; stop the heartbeat on handler completion/failure and always perform an authoritative ownership check before acknowledgement/failure persistence.
+5. SQLite tests cover a long handler; PostgreSQL tests cover stale-generation renewal refusal and process crash/reclaim. A PostgreSQL long-handler renewal race is still required.
 6. Retain consumer-side idempotency. Lease renewal reduces duplicate work; it does not create exactly-once delivery.
 
 ## Operational visibility acceptance
