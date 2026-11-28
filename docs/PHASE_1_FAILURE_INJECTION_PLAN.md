@@ -1,12 +1,12 @@
 # Phase 1 — Failure-Injection Acceptance Plan
 
-**Baseline:** `main` at `f07a8b7b8a864cbc08da35bf4b4c422cd4baf25e` (2026-11-28).
-**Current posture:** reliability foundation implemented; final crash/restart and long-handler acceptance is not complete.
+**Verified code baseline:** `main` at `6d70292596beeea86eb778a09fa04faeed06305e` (2026-11-28).
+**Current posture:** lease ownership, generation fencing, long-handler renewal and synthetic crash-after-effect idempotency tests are implemented and CI-tested; the full failure-injection matrix and operational release gates remain incomplete.
 **Safety:** synthetic events and disposable PostgreSQL only. Never point these tests at a development, staging, or production database containing business data.
 
 ## Verified baseline
 
-GitHub Actions run [46165349483](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46165349483) completed successfully on the baseline commit. Both the backend and frontend jobs passed. The backend job explicitly completed runtime-image verification, isolated PostgreSQL role bootstrap, migration graph validation, migrations to disposable PostgreSQL, Python compilation, and backend/PostgreSQL integration tests. The frontend job completed type-checking and production build.
+GitHub Actions run [46168046099](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46168046099) completed successfully on the verified code baseline. The backend suite reported **687 passed in 54.82 seconds**, including PostgreSQL 16 integration tests for claim-generation fencing, worker-process crash after a synthetic consumer effect, and long-handler lease renewal. The backend job also completed runtime-image verification, isolated PostgreSQL role bootstrap, migration graph validation, migrations to disposable PostgreSQL and Python compilation. The frontend job completed type-checking and production build.
 
 This confirms CI success for that commit. It does not establish a worker process crash/restart test, live provider behavior, production migration safety, or production readiness.
 
@@ -17,7 +17,7 @@ This confirms CI success for that commit. It does not establish a worker process
 - Expired processing leases can be reconciled and reclaimed.
 - Outbox delivery now renews active leases from an independent session while a handler runs. Renewal is conditional on processing status, worker ID, claim-generation attempt count, and an unexpired current lease.
 - If renewal fails or ownership is reclaimed, the handler is not forcibly interrupted. Its eventual acknowledgement/failure is rejected by the authoritative ownership check. Any external side effect still requires consumer-side idempotency.
-- New PostgreSQL coverage simulates a real subprocess crash after a synthetic consumer side effect commits but before acknowledgement. The event is reclaimed and the consumer replay uses a unique idempotency key; the test asserts exactly one effect. This is a database-backed test consumer, not a live external provider.
+- PostgreSQL coverage simulates a real subprocess crash after a synthetic consumer side effect commits but before acknowledgement. The event is reclaimed and the consumer replay uses a unique idempotency key; the test asserts exactly one effect. This is a database-backed test consumer, not a live external provider. The test is included in the 687-test passing CI run.
 - Health summaries are workspace-scoped and payload-free. Alert delivery and metrics export are not yet implemented.
 
 ## Required failure-injection matrix
@@ -43,7 +43,7 @@ Lease renewal is implemented, but handlers remain disabled until all remaining a
 2. Python handlers are not forcibly interrupted when ownership is lost. They may finish, but must not acknowledge or mutate outbox state after losing ownership.
 3. Implemented: renew only when the event is still `processing`, the claimant and claim-generation attempt count match, and the current lease has not already expired.
 4. Implemented: use an independent session for renewal; stop the heartbeat on handler completion/failure and always perform an authoritative ownership check before acknowledgement/failure persistence.
-5. SQLite and PostgreSQL tests cover long-handler renewal; PostgreSQL tests also cover stale-generation renewal refusal and process crash/reclaim.
+5. CI-tested: SQLite and PostgreSQL tests cover long-handler renewal; PostgreSQL tests also cover stale-generation renewal refusal and a real subprocess crash/reclaim after the synthetic effect commits.
 6. Retain consumer-side idempotency. Lease renewal reduces duplicate work; it does not create exactly-once delivery.
 
 ## Operational visibility acceptance
