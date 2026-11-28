@@ -1,7 +1,7 @@
 """Enforce organization/workspace integrity for workforce relationships.
 
 Revision ID: d1e7a9c3f5b2
-Revises: aa1b2c3d4e5f
+Revises: c7a4b1e9d2f6
 """
 from typing import Sequence, Union
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 revision: str = "d1e7a9c3f5b2"
-down_revision: Union[str, Sequence[str], None] = "aa1b2c3d4e5f"
+down_revision: Union[str, Sequence[str], None] = "c7a4b1e9d2f6"
 branch_labels = None
 depends_on = None
 
