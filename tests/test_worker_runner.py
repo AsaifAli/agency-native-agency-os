@@ -356,3 +356,33 @@ def test_production_worker_does_not_poll_when_database_role_verification_fails(m
         )
 
     scopes.assert_not_called()
+
+
+
+def test_provider_usage_reconciliation_runs_only_when_managed_agents_is_enabled(monkeypatch):
+    runtime = object()
+    monkeypatch.setattr(runner, "is_runtime_available", lambda name: name == "claude_managed_agents")
+    get_runtime = Mock(return_value=runtime)
+    reconcile = Mock(return_value={"reconciled": 2, "pending": 1, "skipped": 3})
+    monkeypatch.setattr(runner, "get_runtime", get_runtime)
+    monkeypatch.setattr(runner, "reconcile_abandoned_managed_agent_usage", reconcile)
+
+    result = runner._run_provider_usage_reconciliation(lambda: None, batch_size=50)
+
+    assert result == 2
+    get_runtime.assert_called_once_with("claude_managed_agents")
+    reconcile.assert_called_once()
+    assert reconcile.call_args.kwargs["runtime"] is runtime
+    assert reconcile.call_args.kwargs["limit"] == 10
+
+
+def test_provider_usage_reconciliation_is_noop_when_runtime_is_disabled(monkeypatch):
+    monkeypatch.setattr(runner, "is_runtime_available", lambda _name: False)
+    get_runtime = Mock()
+    reconcile = Mock()
+    monkeypatch.setattr(runner, "get_runtime", get_runtime)
+    monkeypatch.setattr(runner, "reconcile_abandoned_managed_agent_usage", reconcile)
+
+    assert runner._run_provider_usage_reconciliation(lambda: None, batch_size=50) == 0
+    get_runtime.assert_not_called()
+    reconcile.assert_not_called()
