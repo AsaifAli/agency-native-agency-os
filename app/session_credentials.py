@@ -96,14 +96,7 @@ def issue_session_credential(
 
     # One credential per session for the first release. Rotation requires an
     # explicit provider Vault cleanup protocol and is deliberately not implicit.
-    existing = (
-        db.query(MachineSessionCredential.id)
-        .filter_by(org_id=identity.org_id, workspace_id=identity.workspace_id, session_id=session.id)
-        .first()
-    )
-    if existing is not None:
-        raise HTTPException(status_code=409, detail="A session credential already exists.")
-
+    # A unique (workspace, session, version) constraint makes issuance one-shot.
     credential_id = secrets.token_hex(16)
     credential_id = f"{credential_id[:8]}-{credential_id[8:12]}-{credential_id[12:16]}-{credential_id[16:20]}-{credential_id[20:32]}"
     secret = secrets.token_urlsafe(32)
