@@ -51,7 +51,7 @@ def _base_schema(engine, *, cross_workspace_member=False):
                 id VARCHAR(36) PRIMARY KEY, org_id VARCHAR(36) NOT NULL,
                 workspace_id VARCHAR(36) NOT NULL, parent_unit_id VARCHAR(36)
             )
-        """)
+        """))
         connection.execute(sa.text("""
             CREATE TABLE workforce_members (
                 id VARCHAR(36) PRIMARY KEY, org_id VARCHAR(36) NOT NULL,
