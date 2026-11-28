@@ -374,6 +374,38 @@ def process_one_execution(
                     worker_id=worker_id,
                     session_ttl_seconds=min(settings.claude_managed_timeout_seconds, 3600),
                 )
+                from app.session_credentials import (
+                    mark_provider_credential_archived,
+                    persist_provider_credential,
+                    revoke_session_credential,
+                )
+
+                def persist_mcp_provider_credential(credential_id: str, vault_id: str, provider_id: str) -> None:
+                    with session_factory() as callback_db:
+                        persist_provider_credential(
+                            callback_db, credential_id=credential_id, vault_id=vault_id,
+                            provider_credential_id=provider_id, org_id=execution_org_id,
+                            workspace_id=execution_workspace_id,
+                        )
+
+                def revoke_mcp_session_credential(credential_id: str, reason: str) -> None:
+                    with session_factory() as callback_db:
+                        revoke_session_credential(
+                            callback_db, credential_id=credential_id, reason=reason,
+                            org_id=execution_org_id, workspace_id=execution_workspace_id,
+                        )
+
+                def mark_mcp_provider_credential_archived(credential_id: str, provider_id: str) -> None:
+                    with session_factory() as callback_db:
+                        mark_provider_credential_archived(
+                            callback_db, credential_id=credential_id,
+                            provider_credential_id=provider_id, org_id=execution_org_id,
+                            workspace_id=execution_workspace_id,
+                        )
+
+                request.persist_mcp_provider_credential = persist_mcp_provider_credential
+                request.revoke_mcp_session_credential = revoke_mcp_session_credential
+                request.mark_mcp_provider_credential_archived = mark_mcp_provider_credential_archived
         runtime_result = runtime.start(request)
         if request.control_check is not None and request.control_check() == "cancel":
             raise RuntimeCancelled("OS cancellation request observed after provider return.")
