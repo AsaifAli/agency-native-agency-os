@@ -120,7 +120,14 @@ class SessionPathAuthMiddleware:
             await self.app(scope, receive, send)
             return
 
-        match = _SESSION_PATH_RE.fullmatch(scope.get("path", ""))
+        request_path = scope.get("path", "")
+        root_path = scope.get("root_path", "")
+        # ASGI servers differ in whether a mounted application's scope.path
+        # includes root_path. Normalize both valid representations before
+        # matching the session UUID; never accept an arbitrary path suffix.
+        if root_path and request_path.startswith(root_path):
+            request_path = request_path[len(root_path):] or "/"
+        match = _SESSION_PATH_RE.fullmatch(request_path)
         if match is None:
             await PlainTextResponse("Not found", status_code=404)(scope, receive, send)
             return
