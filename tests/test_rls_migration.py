@@ -269,6 +269,7 @@ def test_agent_session_credential_migration_is_execution_bound_and_private():
     assert "worker_mcp_credential_insert" in source
     assert "authenticate_mcp_session_credential" in source
     assert "is_mcp_session_credential_active" in source
+    assert "load_mcp_provider_credential" in source
     assert "attach_mcp_provider_credential" in source
     assert "revoke_mcp_session_credential" in source
     assert "mark_mcp_provider_credential_archived" in source
