@@ -189,14 +189,13 @@ def test_postgres_workspace_grant_functions_require_authority_and_audit_changes(
     finally:
         with Admin() as db:
             if org.id:
-                db.query(AuditEvent).filter_by(org_id=org.id).delete(synchronize_session=False)
+                # Workspace grant operations append audit events whose actor,
+                # organization and workspace references must remain valid.
+                # Keep those synthetic parent records in the disposable CI DB.
                 db.query(WorkspaceGrant).filter_by(org_id=org.id).delete(synchronize_session=False)
                 db.query(Task).filter_by(org_id=org.id).delete(synchronize_session=False)
                 db.query(FounderAuthority).filter_by(org_id=org.id).delete(synchronize_session=False)
                 db.query(Membership).filter_by(org_id=org.id).delete(synchronize_session=False)
-                db.query(Workspace).filter_by(org_id=org.id).delete(synchronize_session=False)
-                db.query(Organization).filter_by(id=org.id).delete(synchronize_session=False)
-                db.query(User).filter(User.id.in_([founder.id, member.id, outsider.id])).delete(synchronize_session=False)
                 db.commit()
         app_engine.dispose()
         admin_engine.dispose()
@@ -234,7 +233,7 @@ def test_machine_identity_lookup_is_id_scoped_before_org_context_is_established(
             db.add_all([workspace, other_workspace]); db.flush()
             identity = MachineIdentity(
                 org_id=org.id, workspace_id=workspace.id, name="Scoped identity",
-                subject_type="service", subject_id=f"service-{suffix}",
+                subject_type="service", subject_id=f"service-{suffix[:28]}",
                 token_hash="a" * 64, token_prefix="aos_mi_test",
                 scopes=["sessions:create"], allowed_data_classes=["public"],
                 expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
@@ -242,7 +241,7 @@ def test_machine_identity_lookup_is_id_scoped_before_org_context_is_established(
             )
             other_identity = MachineIdentity(
                 org_id=other_org.id, workspace_id=other_workspace.id, name="Other identity",
-                subject_type="service", subject_id=f"other-service-{suffix}",
+                subject_type="service", subject_id=f"other-service-{suffix[:24]}",
                 token_hash="b" * 64, token_prefix="aos_mi_test",
                 scopes=["sessions:create"], allowed_data_classes=["public"],
                 expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
