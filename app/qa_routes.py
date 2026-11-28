@@ -234,7 +234,7 @@ def transition_qa_issue(
             raise HTTPException(409, "Retest evaluation must reference the QA issue's task")
         if not evaluation.passed:
             raise HTTPException(409, "A failed evaluation cannot close a QA issue")
-        if issue.fixed_at is None or _utc(evaluation.created_at) < _utc(issue.fixed_at):
+        if issue.fixed_at is None or _utc(evaluation.created_at) <= _utc(issue.fixed_at):
             raise HTTPException(409, "Retest evaluation must be created after the issue was marked fixed")
     elif previous == "retest" and body.status == "in_progress" and body.retest_evaluation_run_id:
         evaluation = db.query(EvaluationRun).filter_by(
