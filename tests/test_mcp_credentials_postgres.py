@@ -128,8 +128,10 @@ def test_mcp_credential_hash_is_not_readable_and_auth_is_database_owned():
                        has_function_privilege(current_user,
                          'agency_os_private.authenticate_mcp_session_credential(text,text,integer)', 'EXECUTE'),
                        has_function_privilege(current_user,
-                         'agency_os_private.is_mcp_session_credential_active(text,text,text,text,text,text)', 'EXECUTE')
-            """)).one() == (False, True, True)
+                         'agency_os_private.is_mcp_session_credential_active(text,text,text,text,text,text)', 'EXECUTE'),
+                       has_function_privilege(current_user,
+                         'agency_os_private.reserve_mcp_vault_credential_slot(text,integer)', 'EXECUTE')
+            """)).one() == (False, True, True, False)
             with pytest.raises(DBAPIError):
                 connection.execute(text("SELECT token_hash FROM public.machine_session_credentials")).all()
             connection.rollback()
