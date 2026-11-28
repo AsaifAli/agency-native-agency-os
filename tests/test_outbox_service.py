@@ -126,6 +126,33 @@ def test_dispatch_failure_retries_and_redacts_credentials(outbox_context):
     assert available_at > datetime.now(timezone.utc) - timedelta(seconds=1)
 
 
+def test_dispatch_renews_lease_during_long_running_handler(outbox_context):
+    import time
+
+    ctx = outbox_context
+    event_id = add_event(ctx)
+
+    def long_handler(_message):
+        # Simulate a handler that is still running close to lease expiry.
+        with ctx["Session"]() as db:
+            row = db.query(OutboxEvent).filter_by(id=event_id).one()
+            row.lease_expires_at = datetime.now(timezone.utc) + timedelta(seconds=0.1)
+            db.commit()
+        time.sleep(0.25)
+
+    result = dispatch_outbox_batch(
+        ctx["Session"],
+        worker_id="worker-long-handler",
+        handlers={"test.event": long_handler},
+        lease_seconds=15,
+        heartbeat_interval_seconds=0.02,
+    )
+
+    row = ctx["db"].query(OutboxEvent).filter_by(id=event_id).one()
+    assert result == (1, 0, 0)
+    assert row.status == "published"
+
+
 def test_exhausted_delivery_moves_to_dead_letter(outbox_context):
     ctx = outbox_context
     event_id = add_event(ctx, max_attempts=1)
