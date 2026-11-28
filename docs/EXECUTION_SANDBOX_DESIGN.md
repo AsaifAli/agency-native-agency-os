@@ -1,6 +1,6 @@
 # Execution sandbox design and acceptance
 
-**Status: design approved for implementation planning; sandbox implementation is not yet present or verified.**
+**Status: Phase 1 API/worker container hardening is configured and statically tested; Docker runtime verification is pending. Per-execution sandboxing and artifact gateway are not implemented.**
 
 This document defines the execution-isolation boundary for the internal Agency OS. It does not claim that Docker Compose process separation, PostgreSQL RLS, or an Anthropic Managed Agents environment is itself a per-execution sandbox.
 
@@ -24,7 +24,7 @@ This document defines the execution-isolation boundary for the internal Agency O
 
 The consolidated candidate separates API and worker processes in Docker Compose and uses distinct PostgreSQL API, worker and migration roles. The worker verifies its production database role and RLS posture at startup. The Tool Gateway applies OS-issued machine/session scope, capability checks, input/output protection, schema validation, idempotency, durable invocation records and audit. These controls are valuable but do not isolate arbitrary code per execution.
 
-The current application Dockerfile uses a shared Python 3.12 slim image and does not declare a non-root runtime user. The ordinary worker is a long-running process, not a disposable per-execution container. The repository's implementation status also records Managed Agents environment sandboxing and egress as unverified. Provider-side environment settings must be inspected and tested; the presence of an environment identifier is not evidence of a verified sandbox.
+The application image now declares a dedicated UID/GID 10001 runtime user. The API and ordinary worker Compose services are configured for non-root execution, read-only root filesystems, a bounded noexec/nosuid/nodev `/tmp` tmpfs, all Linux capabilities dropped, no-new-privileges, PID limits, memory limits and CPU limits. Static contract tests cover these settings. Docker/Compose is not installed in the current execution environment, so image build, effective runtime identity, read-only filesystem behavior, health, worker claim/recovery and graceful shutdown under these constraints still require CI or staging verification. The ordinary worker remains a long-running process, not a disposable per-execution container. Managed Agents environment sandboxing and egress remain unverified; an environment identifier is not evidence of a verified sandbox.
 
 **Therefore: per-execution sandboxing is currently an implementation gap. Do not run untrusted generated code, arbitrary shell commands, or hostile file-processing workloads in the API or ordinary worker.**
 
@@ -60,10 +60,10 @@ A container is a useful first isolation layer, not a universal hostile-code boun
 - Document the threat model, trust boundaries, allowed data classes and prohibited workload classes.
 
 ### Phase 1 — harden existing API and worker containers
-- Run as a dedicated non-root UID/GID.
-- Add read-only root filesystem, bounded writable tmpfs, dropped Linux capabilities, no-new-privileges, PID/CPU/memory limits and health checks.
-- Keep API and worker roles distinct; do not mount host paths or container runtime sockets.
-- Validate startup, health, migrations, worker claims, shutdown and log handling under these restrictions.
+- [x] Declare dedicated non-root UID/GID 10001 in the application image.
+- [x] Configure API and worker read-only root filesystems, bounded writable tmpfs, dropped Linux capabilities, no-new-privileges, PID/CPU/memory limits.
+- [x] Keep API and worker roles distinct; no host paths or container runtime sockets are mounted.
+- [ ] Verify Docker image build, effective UID, health, migration compatibility, worker claims, shutdown and log handling under these restrictions in CI/staging.
 - These are defense-in-depth controls for the service containers, not a substitute for per-execution isolation.
 
 ### Phase 2 — isolated execution broker

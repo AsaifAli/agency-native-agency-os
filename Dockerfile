@@ -12,6 +12,11 @@ COPY migrations ./migrations
 
 COPY app ./app
 
+RUN groupadd --system --gid 10001 agency \
+    && useradd --system --uid 10001 --gid agency --home-dir /nonexistent --shell /usr/sbin/nologin agency
+
+USER 10001:10001
+
 EXPOSE 8000
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
