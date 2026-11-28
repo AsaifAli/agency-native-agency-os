@@ -44,6 +44,10 @@ def upgrade() -> None:
 
     op.add_column("agents", sa.Column("current_version_id", sa.String(36), nullable=True))
     op.add_column("executions", sa.Column("agent_version_id", sa.String(36), nullable=True))
+    op.add_column(
+        "executions",
+        sa.Column("required_capability_action", sa.String(120), nullable=True),
+    )
     op.create_table(
         "agent_versions",
         sa.Column("id", sa.String(36), primary_key=True),
