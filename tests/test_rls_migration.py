@@ -298,3 +298,15 @@ def test_mcp_session_credential_migration_is_execution_bound_and_hash_only():
 def test_mcp_session_credentials_are_in_the_runtime_rls_inventory():
     from app.db import REQUIRED_RLS_TABLES
     assert "machine_session_credentials" in REQUIRED_RLS_TABLES
+
+
+def test_mcp_vault_capacity_migration_is_bounded_and_fails_closed_on_ambiguous_create():
+    source = (PATH.parent / "a8c4e6f2b913_mcp_vault_capacity.py").read_text()
+
+    assert "reserve_mcp_vault_credential_slot" in source
+    assert "pg_advisory_xact_lock(hashtextextended(p_vault_id, 0))" in source
+    assert "least(coalesce(p_max_active_credentials, 16), 20)" in source
+    assert "'not_created', 'active', 'delete_pending'" in source
+    assert "TO agency_os_worker" in source
+    assert "FROM PUBLIC, agency_os_app" in source
+    assert "'MCP_VAULT_CREATE_AMBIGUOUS', 'MCP_ORPHANED_CREDENTIAL'" in source
