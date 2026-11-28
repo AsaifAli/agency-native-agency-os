@@ -14,6 +14,7 @@ from app.auth import (
 )
 from app.audit import record_event
 from app.db import get_db
+from app.data_protection import DataProtectionBlocked, sanitize_text
 from app.domain_models import Milestone, Project, QAIssue
 from app.models import EvaluationRun, Role, Task
 
@@ -91,6 +92,13 @@ def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
+def _safe_text(value: str) -> str:
+    try:
+        return sanitize_text(value)[0]
+    except DataProtectionBlocked as exc:
+        raise HTTPException(422, "QA content blocked by data-protection policy") from exc
+
+
 @router.post("/issues", response_model=QAIssueOut, status_code=201)
 def create_qa_issue(
     org_id: str,
@@ -131,13 +139,13 @@ def create_qa_issue(
         workspace_id=body.workspace_id,
         project_id=body.project_id,
         task_id=body.task_id,
-        title=body.title,
-        description=body.description,
+        title=_safe_text(body.title),
+        description=_safe_text(body.description),
         severity=body.severity,
-        reproducible_steps=body.reproducible_steps,
-        expected_result=body.expected_result,
-        actual_result=body.actual_result,
-        evidence_references=body.evidence_references,
+        reproducible_steps=[_safe_text(value) for value in body.reproducible_steps],
+        expected_result=_safe_text(body.expected_result),
+        actual_result=_safe_text(body.actual_result),
+        evidence_references=[_safe_text(value) for value in body.evidence_references],
         assigned_to_user_id=body.assigned_to_user_id,
         created_by_user_id=p.user.id,
     )
@@ -233,6 +241,7 @@ def transition_qa_issue(
     elif body.retest_evaluation_run_id is not None:
         raise HTTPException(422, "Retest evaluation can only be attached during closure or failed-retest rework")
 
+    safe_note = _safe_text(body.note)
     now = datetime.now(timezone.utc)
     issue.status = body.status
     issue.updated_at = now
@@ -252,7 +261,7 @@ def transition_qa_issue(
         {"from_status": previous, "to_status": issue.status,
          "retest_evaluation_run_id": evaluation.id if evaluation else None,
          "retest_evidence_trust": evaluation.evidence_trust if evaluation else None,
-         "note": body.note},
+         "note": safe_note},
     )
     db.commit()
     db.refresh(issue)
