@@ -1,8 +1,8 @@
 """Claude Managed Agents adapter with durable sessions and OS-owned custom tools.
 
-Only exact custom tools from the Agency OS registry are permitted. Built-in
-provider tools, MCP servers, skills and provider multiagent features remain
-disabled until their actions can be reconciled into OS-owned policy and audit.
+Only exact custom tools from the Agency OS registry are permitted.
+The optional Claude MCP transport exposes only OS-authorized read-only tools;
+session credentials, approvals, tool execution and audit remain OS-owned.
 A provider session completes only after all workflow runs end and the primary
 turn reaches end_turn.
 """
@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import time
 from typing import Callable
+from urllib.parse import urlparse
 
 import httpx
 
@@ -81,6 +82,249 @@ class ManagedAgentsRuntime(AgentRuntime):
             raise RuntimeExecutionError(
                 "Claude Managed Agents returned an invalid response."
             ) from exc
+
+    def _validate_mcp_environment(self, client: httpx.Client) -> None:
+        environment = self._request(
+            client, "GET", f"/v1/environments/{self.config.claude_managed_environment_id}"
+        )
+        if not isinstance(environment, dict) or environment.get("archived_at") is not None:
+            raise RuntimeNotConfiguredError("Claude MCP requires an active cloud environment.")
+        environment_config = environment.get("config")
+        if not isinstance(environment_config, dict) or environment_config.get("type") != "cloud":
+            raise RuntimeNotConfiguredError("Claude MCP is supported only in a managed cloud environment.")
+        networking = environment_config.get("networking")
+        host = urlparse(self.config.claude_managed_mcp_public_base_url).hostname
+        allowed_hosts = networking.get("allowed_hosts") if isinstance(networking, dict) else None
+        if (
+            not isinstance(networking, dict)
+            or networking.get("type") != "limited"
+            or networking.get("allow_mcp_servers") is True
+            or not isinstance(allowed_hosts, list)
+            or host not in allowed_hosts
+        ):
+            raise RuntimeNotConfiguredError(
+                "Claude MCP requires limited environment networking, an exact MCP host allowlist entry, "
+                "and allow_mcp_servers=false."
+            )
+
+    def _mcp_session_url(self, os_session_id: str) -> str:
+        origin = self.config.claude_managed_mcp_public_base_url.rstrip("/")
+        return f"{origin}/v1/integrations/claude/mcp/sessions/{os_session_id}"
+
+    def _list_mcp_vault_credentials(
+        self, client: httpx.Client, vault_id: str
+    ) -> list[dict]:
+        path = f"/v1/vaults/{vault_id}/credentials"
+        params: dict[str, object] = {"limit": 100}
+        credentials: list[dict] = []
+        for _page_number in range(10):
+            response = self._request(client, "GET", path, params=params)
+            if not isinstance(response, dict) or not isinstance(response.get("data"), list):
+                raise RuntimeManualReviewRequired(
+                    "Anthropic Vault credential listing returned an unusable response."
+                )
+            credentials.extend(
+                item for item in response["data"] if isinstance(item, dict)
+            )
+            next_page = response.get("next_page")
+            if not next_page:
+                return credentials
+            if not isinstance(next_page, str):
+                raise RuntimeManualReviewRequired(
+                    "Anthropic Vault returned an invalid credential pagination token."
+                )
+            params = {"limit": 100, "page": next_page}
+        raise RuntimeManualReviewRequired(
+            "Anthropic Vault credential reconciliation exceeded its bounded page limit."
+        )
+
+    @staticmethod
+    def _mcp_vault_credential_matches(
+        credential: dict, *, session_id: str, execution_id: str, mcp_url: str
+    ) -> bool:
+        metadata = credential.get("metadata")
+        auth = credential.get("auth")
+        return (
+            credential.get("archived_at") is None
+            and isinstance(metadata, dict)
+            and metadata.get("agency_os_session_id") == session_id
+            and metadata.get("agency_os_execution_id") == execution_id
+            and metadata.get("agency_os_mcp_server_url") == mcp_url
+            and isinstance(auth, dict)
+            and auth.get("type") == "static_bearer"
+            and auth.get("mcp_server_url") == mcp_url
+        )
+
+    def _archive_mcp_vault_credential(
+        self, client: httpx.Client, vault_id: str, credential_id: str
+    ) -> None:
+        self._request(
+            client,
+            "POST",
+            f"/v1/vaults/{vault_id}/credentials/{credential_id}/archive",
+        )
+
+    def _reconcile_mcp_vault_credential(
+        self,
+        client: httpx.Client,
+        *,
+        vault_id: str,
+        session_id: str,
+        execution_id: str,
+        mcp_url: str,
+    ) -> str:
+        credentials = self._list_mcp_vault_credentials(client, vault_id)
+        matches = [
+            item for item in credentials
+            if self._mcp_vault_credential_matches(
+                item, session_id=session_id, execution_id=execution_id, mcp_url=mcp_url
+            )
+        ]
+        if len(matches) == 1 and isinstance(matches[0].get("id"), str):
+            return matches[0]["id"]
+        if len(matches) > 1:
+            archive_failed = False
+            for item in matches:
+                credential_id = item.get("id")
+                if isinstance(credential_id, str) and credential_id:
+                    try:
+                        self._archive_mcp_vault_credential(client, vault_id, credential_id)
+                    except Exception:
+                        archive_failed = True
+            detail = "Multiple matching Vault credentials were found."
+            if archive_failed:
+                detail += " One or more duplicates could not be archived."
+            raise RuntimeManualReviewRequired(detail)
+        raise RuntimeManualReviewRequired(
+            "Anthropic Vault credential creation is ambiguous and no exact matching credential was found."
+        )
+
+    def _create_mcp_vault_credential(
+        self,
+        client: httpx.Client,
+        *,
+        request: ExecutionRequest,
+        os_session_id: str,
+        token: str,
+        mcp_url: str,
+    ) -> str:
+        vault_id = self.config.claude_managed_mcp_vault_id
+        metadata = {
+            "agency_os_execution_id": request.execution_id or "",
+            "agency_os_session_id": os_session_id,
+            "agency_os_mcp_server_url": mcp_url,
+        }
+        body = {
+            "display_name": f"Agency OS MCP session {os_session_id[:12]}",
+            "auth": {
+                "type": "static_bearer",
+                "token": token,
+                "mcp_server_url": mcp_url,
+            },
+            "metadata": metadata,
+        }
+        try:
+            created = self._request(
+                client, "POST", f"/v1/vaults/{vault_id}/credentials", json=body
+            )
+        except (RuntimeTransientError, RuntimeExecutionError):
+            return self._reconcile_mcp_vault_credential(
+                client, vault_id=vault_id, session_id=os_session_id,
+                execution_id=request.execution_id or "", mcp_url=mcp_url,
+            )
+
+        if (
+            isinstance(created, dict)
+            and isinstance(created.get("id"), str)
+            and self._mcp_vault_credential_matches(
+                created,
+                session_id=os_session_id,
+                execution_id=request.execution_id or "",
+                mcp_url=mcp_url,
+            )
+        ):
+            return created["id"]
+        return self._reconcile_mcp_vault_credential(
+            client, vault_id=vault_id, session_id=os_session_id,
+            execution_id=request.execution_id or "", mcp_url=mcp_url,
+        )
+
+    def _cleanup_mcp_credential(
+        self,
+        client: httpx.Client,
+        request: ExecutionRequest,
+        *,
+        os_credential_id: str,
+        provider_credential_id: str | None,
+        reason: str,
+    ) -> None:
+        if request.revoke_mcp_session_credential is None:
+            raise RuntimeManualReviewRequired(
+                "The MCP credential cannot be revoked through the OS worker lifecycle."
+            )
+        try:
+            request.revoke_mcp_session_credential(os_credential_id, reason)
+        except Exception as exc:
+            raise RuntimeManualReviewRequired(
+                "The OS could not revoke the MCP session credential; manual review is required."
+            ) from exc
+
+        if provider_credential_id is None:
+            return
+        vault_id = self.config.claude_managed_mcp_vault_id
+        try:
+            self._archive_mcp_vault_credential(client, vault_id, provider_credential_id)
+        except Exception as exc:
+            # The OS token is already revoked; the persisted delete_pending state
+            # allows a later bounded cleanup/reconciliation job.
+            raise RuntimeManualReviewRequired(
+                "The OS credential is revoked, but Anthropic Vault archival remains pending."
+            ) from exc
+        if request.mark_mcp_provider_credential_archived is None:
+            raise RuntimeManualReviewRequired(
+                "The provider credential was archived but OS archival state could not be persisted."
+            )
+        try:
+            request.mark_mcp_provider_credential_archived(
+                os_credential_id, provider_credential_id
+            )
+        except Exception as exc:
+            raise RuntimeManualReviewRequired(
+                "The provider credential was archived but OS archival state could not be persisted."
+            ) from exc
+
+    def _mcp_agent_override(self, enabled_tools: dict, mcp_url: str) -> dict:
+        custom_tools = [
+            tool for tool in managed_agent_custom_tool_definitions()
+            if tool.get("name") in enabled_tools
+        ]
+        configured_keys = sorted(
+            key.strip()
+            for key in self.config.claude_managed_mcp_enabled_tool_keys.split(",")
+            if key.strip()
+        )
+        mcp_toolset = {
+            "type": "mcp_toolset",
+            "mcp_server_name": "agency_os",
+            "default_config": {
+                "enabled": False,
+                "permission_policy": {"type": "always_allow"},
+            },
+            "configs": [
+                {
+                    "name": key,
+                    "enabled": True,
+                    "permission_policy": {"type": "always_allow"},
+                }
+                for key in configured_keys
+            ],
+        }
+        return {
+            "type": "agent_with_overrides",
+            "id": self.config.claude_managed_agent_id,
+            "mcp_servers": [{"type": "url", "name": "agency_os", "url": mcp_url}],
+            "tools": [*custom_tools, mcp_toolset],
+        }
 
     def _task_prompt(self, request: ExecutionRequest) -> str:
         if (request.request_metadata or {}).get("purpose") == "workforce.plan_draft":
