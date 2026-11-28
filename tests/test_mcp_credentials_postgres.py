@@ -145,6 +145,10 @@ def test_mcp_credential_hash_is_not_readable_and_auth_is_database_owned():
                 "workspace": expected[1], "identity": expected[2], "session": expected[3],
             }).scalar_one()
             assert active is True
+            # The SECURITY DEFINER authentication functions lock the credential,
+            # identity, session and execution rows. Release those locks before
+            # changing execution state through the separate admin connection.
+            connection.commit()
 
             with Admin() as db:
                 db.query(Execution).filter_by(id=f"mcp-exec-{suffix}").update(
