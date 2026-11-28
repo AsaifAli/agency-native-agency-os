@@ -197,7 +197,10 @@ class WorkspaceGrant(Base):
 
 class Agent(Base):
     __tablename__ = "agents"
-    __table_args__ = (UniqueConstraint("org_id", "workspace_id", "name", name="uq_agent_workspace_name"),)
+    __table_args__ = (
+        UniqueConstraint("org_id", "workspace_id", "name", name="uq_agent_workspace_name"),
+        Index("uq_agent_scope_id", "org_id", "workspace_id", "id", unique=True),
+    )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True, nullable=False)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), index=True, nullable=False)
@@ -211,7 +214,10 @@ class Agent(Base):
 
 class Task(Base):
     __tablename__ = "tasks"
-    __table_args__ = (Index("ix_task_org_workspace_status", "org_id", "workspace_id", "status"),)
+    __table_args__ = (
+        Index("uq_task_scope_id", "org_id", "workspace_id", "id", unique=True),
+        Index("ix_task_org_workspace_status", "org_id", "workspace_id", "status"),
+    )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True, nullable=False)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), index=True, nullable=False)
