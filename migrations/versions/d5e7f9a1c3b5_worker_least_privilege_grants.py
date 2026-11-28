@@ -45,10 +45,6 @@ UPDATE_TABLES = (
     "outbox_events",
     "tasks",
     "tool_invocations",
-    # SELECT FOR UPDATE in the tool gateway requires UPDATE privilege. These
-    # grants are retained until row locking moves behind a narrow DB function.
-    "workforce_capabilities",
-    "workforce_members",
 )
 
 
@@ -82,6 +78,18 @@ def upgrade() -> None:
         "GRANT UPDATE ON TABLE "
         + ", ".join(f'public."{table}"' for table in UPDATE_TABLES)
         + " TO agency_os_worker"
+    )
+
+    # These tables are locked with SELECT FOR UPDATE by the tool gateway. A
+    # narrow, non-authoritative timestamp column privilege satisfies PostgreSQL's
+    # UPDATE privilege requirement without allowing capability/member mutation.
+    op.execute(
+        "GRANT UPDATE (created_at) ON TABLE public.workforce_capabilities "
+        "TO agency_os_worker"
+    )
+    op.execute(
+        "GRANT UPDATE (updated_at) ON TABLE public.workforce_members "
+        "TO agency_os_worker"
     )
 
     # Machine identities are readable only within the execution capability;
