@@ -486,4 +486,4 @@ class EvaluationRun(Base):
 # Task has a composite FK to the Delivery Milestone model. Register that
 # target even in test/tools that import app.models without importing the
 # Revenue/Delivery module explicitly.
-import app.domain_models  # noqa: F401
+import app.domain_models  # noqa: E402,F401
