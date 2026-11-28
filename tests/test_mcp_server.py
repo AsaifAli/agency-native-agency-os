@@ -43,7 +43,7 @@ def _middleware_app(monkeypatch, context=None):
         seen["path"] = scope["path"]
         await JSONResponse({"path": scope["path"]})(scope, receive, send)
 
-    async def authenticate(db_session, authorization, *, requests_per_minute):
+    def authenticate(db_session, authorization, *, requests_per_minute):
         seen["authorization"] = authorization
         seen["requests_per_minute"] = requests_per_minute
         if isinstance(context, Exception):
