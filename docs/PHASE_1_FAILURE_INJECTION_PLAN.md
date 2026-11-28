@@ -49,15 +49,20 @@ Lease renewal is implemented, but handlers remain disabled until all remaining a
 
 ## Operational visibility acceptance
 
-Expose, per authorized workspace and without event payloads or secrets:
+Implemented workspace-scoped, payload-free summary warnings:
 
 - Counts by pending, processing, published, and dead-letter state.
-- Oldest pending age and expired lease count.
-- Retry/exhaustion counts and last safe error classification.
-- Bounded pagination or sampling for actionable dead-letter inspection.
-- Alert thresholds for sustained pending age, expired leases, and dead-letter growth.
+- Oldest pending age, expired lease count, exhausted pending count and an `as_of` timestamp.
+- Configurable warning thresholds: pending age (default 900 seconds), expired leases (default 1), and dead-letter count (default 1). These are starting operational defaults, not contractual SLAs; tune them to the agency's delivery objectives.
+- Stable alert codes and a `healthy`/`warning` summary state. The founder-only route continues to require explicit Founder Authority and workspace access.
 
-Any metrics labels must avoid high-cardinality identifiers and tenant-sensitive payload values. Cross-workspace aggregation must be explicitly authorized; do not infer it from organization membership.
+Still incomplete:
+
+- Alert delivery/notification routing and metrics export.
+- Dead-letter detail inspection with bounded pagination and a reviewed redaction contract.
+- Dead-letter growth-rate detection. The current endpoint evaluates a point-in-time count; it does not claim trend detection.
+
+Threshold environment variables are documented in `.env.runtime.example`. Any future metrics labels must avoid high-cardinality identifiers and tenant-sensitive payload values. Cross-workspace aggregation must be explicitly authorized; do not infer it from organization membership.
 
 ## Release gate
 
