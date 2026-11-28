@@ -91,6 +91,33 @@ def test_mcp_credential_hash_is_not_readable_and_auth_is_database_owned():
             db.add(credential)
             db.commit()
             expected = (org.id, workspace.id, identity.id, session.id)
+            joined = db.execute(text("""
+                SELECT cred.id, cred.token_hash, cred.revoked_at, cred.expires_at,
+                       mi.revoked_at, mi.expires_at, s.status, s.expires_at,
+                       s.data_class::text, e.status::text, e.machine_session_id
+                FROM public.machine_session_credentials AS cred
+                JOIN public.machine_identities AS mi
+                  ON mi.id = cred.machine_identity_id
+                 AND mi.org_id = cred.org_id
+                 AND mi.workspace_id = cred.workspace_id
+                JOIN public.agent_sessions AS s
+                  ON s.id = cred.session_id
+                 AND s.org_id = cred.org_id
+                 AND s.workspace_id = cred.workspace_id
+                 AND s.machine_identity_id = mi.id
+                JOIN public.executions AS e
+                  ON e.org_id = cred.org_id
+                 AND e.workspace_id = cred.workspace_id
+                 AND e.machine_session_id = cred.session_id
+                 AND e.status::text = 'running'
+                WHERE cred.id = :credential_id
+            """), {"credential_id": credential_id}).first()
+            assert joined is not None, "MCP auth test fixture must satisfy the live execution join"
+            assert joined[1] == token_hash and joined[2] is None and joined[3] > now
+            assert joined[4] is None and joined[5] > now
+            assert joined[6] == "active" and joined[7] > now
+            assert joined[8] in {"synthetic", "public"}
+            assert joined[9] == "running" and joined[10] == session.id
 
         with app_engine.connect() as connection:
             assert connection.execute(text("""
