@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_principal, has_founder_authority, require_membership, require_role, require_founder_authority, require_workspace_access_from_context, Principal
 from app.db import get_db
 from app.data_protection import DataProtectionBlocked, sanitize_text
-from app.models import Role, EvaluationRun
+from app.models import Role, EvaluationRun, Workspace
 from app.audit import record_event
 from app.telephony.models import OutboxEvent
 from app.domain_models import Client, Contact, ContactActivity, Lead, LeadResearchRecord, OutreachDraft, Opportunity, Project, Milestone, ProjectOutcome, OutcomeMeasurement
@@ -224,6 +224,9 @@ def create_lead(
         if body.client_id and contact.client_id and contact.client_id != body.client_id:
             raise HTTPException(422, "Lead contact must belong to the selected client")
     client_id = body.client_id or (contact.client_id if contact else None)
+    # Serialize duplicate checks per workspace so concurrent lead creation cannot
+    # both pass the check before either transaction commits.
+    db.query(Workspace).filter_by(id=body.workspace_id, org_id=org_id).with_for_update().first()
     normalized_email = (body.email or (contact.email if contact else "")).lower().strip()
     duplicate = None
     if normalized_email:
