@@ -8,7 +8,7 @@ import { api, orgId, type Workspace } from "@/lib/api";
 
 type Project = { id: string; workspace_id: string; name: string; status: string };
 type Milestone = { id: string; title: string; status: string };
-type EvaluationRun = { id: string; pack_name: string; score: number; passed: boolean; evidence_trust: string; release_eligible: boolean; created_at: string };
+type EvaluationRun = { id: string; task_id: string | null; pack_name: string; score: number; passed: boolean; evidence_trust: string; release_eligible: boolean; created_at: string };
 type Measurement = {
   id: string; outcome_id: string; value: string; measured_at: string; source_type: string;
   source_reference: string; evidence_summary: string; milestone_id: string | null;
@@ -105,7 +105,7 @@ function OutcomeCard({ outcome, milestones, evaluations, onMeasure, onDecide }: 
           <div><div className="activity-title">{row.value} · {row.source_type.replaceAll("_", " ")}</div>
             <div className="activity-meta">{new Date(row.measured_at).toLocaleString()} · {row.source_reference}</div>
             {row.milestone_id && <div className="activity-meta">Milestone: {milestones.find(item => item.id === row.milestone_id)?.title || "Linked milestone"}</div>}
-            {row.supporting_evaluation_run_id && <div className="activity-meta">Evaluation run: {evaluations.find(item => item.id === row.supporting_evaluation_run_id)?.pack_name || "Linked evaluation"} · {row.supporting_evaluation_run_id}</div>}
+            {row.supporting_evaluation_run_id && <div className="activity-meta">Evaluation run: {evaluations.find(item => item.id === row.supporting_evaluation_run_id)?.pack_name || "Linked evaluation"}{evaluations.find(item => item.id === row.supporting_evaluation_run_id)?.task_id ? ` · Task ${evaluations.find(item => item.id === row.supporting_evaluation_run_id)?.task_id}` : ""} · {row.supporting_evaluation_run_id}</div>}
             <div className="activity-meta">{row.evidence_summary}</div>
           </div>
         </div>
@@ -119,7 +119,7 @@ function OutcomeCard({ outcome, milestones, evaluations, onMeasure, onDecide }: 
           <option value="client_reported">Client reported</option><option value="agency_measured">Agency measured</option><option value="system_measured">System measured</option>
         </select></label>
         <label className="field">Related milestone<select value={milestoneId} onChange={e => setMilestoneId(e.target.value)}><option value="">No milestone link</option>{milestones.map(item => <option key={item.id} value={item.id}>{item.title} · {item.status}</option>)}</select></label>
-        <label className="field">Supporting evaluation run<select value={evaluationId} onChange={e => setEvaluationId(e.target.value)}><option value="">No evaluation link</option>{evaluations.map(item => <option key={item.id} value={item.id}>{item.pack_name} · {item.passed ? "passed" : "failed"} · {Math.round(item.score * 100)}% · {item.evidence_trust}</option>)}</select><span className="activity-meta">Evaluation runs are supporting, self-reported evidence unless independently verified. They are not release approval.</span></label>
+        <label className="field">Supporting evaluation run<select value={evaluationId} onChange={e => setEvaluationId(e.target.value)}><option value="">No evaluation link</option>{evaluations.map(item => <option key={item.id} value={item.id}>{item.pack_name}{item.task_id ? ` · Task ${item.task_id}` : ""} · {item.passed ? "passed" : "failed"} · {Math.round(item.score * 100)}% · {item.evidence_trust}</option>)}</select><span className="activity-meta">Evaluation runs are supporting, self-reported evidence unless independently verified. They are not release approval.</span></label>
         <label className="field">Source reference<input required minLength={2} maxLength={240} value={sourceReference} onChange={e => setSourceReference(e.target.value)} placeholder="Report, dashboard, dataset or evidence ID" /></label>
         <label className="field">Evidence summary<textarea required minLength={10} value={evidence} onChange={e => setEvidence(e.target.value)} placeholder="What was measured, over what period, and how?" /></label>
         <button className="button" disabled={busy}>Save measurement</button>
