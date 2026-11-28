@@ -17,6 +17,7 @@ class ExecutionRequest:
     agent_name: str = ""
     agent_department: str = ""
     agent_instructions: str = ""
+    runtime_config: dict = field(default_factory=dict)
     task_title: str = ""
     task_description: str = ""
     external_run_id: str | None = None
