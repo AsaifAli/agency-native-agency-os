@@ -97,7 +97,7 @@ def upgrade() -> None:
         sa.column("department", sa.String(100)),
         sa.column("instructions", sa.Text()),
         sa.column("runtime", sa.String(80)),
-        sa.column("data_class", sa.String(40)),
+        sa.column("data_class", enum_type),
         sa.column("runtime_config", sa.JSON()),
         sa.column("config_sha256", sa.String(64)),
         sa.column("change_reason", sa.Text()),
