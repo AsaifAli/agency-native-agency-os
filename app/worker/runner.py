@@ -14,6 +14,9 @@ from app.db import (
     scoped_worker_workspace_session_factory,
 )
 from app.worker.processor import process_one_execution
+from app.integrations.runtime_registry import is_runtime_available
+from app.worker.runtime_factory import get_runtime
+from app.provider_usage_reconciliation import reconcile_abandoned_managed_agent_usage
 from app.machine_identity import expire_due_agent_sessions
 from app.retention import purge_due_retention_data
 from app.outbox_handlers import OUTBOX_HANDLERS
@@ -62,6 +65,24 @@ def _run_maintenance(
         db.commit()
 
     return promoted_count, recovered_count, queued_delegations
+
+
+
+def _run_provider_usage_reconciliation(
+    session_factory: SessionFactory,
+    batch_size: int,
+) -> int:
+    """Recover missing usage only when the Managed Agents runtime is configured."""
+    if not is_runtime_available("claude_managed_agents"):
+        return 0
+    runtime = get_runtime("claude_managed_agents")
+    result = reconcile_abandoned_managed_agent_usage(
+        session_factory,
+        runtime=runtime,
+        limit=min(batch_size, 10),
+    )
+    return result["reconciled"]
+
 
 
 def _run_session_maintenance(
@@ -234,7 +255,7 @@ def run_worker(
 
         if now >= next_maintenance_at:
             cursor_workspace_id = None
-            totals = [0, 0, 0, 0, 0, 0, 0, 0, 0]
+            totals = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
             while not stop_event.is_set():
                 # The database chooses exactly one workspace. The worker never
                 # receives an unscoped tenant inventory or chooses a tenant ID.
@@ -269,6 +290,9 @@ def run_worker(
                         worker_id=worker_id,
                         batch_size=maintenance_batch_size,
                     )
+                    usage_reconciled = _run_provider_usage_reconciliation(
+                        scoped_factory, maintenance_batch_size,
+                    )
                     lease_heartbeat.assert_healthy()
                 finally:
                     try:
@@ -290,10 +314,11 @@ def run_worker(
                 totals[6] += dead + requeued
                 totals[7] += retention["agent_sessions_scrubbed"]
                 totals[8] += retention["tool_payloads_purged"]
+                totals[9] += usage_reconciled
                 cursor_workspace_id = capability.workspace_id
                 did_work = did_work or any((
                     promoted, recovered, queued, expired_sessions,
-                    published, retried, dead, requeued,
+                    published, retried, dead, requeued, usage_reconciled,
                     retention["agent_sessions_scrubbed"], retention["tool_payloads_purged"],
                 ))
 
@@ -304,7 +329,7 @@ def run_worker(
                 logger.info(
                     "Capability-scoped worker maintenance completed: promoted=%s recovered=%s "
                     "delegated_queued=%s sessions_expired=%s outbox_published=%s "
-                    "outbox_retried=%s outbox_reconciled=%s agent_session_metadata_scrubbed=%s "
+                    "outbox_retried=%s outbox_reconciled=%s provider_usage_reconciled=%s agent_session_metadata_scrubbed=%s "
                     "tool_payloads_purged=%s browser_sessions_pruned=%s",
                     *totals, pruned_browser_sessions,
                 )
