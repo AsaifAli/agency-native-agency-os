@@ -83,12 +83,22 @@ def _same_request(
     task_id: str,
     agent_id: str,
     requested_by: str,
+    required_capability_action: str | None,
 ) -> bool:
+    if required_capability_action is None:
+        capability_matches = existing.required_capability_action in {
+            None, "task.execute", "research.execute", "report.generate",
+        }
+    else:
+        capability_matches = (
+            existing.required_capability_action == required_capability_action
+        )
     return (
         existing.workspace_id == workspace_id
         and existing.task_id == task_id
         and existing.agent_id == agent_id
         and existing.requested_by == requested_by
+        and capability_matches
     )
 
 
@@ -141,6 +151,7 @@ def create_execution(
             task_id=task_id,
             agent_id=agent_id,
             requested_by=requested_by,
+            required_capability_action=required_capability_action,
         ):
             raise ExecutionConflict(
                 "Idempotency key was already used for a different execution"
@@ -194,16 +205,27 @@ def create_execution(
             org_id=org_id, workspace_id=workspace_id,
             member_id=workforce_member.id, enabled=True,
         ).all()
-        eligible_grant = next((
-            grant for grant in grants
-            if agent.data_class.value in (grant.allowed_data_classes or [])
-            and bool(set(grant.allowed_actions or []) & required_actions)
-            and not (grant.tool_allowlist or [])
-        ), None)
+        eligible_grant = None
+        effective_capability_action = required_capability_action
+        for grant in sorted(grants, key=lambda item: (item.capability_key, item.id)):
+            eligible_actions = sorted(
+                set(grant.allowed_actions or []) & required_actions
+            )
+            if (
+                agent.data_class.value in (grant.allowed_data_classes or [])
+                and eligible_actions
+                and not (grant.tool_allowlist or [])
+            ):
+                eligible_grant = grant
+                if effective_capability_action is None:
+                    effective_capability_action = eligible_actions[0]
+                break
         if eligible_grant is None:
             raise AgentNotEnabled(
                 "Workforce member requires an enabled data-eligible execution capability with no ungoverned tools"
             )
+    else:
+        effective_capability_action = required_capability_action or "task.execute"
 
     agent_version = ensure_initial_agent_version(db, agent, created_by=requested_by)
     _validate_runtime_policy(agent)
@@ -214,6 +236,7 @@ def create_execution(
         task_id=task.id,
         agent_id=agent.id,
         agent_version_id=agent_version.id,
+        required_capability_action=effective_capability_action,
         requested_by=requested_by,
         idempotency_key=idempotency_key,
         runtime=agent_version.runtime,
@@ -266,8 +289,11 @@ def create_execution(
         {
             "task_id": task.id,
             "agent_id": agent.id,
-            "runtime": agent.runtime,
-            "data_class": agent.data_class.value,
+            "agent_version_id": agent_version.id,
+            "agent_version_sha256": agent_version.config_sha256,
+            "required_capability_action": effective_capability_action,
+            "runtime": agent_version.runtime,
+            "data_class": agent_version.data_class.value,
         },
     )
 
