@@ -134,7 +134,7 @@ def _revoke_identity(client, identity_id):
 
 @pytest.mark.parametrize(
     ("agent_enabled", "member_status"),
-    [(False, "active"), (True, "paused"), (True, "retired")],
+    [(False, "active"), (True, "paused"), (True, "retired"), (True, "active")],
 )
 def test_agent_machine_identity_and_session_require_live_agent_member_state(
     security_client, agent_enabled, member_status
@@ -183,12 +183,20 @@ def test_agent_machine_identity_and_session_require_live_agent_member_state(
             principal = authenticate_machine_token(
                 f"Bearer aos_mi_{identity.id}.{secret}", db
             )
-            with pytest.raises(HTTPException) as exc:
-                create_agent_session(
+            if member_status == "active":
+                session = create_agent_session(
                     db, principal, purpose="Lifecycle test",
                     data_class="synthetic", ttl_seconds=300,
                 )
-            assert exc.value.status_code in {401, 403}
+                assert session.status == "active"
+                assert session.machine_identity_id == identity.id
+            else:
+                with pytest.raises(HTTPException) as exc:
+                    create_agent_session(
+                        db, principal, purpose="Lifecycle test",
+                        data_class="synthetic", ttl_seconds=300,
+                    )
+                assert exc.value.status_code == 403
     finally:
         db.close()
 
