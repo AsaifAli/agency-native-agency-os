@@ -131,6 +131,7 @@ def test_workspace_authorization_migration_covers_every_workspace_owned_table():
     expected.difference_update({
         "project_outcomes", "outcome_measurements",
         "orchestration_plan_delegations", "knowledge_items", "business_drafts",
+        "machine_session_credentials",
     })
     assert set(migration.WORKSPACE_TABLES) == expected
 
@@ -259,19 +260,16 @@ def test_ci_runs_human_rls_tests_with_a_dedicated_least_privilege_app_login():
 
 
 def test_agent_session_credential_migration_is_execution_bound_and_private():
-    root = PATH.parents[2]
-    migrations = root / "migrations" / "versions"
-    migration_path = next(migrations.glob("*agent_session_credentials*.py"))
-    migration = migration_path.read_text()
-    source = migration.lower()
+    source = (PATH.parent / "r4b8d2f6a103_mcp_session_credentials.py").read_text().lower()
 
-    assert "agent_session_credentials" in source
+    assert "machine_session_credentials" in source
     assert "enable row level security" in source
     assert "force row level security" in source
     assert "worker_has_execution_context" in source
-    assert "create_agent_session_with_credential" in source
-    assert "lookup_agent_session_credential" in source
-    assert "revoke all on table public.agent_session_credentials" in source
+    assert "worker_mcp_credential_insert" in source
+    assert "authenticate_mcp_session_credential" in source
+    assert "is_mcp_session_credential_active" in source
+    assert "revoke all on public.machine_session_credentials" in source
     assert "agency_os_app" in source
     assert "agency_os_worker" in source
 
