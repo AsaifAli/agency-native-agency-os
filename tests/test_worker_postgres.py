@@ -35,6 +35,7 @@ from app.outbox_service import (
     OutboxOwnershipError,
     _acknowledge,
     _record_failure,
+    _renew_lease,
     reconcile_outbox_events,
     claim_outbox_batch,
 )
@@ -905,6 +906,14 @@ def test_postgres_outbox_claim_generation_fences_reused_worker_id():
             second_claim.commit()
         finally:
             second_claim.close()
+
+        renewed = _renew_lease(
+            Session,
+            message=old_message,
+            worker_id=worker_id,
+            lease_seconds=60,
+        )
+        assert renewed is False
 
         with pytest.raises(OutboxOwnershipError):
             _acknowledge(Session, message=old_message, worker_id=worker_id)
