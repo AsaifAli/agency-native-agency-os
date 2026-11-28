@@ -915,14 +915,6 @@ def test_postgres_outbox_claim_generation_fences_reused_worker_id():
         )
         assert renewed is False
 
-        renewed = _renew_lease(
-            Session,
-            message=old_message,
-            worker_id=worker_id,
-            lease_seconds=60,
-        )
-        assert renewed is False
-
         with pytest.raises(OutboxOwnershipError):
             _acknowledge(Session, message=old_message, worker_id=worker_id)
 
@@ -1371,6 +1363,8 @@ import os
 import time
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
+# Register the FK target tables before SQLAlchemy flushes OutboxEvent.
+from app.models import Organization, Workspace
 from app.outbox_service import claim_outbox_batch
 
 engine = create_engine(os.environ["AGENCY_OS_TEST_DATABASE_URL"], pool_pre_ping=True)
