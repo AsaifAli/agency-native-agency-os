@@ -2169,6 +2169,15 @@ def test_abandoned_managed_agent_session_usage_is_reconciled_idempotently(worker
     }
     assert persisted_attempt.result["usage_reconciliation"]["status"] == "reconciled"
     assert persisted_execution.result["usage"]["list_cost_minor"] == 9
+    usage_event = db.query(AuditEvent).filter_by(
+        org_id=ctx["org_id"],
+        workspace_id=ctx["workspace_id"],
+        event_type="execution.provider_usage_observed",
+        resource_type="execution_attempt",
+        resource_id=attempt.id,
+    ).one()
+    assert usage_event.payload["source"] == "provider_session_reconciliation"
+    assert usage_event.payload["usage"] == persisted_attempt.result["usage"]
 
     second = reconcile_abandoned_managed_agent_usage(
         session_factory,
