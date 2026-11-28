@@ -54,7 +54,7 @@ def authenticate_machine_token(authorization: str | None, db: Session) -> Machin
     if not hmac.compare_digest(identity.token_hash, _token_digest(secret)):
         raise HTTPException(401, "Invalid machine credential")
     identity.last_used_at = _utcnow()
-    set_rls_context(db, machine_org_id=identity.org_id, machine_workspace_id=identity.workspace_id)
+    set_rls_context(db, machine_org_id=identity.org_id, machine_workspace_id=identity.workspace_id, machine_identity_lookup_id=identity.id)
     return MachinePrincipal(identity=identity)
 
 def get_machine_principal(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> MachinePrincipal:

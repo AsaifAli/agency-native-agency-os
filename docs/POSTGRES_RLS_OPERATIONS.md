@@ -17,7 +17,7 @@ Human access requires both active organization membership and an explicit, audit
 | `agency_os_app` | API only | Non-owner, `NOBYPASSRLS` | All API queries are subject to tenant RLS |
 | `agency_os_worker` | Worker only | Non-owner, non-superuser, `NOBYPASSRLS` | Workspace-scoped queue processing with explicit transaction-local RLS context |
 
-The worker role is non-superuser `NOBYPASSRLS`. Its code enumerates workspace identifiers through the private scope function and processes one workspace at a time with transaction-local RLS context. The scope function and browser-session retention function are the only cross-workspace SECURITY DEFINER entry points granted to the worker. The worker still has operational authority to process every workspace; PostgreSQL custom GUC context is defense-in-depth against missing predicates, not a boundary against arbitrary SQL execution under the worker credential. For isolation against a compromised worker credential, use per-tenant worker credentials or move all tenant data operations behind narrowly scoped database functions. The API must never receive migrator or worker credentials.
+The worker role is non-superuser `NOBYPASSRLS`. It claims one workspace at a time through bounded execution/maintenance capability functions and processes it with transaction-local RLS context. It has no general-purpose global workspace-list function. Worker claim/lease lifecycle functions and bounded browser-session retention are narrowly scoped SECURITY DEFINER entry points; none grants arbitrary tenant-table access. The worker still has operational authority to process every workspace; PostgreSQL custom GUC context is defense-in-depth against missing predicates, not a boundary against arbitrary SQL execution under the worker credential. For isolation against a compromised worker credential, use per-tenant worker credentials or move all tenant data operations behind narrowly scoped database functions. The API must never receive migrator or worker credentials.
 
 ### Shared user identity directory
 
@@ -48,7 +48,7 @@ Do not reset/delete the volume. Back up first.
 ## Context behavior
 
 - Human authentication binds `agency_os.user_id` transaction-locally after resolving the active user.
-- Machine authentication first binds only the supplied identity ID for one-row lookup; after digest verification it binds the machine organization and exact workspace.
+- Machine authentication first binds only the supplied identity ID for one-row lookup; after digest verification it retains that exact identity ID together with the machine organization and exact workspace. Service-session credential SECURITY DEFINER functions require all three context values to match their target parameters and reject cross-identity calls.
 - Signed website intake binds only its configured org/workspace after signature and idempotency checks.
 - SQLAlchemy reapplies context after each new transaction. `set_config(..., true)` resets at commit/rollback so pooled connections do not retain a previous request's tenant identity.
 - A restricted `SECURITY DEFINER` membership predicate is owned by `agency_os_migrator`; execute is revoked from PUBLIC and granted to API and worker roles. For `session_user = 'agency_os_worker'`, it always returns false so the worker cannot use it as a membership oracle.

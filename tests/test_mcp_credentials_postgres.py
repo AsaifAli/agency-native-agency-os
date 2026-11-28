@@ -9,6 +9,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import sessionmaker
 
+from app.db import set_rls_context
 from app.models import Agent, DataClass, Execution, ExecutionStatus, Organization, Task, User, Workspace
 from app.security_models import AgentSession, MachineIdentity, MachineSessionCredential
 
@@ -346,10 +347,44 @@ def test_service_identity_mcp_credential_uses_narrow_database_capabilities():
             db.commit()
             org_id, workspace_id = org.id, workspace.id
 
+        # The SECURITY DEFINER functions must reject direct calls that do not
+        # carry the identity context established by a successful bearer check.
+        with App() as db:
+            set_rls_context(
+                db,
+                machine_identity_lookup_id=str(uuid.uuid4()),
+                machine_org_id=org_id,
+                machine_workspace_id=workspace_id,
+            )
+            rejected_issue = db.execute(text("""
+                SELECT agency_os_private.issue_service_mcp_session_credential(
+                    :credential_id, :org_id, :workspace_id, :identity_id,
+                    :session_id, :token_hash, :token_prefix, :expires_at, :created_at
+                )
+            """), {
+                "credential_id": str(uuid.uuid4()), "org_id": org_id,
+                "workspace_id": workspace_id, "identity_id": identity_id,
+                "session_id": session_id, "token_hash": hashlib.sha256(uuid.uuid4().bytes).hexdigest(),
+                "token_prefix": "aos_ms_synthetic.",
+                "expires_at": now + timedelta(minutes=5), "created_at": now,
+            }).scalar_one()
+            rejected_revoke = db.execute(text("""
+                SELECT agency_os_private.revoke_service_mcp_session_credentials(
+                    :org_id, :workspace_id, :identity_id, :session_id
+                )
+            """), {
+                "org_id": org_id, "workspace_id": workspace_id,
+                "identity_id": identity_id, "session_id": session_id,
+            }).scalar_one()
+            assert rejected_issue is False
+            assert rejected_revoke == -1
+            db.rollback()
+
         with App() as db:
             principal = authenticate_machine_token(
                 f"Bearer aos_mi_{identity_id}.{raw_secret}", db
             )
+            assert db.info["agency_os_rls_context"]["machine_identity_lookup_id"] == identity_id
             session = create_agent_session(
                 db, principal, purpose="Claude Code integration session",
                 data_class="public", ttl_seconds=1800,

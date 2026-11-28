@@ -105,6 +105,7 @@ def test_machine_token_authentication_and_expiry(security_client):
     try:
         principal = authenticate_machine_token("Bearer " + issued["token"], db)
         assert principal.identity.id == issued["id"]
+        assert db.info["agency_os_rls_context"]["machine_identity_lookup_id"] == issued["id"]
         with pytest.raises(Exception):
             authenticate_machine_token("Bearer " + issued["token"] + "wrong", db)
         identity = db.get(MachineIdentity, issued["id"])
