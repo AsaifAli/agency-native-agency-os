@@ -230,3 +230,46 @@ def test_qa_issue_list_is_limited_to_the_requested_workspace(client):
     )
     assert listed.status_code == 200, listed.text
     assert [item["id"] for item in listed.json()] == [created.json()["id"]]
+
+
+def test_failed_retest_returns_issue_to_work_and_is_audited(client):
+    created = create_issue(client)
+    assert created.status_code == 201, created.text
+    issue_id = created.json()["id"]
+    url = f"/v1/orgs/{client.org_id}/qa/issues/{issue_id}/transition?workspace_id={client.ws_id}"
+    for status in ("triaged", "in_progress", "fixed", "retest"):
+        response = client.patch(url, headers=headers(), json={"status": status})
+        assert response.status_code == 200, response.text
+
+    db = client.session_factory()
+    try:
+        evaluation = db.get(EvaluationRun, client.failing_eval_id)
+        evaluation.created_at = datetime.now(timezone.utc)
+        db.commit()
+    finally:
+        db.close()
+
+    reopened = client.patch(
+        url, headers=headers(),
+        json={
+            "status": "in_progress",
+            "retest_evaluation_run_id": client.failing_eval_id,
+            "note": "Retest still reproduces the issue; return it to implementation.",
+        },
+    )
+    assert reopened.status_code == 200, reopened.text
+    assert reopened.json()["status"] == "in_progress"
+    assert reopened.json()["fixed_at"] is None
+
+    db = client.session_factory()
+    try:
+        from app.models import AuditEvent
+        event = db.query(AuditEvent).filter_by(
+            resource_type="qa_issue", resource_id=issue_id,
+            event_type="qa_issue.status_changed",
+        ).order_by(AuditEvent.created_at.desc()).first()
+        assert event.payload["retest_evaluation_run_id"] == client.failing_eval_id
+        assert event.payload["from_status"] == "retest"
+        assert event.payload["to_status"] == "in_progress"
+    finally:
+        db.close()
