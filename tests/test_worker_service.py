@@ -33,6 +33,7 @@ from app.worker_service import (
     recover_expired_execution_leases,
     start_execution,
     queue_ready_delegations,
+    _aggregate_provider_usage,
 )
 
 import time
@@ -2041,10 +2042,39 @@ def test_processor_persists_usage_when_provider_budget_requires_review(worker_co
     assert attempt.result == saved.result
 
 
-def test_provider_usage_aggregates_across_execution_attempts(worker_context):
+
+def test_managed_agents_usage_adds_distinct_provider_sessions(worker_context):
+    ctx = worker_context
+    db = ctx["db"]
+    execution = create_worker_execution(ctx)
+    execution.runtime = "claude_managed_agents"
+    first_usage = {"input_tokens": 100, "output_tokens": 20, "list_cost_minor": 10,
+                   "currency": "USD"}
+    second_usage = {"input_tokens": 50, "output_tokens": 30, "list_cost_minor": 7,
+                    "currency": "USD"}
+    for number, session_id, usage in (
+        (1, "sesn-one", first_usage), (2, "sesn-two", second_usage),
+    ):
+        db.add(ExecutionAttempt(
+            execution_id=execution.id, attempt_number=number,
+            runtime="claude_managed_agents", external_run_id=session_id,
+            status=ExecutionAttemptStatus.failed,
+            result={"usage": usage},
+        ))
+    db.flush()
+
+    assert _aggregate_provider_usage(db, execution.id) == {
+        "input_tokens": 150, "output_tokens": 50, "list_cost_minor": 17,
+        "currency": "USD",
+    }
+
+def test_managed_agents_usage_uses_latest_cumulative_snapshot_for_resumed_session(worker_context):
     ctx = worker_context
     db = ctx["db"]
     execution, first_attempt, worker_id = start_running_attempt(ctx)
+    execution.runtime = "claude_managed_agents"
+    first_attempt.runtime = "claude_managed_agents"
+    first_attempt.external_run_id = "sesn-shared"
     first_usage = {
         "input_tokens": 100, "output_tokens": 20, "list_cost_minor": 10,
         "currency": "USD", "active_seconds": 1.5,
@@ -2061,25 +2091,22 @@ def test_provider_usage_aggregates_across_execution_attempts(worker_context):
     execution.next_retry_at = None
     second_attempt = ExecutionAttempt(
         execution_id=execution.id, attempt_number=2, worker_id=worker_id,
-        runtime=execution.runtime, status=ExecutionAttemptStatus.running,
+        runtime=execution.runtime, external_run_id="sesn-shared",
+        status=ExecutionAttemptStatus.running,
         lease_expires_at=now + timedelta(seconds=120), heartbeat_at=now, started_at=now,
     )
     db.add(second_attempt); db.flush()
     second_usage = {
-        "input_tokens": 50, "output_tokens": 30, "list_cost_minor": 7,
+        "input_tokens": 150, "output_tokens": 50, "list_cost_minor": 17,
         "currency": "USD", "active_seconds": 2.5,
-        "server_tool_use": {"web_search_requests": 0, "web_fetch_requests": 1},
+        "server_tool_use": {"web_search_requests": 1, "web_fetch_requests": 1},
     }
     complete_execution(
         db, execution_id=execution.id, attempt_id=second_attempt.id, worker_id=worker_id,
-        result={"provider": "claude_managed_agents", "external_run_id": "sesn-second",
+        result={"provider": "claude_managed_agents", "external_run_id": "sesn-shared",
                 "status": "succeeded", "detail": "Completed.", "usage": second_usage},
     )
     db.commit()
-    assert execution.provider_usage == {
-        "input_tokens": 150, "output_tokens": 50, "list_cost_minor": 17,
-        "currency": "USD", "active_seconds": 4.0,
-        "server_tool_use": {"web_search_requests": 1, "web_fetch_requests": 1},
-    }
+    assert execution.provider_usage == second_usage
     assert first_attempt.result["usage"] == first_usage
     assert second_attempt.result["usage"] == second_usage

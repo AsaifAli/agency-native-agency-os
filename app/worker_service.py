@@ -608,13 +608,40 @@ def heartbeat_execution(
 
 
 def _aggregate_provider_usage(db: Session, execution_id: str) -> dict | None:
-    """Sum provider-reported usage across every persisted attempt for an execution."""
-    rows = db.query(ExecutionAttempt.result).filter_by(execution_id=execution_id).all()
-    usage_rows = []
-    for (result,) in rows:
+    """Aggregate attempt deltas and one latest cumulative snapshot per Managed Agents session.
+
+    Managed Agents usage is session-cumulative. A resumed execution can therefore
+    persist the same session's cumulative snapshot on multiple attempts; summing
+    those snapshots would double-count prior turns. Distinct provider sessions
+    remain additive. Other runtimes retain the existing per-attempt additive
+    contract until their usage semantics are explicitly defined.
+    """
+    rows = (
+        db.query(ExecutionAttempt)
+        .filter_by(execution_id=execution_id)
+        .order_by(ExecutionAttempt.attempt_number.asc(), ExecutionAttempt.id.asc())
+        .all()
+    )
+    additive_usage_rows = []
+    managed_session_snapshots: dict[str, tuple[int, dict]] = {}
+    for attempt in rows:
+        result = attempt.result
         usage = result.get("usage") if isinstance(result, dict) else None
-        if usage is not None:
-            usage_rows.append(_validate_provider_usage(usage))
+        if usage is None:
+            continue
+        normalized = _validate_provider_usage(usage)
+        if attempt.runtime == "claude_managed_agents" and attempt.external_run_id:
+            current = managed_session_snapshots.get(attempt.external_run_id)
+            if current is None or attempt.attempt_number >= current[0]:
+                managed_session_snapshots[attempt.external_run_id] = (
+                    attempt.attempt_number, normalized,
+                )
+        else:
+            additive_usage_rows.append(normalized)
+
+    usage_rows = additive_usage_rows + [
+        snapshot for _, snapshot in managed_session_snapshots.values()
+    ]
     if not usage_rows:
         return None
     totals: dict = {}
