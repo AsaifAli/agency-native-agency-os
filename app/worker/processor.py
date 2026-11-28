@@ -27,6 +27,7 @@ from app.execution_controls import (
     acknowledge_execution_cancel,
     get_execution_control_request,
 )
+from app.execution_service import current_execution_authorization_error
 from app.worker_service import (
     LeaseExpired,
     claim_next_execution,
@@ -264,6 +265,37 @@ def process_one_execution(
                 )
                 db.commit()
                 return execution.id
+        authorization_error = current_execution_authorization_error(
+            db, execution, agent,
+        )
+        if authorization_error is not None:
+            error_code, error_message = authorization_error
+            record_event(
+                db,
+                execution.org_id,
+                None,
+                "execution.authorization_revoked",
+                "execution",
+                execution.id,
+                execution.workspace_id,
+                {
+                    "reason_code": error_code,
+                    "required_capability_action": execution.required_capability_action,
+                    "agent_version_id": execution.agent_version_id,
+                },
+            )
+            fail_execution(
+                db,
+                execution_id=execution.id,
+                attempt_id=attempt.id,
+                worker_id=worker_id,
+                error_code=error_code,
+                error_message=error_message,
+                retryable=False,
+            )
+            db.commit()
+            return execution.id
+
         task = db.query(Task).filter_by(
             id=execution.task_id, org_id=execution.org_id,
             workspace_id=execution.workspace_id,
