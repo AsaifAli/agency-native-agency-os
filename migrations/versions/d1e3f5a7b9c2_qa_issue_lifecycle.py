@@ -95,8 +95,14 @@ def upgrade() -> None:
             f"USING {predicate} WITH CHECK {predicate}"
         )
         op.execute("REVOKE ALL ON TABLE public.qa_issues FROM agency_os_worker")
-        op.execute("GRANT SELECT, INSERT, UPDATE ON TABLE public.qa_issues TO agency_os_app")
-        op.execute("REVOKE DELETE ON TABLE public.qa_issues FROM agency_os_app")
+        op.execute("GRANT SELECT, INSERT ON TABLE public.qa_issues TO agency_os_app")
+        op.execute("REVOKE UPDATE, DELETE ON TABLE public.qa_issues FROM agency_os_app")
+        op.execute("""
+            GRANT UPDATE (
+                status, retest_evaluation_run_id, retest_evidence_trust,
+                fixed_at, closed_at, closed_by_user_id, updated_at
+            ) ON TABLE public.qa_issues TO agency_os_app
+        """)
 
 
 def downgrade() -> None:
