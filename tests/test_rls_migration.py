@@ -331,3 +331,24 @@ def test_security_definer_access_predicates_bind_actor_to_transaction_identity()
     assert source.count("actor_user_id = nullif(current_setting('agency_os.user_id', true), '')") >= 2
     assert source.count("SECURITY DEFINER") >= 2
     assert source.count("OWNER TO agency_os_migrator") >= 2
+
+
+def test_every_security_definer_migration_function_is_private_and_pins_search_path():
+    import re
+
+    migration_dir = Path(__file__).parents[1] / "migrations" / "versions"
+    checked = 0
+    for path in migration_dir.glob("*.py"):
+        source = path.read_text()
+        for match in re.finditer(r"CREATE(?: OR REPLACE)? FUNCTION\s+([\w.]+)\s*\(", source, re.IGNORECASE):
+            tail = source[match.start():]
+            end = tail.find("$function$")
+            if end < 0:
+                continue
+            definition = tail[:end + len("$function$")]
+            if not re.search(r"\bSECURITY\s+DEFINER\b", definition, re.IGNORECASE):
+                continue
+            checked += 1
+            assert match.group(1).startswith("agency_os_private."), path.name
+            assert re.search(r"SET\s+search_path\s*=\s*pg_catalog(?:\s*,|\s*$)", definition, re.IGNORECASE), path.name
+    assert checked >= 30
