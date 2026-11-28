@@ -121,6 +121,33 @@ def test_mcp_credential_hash_is_not_readable_and_auth_is_database_owned():
             """)).one()
             assert tuple(privileges) == (False, True, False, False)
 
+            # Caller-forged tenant GUCs cannot satisfy the execution-bound INSERT policy.
+            connection.execute(
+                text("SELECT set_config('agency_os.machine_org_id', :org, true)"),
+                {"org": expected[0]},
+            )
+            connection.execute(
+                text("SELECT set_config('agency_os.machine_workspace_id', :workspace, true)"),
+                {"workspace": expected[1]},
+            )
+            with pytest.raises(DBAPIError):
+                connection.execute(text("""
+                    INSERT INTO public.machine_session_credentials (
+                        id, org_id, workspace_id, machine_identity_id, session_id,
+                        token_hash, token_prefix, credential_version, expires_at,
+                        request_count_window, provider_credential_status
+                    ) VALUES (
+                        :id, :org, :workspace, :identity, :session,
+                        :hash, 'aos_ms_forged.', 1, now() + interval '5 minutes',
+                        0, 'not_created'
+                    )
+                """), {
+                    "id": str(uuid.uuid4()), "org": expected[0], "workspace": expected[1],
+                    "identity": expected[2], "session": expected[3],
+                    "hash": hashlib.sha256(f"forged-{suffix}".encode()).hexdigest(),
+                })
+            connection.rollback()
+
         with Admin() as db:
             db.query(AgentSession).filter_by(id=expected[3]).update({"status": "cancelled"})
             db.commit()
