@@ -34,11 +34,24 @@ def _engine():
 
 def _base_schema(engine, *, cross_workspace_member=False):
     with engine.begin() as connection:
-        for table in ("agents", "tasks", "workforce_units"):
-            connection.execute(sa.text(
-                f"CREATE TABLE {table} (id VARCHAR(36) PRIMARY KEY, "
-                "org_id VARCHAR(36) NOT NULL, workspace_id VARCHAR(36) NOT NULL)"
-            ))
+        connection.execute(sa.text("""
+            CREATE TABLE agents (
+                id VARCHAR(36) PRIMARY KEY, org_id VARCHAR(36) NOT NULL,
+                workspace_id VARCHAR(36) NOT NULL
+            )
+        """))
+        connection.execute(sa.text("""
+            CREATE TABLE tasks (
+                id VARCHAR(36) PRIMARY KEY, org_id VARCHAR(36) NOT NULL,
+                workspace_id VARCHAR(36) NOT NULL
+            )
+        """))
+        connection.execute(sa.text("""
+            CREATE TABLE workforce_units (
+                id VARCHAR(36) PRIMARY KEY, org_id VARCHAR(36) NOT NULL,
+                workspace_id VARCHAR(36) NOT NULL, parent_unit_id VARCHAR(36)
+            )
+        """)
         connection.execute(sa.text("""
             CREATE TABLE workforce_members (
                 id VARCHAR(36) PRIMARY KEY, org_id VARCHAR(36) NOT NULL,
@@ -50,6 +63,15 @@ def _base_schema(engine, *, cross_workspace_member=False):
             CREATE TABLE workforce_capabilities (
                 id VARCHAR(36) PRIMARY KEY, org_id VARCHAR(36) NOT NULL,
                 workspace_id VARCHAR(36) NOT NULL, member_id VARCHAR(36) NOT NULL
+            )
+        """))
+        connection.execute(sa.text("""
+            CREATE TABLE workforce_positions (
+                id VARCHAR(36) PRIMARY KEY, org_id VARCHAR(36) NOT NULL,
+                workspace_id VARCHAR(36) NOT NULL, unit_id VARCHAR(36),
+                team_unit_id VARCHAR(36), assigned_member_id VARCHAR(36),
+                position_key VARCHAR(160) NOT NULL, reports_to_position_key VARCHAR(160),
+                UNIQUE (org_id, workspace_id, position_key)
             )
         """))
         connection.execute(sa.text("""
@@ -75,6 +97,15 @@ def _base_schema(engine, *, cross_workspace_member=False):
             "(id, org_id, workspace_id, unit_id, manager_member_id, agent_id) "
             "VALUES ('member-a', 'org-a', 'workspace-a', 'workforce_units-a', NULL, 'agents-a'), "
             "('member-b', 'org-a', 'workspace-b', 'workforce_units-b', NULL, 'agents-b')"
+        ))
+        connection.execute(sa.text(
+            "INSERT INTO workforce_positions "
+            "(id, org_id, workspace_id, unit_id, team_unit_id, assigned_member_id, "
+            "position_key, reports_to_position_key) VALUES "
+            "('position-a', 'org-a', 'workspace-a', 'workforce_units-a', "
+            "'workforce_units-a', 'member-a', 'position-a', NULL), "
+            "('position-b', 'org-a', 'workspace-b', 'workforce_units-b', "
+            "'workforce_units-b', 'member-b', 'position-b', NULL)"
         ))
         if cross_workspace_member:
             connection.execute(sa.text(
@@ -159,6 +190,40 @@ def test_workforce_links_are_workspace_scoped_at_database_boundary():
                 "child_task_id, delegated_by_member_id, assigned_to_member_id) "
                 "VALUES ('delegation-cross-creator', 'org-a', 'workspace-a', 'tasks-a', "
                 "'tasks-c', 'member-b', 'member-a')"
+            ))
+
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(sa.text(
+                "INSERT INTO workforce_units (id, org_id, workspace_id, parent_unit_id) "
+                "VALUES ('unit-cross-parent', 'org-a', 'workspace-a', 'workforce_units-b')"
+            ))
+
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(sa.text(
+                "INSERT INTO workforce_positions "
+                "(id, org_id, workspace_id, unit_id, position_key) "
+                "VALUES ('position-cross-unit', 'org-a', 'workspace-a', "
+                "'workforce_units-b', 'position-cross-unit')"
+            ))
+
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(sa.text(
+                "INSERT INTO workforce_positions "
+                "(id, org_id, workspace_id, assigned_member_id, position_key) "
+                "VALUES ('position-cross-member', 'org-a', 'workspace-a', "
+                "'member-b', 'position-cross-member')"
+            ))
+
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(sa.text(
+                "INSERT INTO workforce_positions "
+                "(id, org_id, workspace_id, reports_to_position_key, position_key) "
+                "VALUES ('position-cross-report', 'org-a', 'workspace-a', "
+                "'position-b', 'position-cross-report')"
             ))
 
 
