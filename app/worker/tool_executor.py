@@ -217,6 +217,8 @@ def build_machine_mcp_session_preparer(
     attempt_id: str,
     worker_id: str,
     session_ttl_seconds: int = 900,
+    provider_vault_id: str,
+    max_active_vault_credentials: int = 16,
 ):
     """Prepare one execution-bound AgentSession and one-time MCP bearer token.
 
@@ -225,8 +227,8 @@ def build_machine_mcp_session_preparer(
     """
     from sqlalchemy.exc import IntegrityError
 
-    from app.integrations.runtime import RuntimeManualReviewRequired
-    from app.session_credentials import issue_session_credential
+    from app.integrations.runtime import RuntimeManualReviewRequired, RuntimeTransientError
+    from app.session_credentials import MCPVaultCapacityError, issue_session_credential
 
     ttl_seconds = max(60, min(int(session_ttl_seconds), 3600))
 
@@ -341,8 +343,15 @@ def build_machine_mcp_session_preparer(
                     session_id=session.id,
                     ttl_seconds=ttl_seconds,
                     now=now,
+                    provider_vault_id=provider_vault_id,
+                    max_active_vault_credentials=max_active_vault_credentials,
                 )
                 db.commit()
+            except MCPVaultCapacityError as exc:
+                db.rollback()
+                raise RuntimeTransientError(
+                    "Claude Managed Agents MCP is waiting for an available Vault credential slot."
+                ) from exc
             except IntegrityError as exc:
                 db.rollback()
                 raise RuntimeManualReviewRequired(
