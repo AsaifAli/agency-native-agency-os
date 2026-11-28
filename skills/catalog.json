@@ -571,7 +571,7 @@
       "name": "agency-learning-loop",
       "path": "agency-learning-loop/SKILL.md",
       "category": "operations",
-      "description": "Review Revenue and Delivery outcomes, turn verified evidence into scoped lessons, and propose evaluated improvements without self-modification.",
+      "description": "Review completed Revenue and Delivery work, turn verified outcomes into scoped operational lessons, and propose evaluated improvements without self-modifying authority or policy.",
       "sources": [
         "ainative-os",
         "founder-os"
@@ -594,7 +594,7 @@
       "name": "cowork-hybrid-operations",
       "path": "cowork-hybrid-operations/SKILL.md",
       "category": "operations",
-      "description": "Use Claude Cowork for bounded cross-app research and deliverables while preserving Agency OS authority, client isolation and human review.",
+      "description": "Use Claude Cowork as a bounded knowledge-work surface for the agency's Revenue and Delivery engines while preserving Agency OS authority, client isolation and human review.",
       "sources": [
         "anthropic-cowork-docs",
         "agent-skills-spec"
