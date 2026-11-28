@@ -1,0 +1,135 @@
+# Claude Managed Agents MCP Adapter — Design and Acceptance Contract
+
+**Status:** Design contract; implementation not yet started.  
+**Owner:** Claude runtime adapter, with the OS Tool Gateway as the only authorization and execution authority.  
+**Initial data policy:** synthetic/public only. No local model, local inference or local fallback.
+
+## 1. Architectural boundary
+
+MCP transport belongs to the Claude Managed Agents integration layer. It is not a second tool system.
+
+- The Claude adapter owns provider-specific Agent/session configuration, MCP server registration, Anthropic Vault credentials, session lifecycle and provider event handling.
+- The OS owns machine identity, AgentSession, session credentials, workspace scope, RBAC/ABAC, workforce grants, data-class eligibility, approvals, idempotency, tool execution, persisted results and audit.
+- Every MCP invocation must call the existing `app.tool_gateway.invoke_registered_tool`. Do not duplicate policy checks in the MCP server or create a second tool registry.
+- The MCP endpoint is a transport façade over the Tool Gateway. It cannot access core business tables directly.
+- Start read-only. Tools requiring approval or external side effects remain unavailable until an approval adapter can consume the approval and protected action atomically.
+
+## 2. Provider contract and constraints
+
+Claude Managed Agents supports remote MCP servers over Streamable HTTP. Agent configuration declares the MCP server and matching `mcp_toolset`; session creation supplies authentication through an Anthropic Vault. Credentials are matched to the declared MCP URL. The adapter must use the exact same session-specific URL in the vault credential and session override.
+
+Relevant provider constraints:
+
+- Create the Vault credential as `static_bearer`, bound to the exact MCP server URL.
+- Attach `vault_ids` when creating the Managed Agents session. The current Update Session API marks `vault_ids` as not yet supported, so credentials cannot be attached after session creation.
+- Use a session-local `agent_with_overrides` configuration to supply the MCP server URL and MCP toolset without mutating the reusable Agent definition.
+- With limited networking, the MCP host must be explicitly included in the Managed Agents environment's allowed hosts. Do not enable unrestricted MCP networking.
+- The current provider API does not document an idempotency key for Vault credential creation or session creation. Ambiguous outcomes must stop for reconciliation, not blindly retry.
+
+References:
+- [Managed Agents MCP connector](https://platform.claude.com/docs/en/managed-agents/mcp-connector)
+- [Authenticate with Vaults](https://platform.claude.com/docs/en/managed-agents/vaults)
+- [Create Vault credential](https://platform.claude.com/docs/en/api/beta/vaults/credentials/create)
+- [Create Session](https://platform.claude.com/docs/en/api/beta/sessions/create)
+- [Update Session](https://platform.claude.com/docs/en/api/beta/sessions/update)
+- [Session operations](https://platform.claude.com/docs/en/managed-agents/session-operations)
+
+## 3. Session-scoped authentication
+
+A long-lived MachineIdentity bearer token alone is insufficient for MCP because each provider session must map to exactly one OS AgentSession. Use a short-lived, session-scoped bearer credential.
+
+1. The worker, under its live execution capability, creates an OS AgentSession bound to the execution's exact org, workspace, agent MachineIdentity and allowed data class.
+2. The OS generates a high-entropy session token. Only its SHA-256 digest and non-secret display prefix are stored. The raw token exists only in worker memory until it is sent over TLS to the Anthropic Vault API; it must never enter prompts, logs, traces, audit payloads or source control.
+3. The credential is bound to the AgentSession and expires no later than the AgentSession or MachineIdentity. Revocation/expiry of either parent makes the credential unusable.
+4. The public MCP URL is session-specific, for example `https://<configured-host>/v1/integrations/claude/mcp/sessions/<agent_session_id>`. The path identifies the OS session; the bearer token authenticates it. The path is not a secret.
+5. The MCP authentication boundary validates the path session ID and bearer digest together, then establishes the exact org/workspace/machine identity context before loading any tenant data.
+6. The credential lookup must use a narrowly scoped SECURITY DEFINER function that returns only minimal session context. The app role must not receive direct SELECT access to the credential table. Worker writes must be bound to the current execution capability and that execution's agent.
+7. Store provider Vault credential ID and provider session ID as non-secret external references on OS-owned session/execution records. Never store the raw bearer token.
+
+The credential table must have forced workspace RLS. Worker visibility is additionally restricted to the exact live execution ID; a worker must not enumerate other session credentials in the workspace.
+
+## 4. Session creation and provider lifecycle
+
+1. Validate the pre-created Managed Agents Agent. Reject unexpected built-in toolsets, skills, multiagent configuration, unapproved MCP servers and arbitrary tool overrides.
+2. Create the OS AgentSession and its one-time credential hash in a committed transaction.
+3. Create an Anthropic Vault credential using `static_bearer`, the raw session token, the session-specific MCP URL, and non-secret metadata containing the OS AgentSession and execution IDs.
+4. Persist the returned Vault credential ID before creating the provider session. If credential creation has an ambiguous result, list credentials in the configured Vault and reconcile by exact metadata and URL. Zero or multiple matches must stop for manual review; never create another credential blindly.
+5. Create the Managed Agents session with:
+   - the configured Agent ID through `agent_with_overrides`;
+   - one session-specific MCP server URL;
+   - one matching `mcp_toolset`;
+   - the configured Vault ID in `vault_ids`;
+   - the existing bounded session budget and initial task event.
+6. Persist the provider session ID before reporting the execution as started. If the response is ambiguous or persistence fails, mark the execution non-retryable for manual reconciliation. Do not create a second provider session.
+7. On successful completion, cancellation, expiry or identity revocation, revoke the OS session credential first. Archive the corresponding provider Vault credential as cleanup; if archive fails, the OS-side revocation still prevents further tool calls and a cleanup task must be recorded.
+8. A provider `session.error` for MCP connection/authentication failure must be surfaced as a typed runtime error and stop tool use until the credential/network configuration is repaired.
+
+External calls occur outside database transactions. Persist intent and references around each external effect; use bounded retries only when the provider outcome is known. All cleanup and reconciliation must be idempotent.
+
+## 5. MCP transport and Tool Gateway contract
+
+- Use the official Python MCP SDK's Streamable HTTP transport, mounted into the existing FastAPI process. Do not add a separate service unless operational evidence requires it.
+- Use stateless HTTP so any API replica can handle each request; the URL path and OS credential resolve the persisted session context.
+- Apply exact Host and Origin allowlists, DNS-rebinding protection, HTTPS-only public URL validation, bounded request bodies, timeouts and concurrency limits.
+- Tool discovery returns only tools that are simultaneously:
+  - registered and enabled by OS configuration;
+  - explicitly scoped to the MachineIdentity;
+  - allowed by the active workforce member and capability grant for this tool/action/scope;
+  - allowed for the AgentSession data class;
+  - read-only and not approval-gated.
+- Discovery is advisory. Invocation rechecks all authorization under the existing Tool Gateway's database locks and persists the ToolInvocation plus audit event.
+- Derive the MCP idempotency key from the stable AgentSession ID, MCP request ID and tool key. Reuse of a key with a different request hash must fail closed.
+- Return generic policy-denial text to the provider. Do not disclose tenant existence, internal IDs, database errors, credentials or policy implementation details.
+
+## 6. Data protection and tenant isolation
+
+- MachineIdentity and AgentSession allowed data classes are authoritative; MCP configuration cannot widen them.
+- Initial eligibility is synthetic/public only. Commercial, confidential and regulated data remain denied until a separately reviewed runtime eligibility policy and provider contract permit them.
+- Apply the Data Protection Gateway to every tool input and output using the existing Tool Gateway path.
+- The session credential must be scoped to one AgentSession and one workspace. Wrong path, wrong token, expired/revoked session, revoked MachineIdentity, mismatched workspace or missing workforce grant must all be denied.
+- No arbitrary MCP URLs, caller-selected tools, user-controlled headers, custom network targets or provider-supplied tool permissions are trusted.
+- No direct MCP access to PostgreSQL models, filesystem, object storage, provider secrets or worker internals.
+
+## 7. Required tests before enabling
+
+### Database and credential boundary
+- Migration graph and full PostgreSQL 16 upgrade.
+- Actual `agency_os_worker` login can create a session credential only for its current execution and exact agent/workspace.
+- Worker cannot read another execution's credential hash; app role cannot SELECT the credential table.
+- Credential lookup function rejects wrong token, wrong session path, wrong workspace, expired/revoked credential, inactive AgentSession and revoked/expired MachineIdentity.
+- Revocation takes effect immediately; expiry and retention cleanup remove/revoke dependent credentials safely.
+
+### MCP transport and Tool Gateway
+- Host/Origin rejection, DNS-rebinding protection, request size limit, invalid bearer, malformed JSON-RPC and unsupported methods.
+- Tool discovery filters data class, identity scope, workforce grants, tool risk and approval requirement.
+- Invocation rechecks authorization; cross-workspace and cross-agent attempts fail.
+- Duplicate request replays the persisted result; same idempotency key with changed arguments conflicts.
+- Concurrency and per-session call limit are enforced by OS-owned state.
+
+### Managed Agents provider adapter
+- Mock Vault credential create/list/archive and Managed Agents session create/retrieve.
+- Exact URL equality between MCP server declaration and Vault credential.
+- `vault_ids` attached at session creation; no unsupported post-create vault update.
+- Only approved `agent_with_overrides` fields are sent.
+- Raw token is absent from logs, prompts, traces, audit and persisted OS rows.
+- Ambiguous Vault credential or provider session creation never triggers blind duplicate creation.
+- MCP connection/authentication errors stop the run and leave a recoverable, audited state.
+- Session completion/revocation disables the OS token even if provider-side credential archival fails.
+
+## 8. Explicitly out of scope for the first release
+
+- Local AI, local inference, local fallback or local MCP subprocesses.
+- Stdio and legacy SSE transports.
+- Arbitrary user-registered MCP servers.
+- Write tools, approval-bearing tools, payments, outreach sends or other external side effects.
+- Provider-side multiagent delegation, Agent SDK runtime, automatic MCP credential rotation and automatic ambiguous-session reconciliation.
+- Confidential/regulated data or any unsupported compliance claim.
+
+## 9. External setup, to be completed last
+
+- Public HTTPS API URL for the MCP endpoint.
+- Anthropic Managed Agents access and API key.
+- One dedicated Anthropic Vault ID for the Agency OS environment.
+- Managed Agents environment limited-network allowlist containing only the Agency OS MCP host.
+- Provider Agent configured for the supported model/system prompt; session-local overrides supply the MCP server and toolset.
+- Staging-only smoke test with synthetic data before any production enablement.
