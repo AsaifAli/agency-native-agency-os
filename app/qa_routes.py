@@ -16,7 +16,7 @@ from app.audit import record_event
 from app.db import get_db
 from app.data_protection import DataProtectionBlocked, sanitize_text
 from app.domain_models import Milestone, Project, QAIssue
-from app.models import EvaluationRun, Role, Task
+from app.models import EvaluationRun, Membership, Role, Task, WorkspaceGrant
 
 
 router = APIRouter(prefix="/v1/orgs/{org_id}/qa", tags=["quality-assurance"])
@@ -127,12 +127,15 @@ def create_qa_issue(
             raise HTTPException(409, "Task milestone does not belong to the selected project")
 
     if body.assigned_to_user_id:
-        from app.models import Membership
         assigned_member = db.query(Membership).filter_by(
             org_id=org_id, user_id=body.assigned_to_user_id,
         ).first()
-        if assigned_member is None:
-            raise HTTPException(404, "Assignee is not a member of this organization")
+        workspace_grant = db.query(WorkspaceGrant).filter_by(
+            org_id=org_id, workspace_id=body.workspace_id,
+            user_id=body.assigned_to_user_id, revoked_at=None,
+        ).first()
+        if assigned_member is None or workspace_grant is None:
+            raise HTTPException(404, "Assignee does not have access to this workspace")
 
     issue = QAIssue(
         org_id=org_id,
