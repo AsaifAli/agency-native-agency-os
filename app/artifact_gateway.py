@@ -79,9 +79,16 @@ def inspect_upload(
     max_bytes: int = DEFAULT_MAX_ARTIFACT_BYTES,
 ) -> InspectedUpload:
     """Read a bounded stream, validate its declared type against its bytes, and hash it."""
-    if max_bytes < 1 or max_bytes > 100 * 1024 * 1024:
-        raise ValueError("max_bytes must be between 1 byte and 100 MiB")
-    media_type = (declared_media_type or "").split(";", 1)[0].strip().lower()
+    if (
+        isinstance(max_bytes, bool)
+        or not isinstance(max_bytes, int)
+        or max_bytes < 1
+        or max_bytes > 100 * 1024 * 1024
+    ):
+        raise ValueError("max_bytes must be an integer between 1 byte and 100 MiB")
+    if not isinstance(declared_media_type, str) or not declared_media_type.strip():
+        raise ArtifactValidationError("declared media type is required")
+    media_type = declared_media_type.split(";", 1)[0].strip().lower()
     if media_type not in _ALLOWED_TYPES:
         raise ArtifactValidationError("declared media type is not allowed")
     safe_name = _safe_filename(filename, media_type)
@@ -121,9 +128,13 @@ def require_clean_scan(result: Mapping[str, str] | None) -> tuple[str, str]:
     """Return scanner identity only for an explicit clean result; all other states fail closed."""
     if result is None:
         raise ArtifactValidationError("malware scanner is unavailable; upload remains quarantined")
-    status = result.get("status", "").strip().lower()
-    scanner = result.get("scanner", "").strip()
-    version = result.get("version", "").strip()
+    if not isinstance(result, Mapping) or set(result) != {"status", "scanner", "version"}:
+        raise ArtifactValidationError("malware scanner returned an invalid result schema")
+    if any(not isinstance(result[key], str) for key in ("status", "scanner", "version")):
+        raise ArtifactValidationError("malware scanner returned invalid result fields")
+    status = result["status"].strip().lower()
+    scanner = result["scanner"].strip()
+    version = result["version"].strip()
     if status != "clean" or not scanner or not version:
         raise ArtifactValidationError("artifact requires an explicit clean scan and scanner version")
     return scanner, version

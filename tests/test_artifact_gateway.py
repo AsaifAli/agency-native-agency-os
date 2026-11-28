@@ -85,3 +85,30 @@ def test_scan_gate_fails_closed_when_scanner_missing_or_not_clean():
     with pytest.raises(ArtifactValidationError, match="clean scan"):
         require_clean_scan({"status": "clean", "scanner": "", "version": "1"})
     assert require_clean_scan({"status": "clean", "scanner": "scanner", "version": "1"}) == ("scanner", "1")
+
+
+def test_inspect_upload_rejects_invalid_configuration_types():
+    with pytest.raises(ValueError, match="max_bytes"):
+        inspect_upload(
+            chunks=[b"%PDF-1.4\nbody"],
+            filename="report.pdf",
+            declared_media_type="application/pdf",
+            max_bytes=True,
+        )
+    with pytest.raises(ArtifactValidationError, match="declared media type"):
+        inspect_upload(
+            chunks=[b"%PDF-1.4\nbody"],
+            filename="report.pdf",
+            declared_media_type=None,
+        )
+
+
+def test_scanner_result_schema_is_strict_and_malformed_results_fail_closed():
+    for result in (
+        "clean",
+        {"status": True, "scanner": "scanner", "version": "1"},
+        {"status": "clean", "scanner": "scanner", "version": "1", "infected": "true"},
+        {"status": "clean", "scanner": "scanner", "version": "1", "signature": "unverified"},
+    ):
+        with pytest.raises(ArtifactValidationError):
+            require_clean_scan(result)
