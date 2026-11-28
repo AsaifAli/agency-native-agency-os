@@ -210,7 +210,49 @@ class Agent(Base):
     runtime: Mapped[str] = mapped_column(String(80), default="claude_managed_agents")
     data_class: Mapped[DataClass] = mapped_column(Enum(DataClass), default=DataClass.synthetic)
     enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    current_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class AgentVersion(Base):
+    __tablename__ = "agent_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "org_id", "workspace_id", "agent_id", "version_number",
+            name="uq_agent_version_number",
+        ),
+        UniqueConstraint(
+            "org_id", "workspace_id", "agent_id", "id",
+            name="uq_agent_version_scope_id",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "agent_id"],
+            ["agents.org_id", "agents.workspace_id", "agents.id"],
+            ondelete="CASCADE",
+            name="fk_agent_version_agent_scope",
+        ),
+        CheckConstraint("version_number >= 1", name="ck_agent_version_number"),
+        Index(
+            "ix_agent_version_scope_created",
+            "org_id", "workspace_id", "agent_id", "created_at",
+        ),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    org_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    agent_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    version_number: Mapped[int] = mapped_column(nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    department: Mapped[str] = mapped_column(String(100), nullable=False)
+    instructions: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    runtime: Mapped[str] = mapped_column(String(80), nullable=False)
+    data_class: Mapped[DataClass] = mapped_column(Enum(DataClass), nullable=False)
+    runtime_config: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    config_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    change_reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
 
 class Task(Base):
     __tablename__ = "tasks"
@@ -247,6 +289,12 @@ class Execution(Base):
             ondelete="RESTRICT",
             name="fk_execution_machine_session_scope",
         ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "agent_id", "agent_version_id"],
+            ["agent_versions.org_id", "agent_versions.workspace_id", "agent_versions.agent_id", "agent_versions.id"],
+            ondelete="RESTRICT",
+            name="fk_execution_agent_version_scope",
+        ),
         Index(
             "ix_execution_org_workspace_status_created",
             "org_id", "workspace_id", "status", "created_at",
@@ -273,6 +321,7 @@ class Execution(Base):
     agent_id: Mapped[str] = mapped_column(
         ForeignKey("agents.id"), nullable=False
     )
+    agent_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     requested_by: Mapped[str] = mapped_column(
         ForeignKey("users.id"), nullable=False
     )
