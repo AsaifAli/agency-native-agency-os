@@ -540,7 +540,7 @@ def test_worker_public_table_grants_are_least_privilege():
     expected_update = {
         "agent_sessions", "delegations", "execution_attempts",
         "executions", "orchestration_plan_drafts", "outbox_events",
-        "tasks", "tool_invocations",
+        "tasks", "tool_invocations", "workforce_capabilities", "workforce_members",
     }
 
     worker_engine = create_engine(WORKER_URL, pool_pre_ping=True)
