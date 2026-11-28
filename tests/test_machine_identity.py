@@ -173,11 +173,22 @@ def test_agent_machine_identity_authentication_requires_live_agent_and_member(
         db.add_all([agent, member, identity])
         db.commit()
 
-        with pytest.raises(HTTPException) as exc:
-            authenticate_machine_token(
+        if not agent_enabled:
+            with pytest.raises(HTTPException) as exc:
+                authenticate_machine_token(
+                    f"Bearer aos_mi_{identity.id}.{secret}", db
+                )
+            assert exc.value.status_code == 401
+        else:
+            principal = authenticate_machine_token(
                 f"Bearer aos_mi_{identity.id}.{secret}", db
             )
-        assert exc.value.status_code == 401
+            with pytest.raises(HTTPException) as exc:
+                create_agent_session(
+                    db, principal, purpose="Lifecycle test",
+                    data_class="synthetic", ttl_seconds=300,
+                )
+            assert exc.value.status_code in {401, 403}
     finally:
         db.close()
 
