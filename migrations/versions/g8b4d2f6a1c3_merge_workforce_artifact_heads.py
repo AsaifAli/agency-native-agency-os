@@ -5,6 +5,7 @@ preserves their history and restores one linear Alembic upgrade target.
 """
 from typing import Sequence, Union
 
+# No schema operations belong here; both parent migrations are applied independently.
 revision: str = "g8b4d2f6a1c3"
 down_revision: Union[str, Sequence[str], None] = (
     "d1e7a9c3f5b2",
