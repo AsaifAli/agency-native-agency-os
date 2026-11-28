@@ -198,3 +198,13 @@ def test_worker_global_workspace_enumerator_is_revoked_and_replaced_by_single_sc
     # maintenance migration; this follow-up only corrects result casts.
     assert "CREATE OR REPLACE FUNCTION agency_os_private.claim_worker_maintenance_scope" in return_type_fix
     assert "GRANT EXECUTE" not in return_type_fix
+
+
+def test_public_schema_cannot_be_used_for_object_injection_by_runtime_roles():
+    migration = (PATH.parent / "d6f8a0b2c4e6_public_schema_runtime_lockdown.py").read_text()
+    bootstrap = (PATH.parents[2] / "docker/postgres/01-roles.sh").read_text()
+
+    assert "REVOKE CREATE ON SCHEMA public " in migration
+    assert "FROM PUBLIC, agency_os_app, agency_os_worker" in migration
+    assert "GRANT USAGE ON SCHEMA public TO agency_os_app, agency_os_worker" in migration
+    assert "REVOKE CREATE ON SCHEMA public FROM PUBLIC, agency_os_app, agency_os_worker" in bootstrap
