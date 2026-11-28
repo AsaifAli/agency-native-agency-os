@@ -13,6 +13,7 @@ const groups = [
       ["Workforce", "/workforce", "♙"],
       ["Agent Studio", "/agents", "✳"],
       ["Tasks", "/tasks", "☷"],
+      ["QA & Defects", "/qa", "⚑"],
       ["Operations", "/operations", "◉"],
       ["Private Operations", "/private-ops", "✧"],
       ["Approvals", "/approvals", "✓"],
