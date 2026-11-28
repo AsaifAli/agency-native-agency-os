@@ -104,9 +104,79 @@ def upgrade() -> None:
             ) ON TABLE public.qa_issues TO agency_os_app
         """)
 
+        op.execute("""
+            CREATE OR REPLACE FUNCTION agency_os_private.enforce_qa_issue_transition()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            SET search_path = pg_catalog, public
+            AS $function$
+            DECLARE
+                eval_task_id text;
+                eval_passed boolean;
+                eval_created_at timestamptz;
+                eval_evidence_trust text;
+            BEGIN
+                IF NEW.status = OLD.status THEN
+                    RETURN NEW;
+                END IF;
+
+                IF NOT (
+                    (OLD.status = 'open' AND NEW.status = 'triaged') OR
+                    (OLD.status = 'triaged' AND NEW.status = 'in_progress') OR
+                    (OLD.status = 'in_progress' AND NEW.status = 'fixed') OR
+                    (OLD.status = 'fixed' AND NEW.status = 'retest') OR
+                    (OLD.status = 'retest' AND NEW.status IN ('in_progress', 'closed'))
+                ) THEN
+                    RAISE EXCEPTION 'invalid QA issue lifecycle transition'
+                        USING ERRCODE = '23514';
+                END IF;
+
+                IF NEW.status = 'closed' THEN
+                    SELECT er.task_id, er.passed, er.created_at, er.evidence_trust
+                      INTO eval_task_id, eval_passed, eval_created_at, eval_evidence_trust
+                      FROM public.evaluation_runs AS er
+                     WHERE er.org_id = NEW.org_id
+                       AND er.workspace_id = NEW.workspace_id
+                       AND er.id = NEW.retest_evaluation_run_id;
+
+                    IF NOT FOUND
+                       OR eval_task_id IS DISTINCT FROM NEW.task_id
+                       OR eval_passed IS NOT TRUE
+                       OR NEW.fixed_at IS NULL
+                       OR eval_created_at < NEW.fixed_at
+                       OR NEW.retest_evidence_trust IS DISTINCT FROM eval_evidence_trust THEN
+                        RAISE EXCEPTION 'QA issue closure requires a passing task-linked post-fix evaluation'
+                            USING ERRCODE = '23514';
+                    END IF;
+                END IF;
+
+                RETURN NEW;
+            END
+            $function$
+        """)
+        op.execute("""
+            ALTER FUNCTION agency_os_private.enforce_qa_issue_transition()
+            OWNER TO agency_os_migrator
+        """)
+        op.execute("""
+            REVOKE ALL ON FUNCTION agency_os_private.enforce_qa_issue_transition()
+            FROM PUBLIC
+        """)
+        op.execute("""
+            GRANT EXECUTE ON FUNCTION agency_os_private.enforce_qa_issue_transition()
+            TO agency_os_app
+        """)
+        op.execute("""
+            CREATE TRIGGER qa_issue_transition_guard
+            BEFORE UPDATE OF status ON public.qa_issues
+            FOR EACH ROW EXECUTE FUNCTION agency_os_private.enforce_qa_issue_transition()
+        """)
+
 
 def downgrade() -> None:
     if op.get_bind().dialect.name == "postgresql":
+        op.execute("DROP TRIGGER IF EXISTS qa_issue_transition_guard ON public.qa_issues")
+        op.execute("DROP FUNCTION IF EXISTS agency_os_private.enforce_qa_issue_transition()")
         op.execute("DROP POLICY IF EXISTS tenant_isolation ON public.qa_issues")
         op.execute("ALTER TABLE public.qa_issues NO FORCE ROW LEVEL SECURITY")
         op.execute("ALTER TABLE public.qa_issues DISABLE ROW LEVEL SECURITY")
