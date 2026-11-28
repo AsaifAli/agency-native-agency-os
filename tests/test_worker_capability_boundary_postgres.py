@@ -422,7 +422,6 @@ def test_worker_claim_rpc_issues_a_live_workspace_bound_capability():
                 db.execute(text("SELECT id FROM public.tasks LIMIT 1")).all()
     finally:
         with Admin() as db:
-            db.execute(text("DELETE FROM public.audit_events WHERE org_id = :org"), {"org": org.id})
             db.execute(text("""
                 DELETE FROM public.execution_attempts
                 WHERE execution_id IN (
