@@ -165,3 +165,8 @@ Before enabling an external client:
 - [ ] Keep Managed Agents on its existing worker callback path unless provider-side MCP is specifically needed and its Vault/network lifecycle has been tested.
 
 No production activation, live Cowork connection, Anthropic Vault configuration, per-execution sandbox, commercial-data eligibility or compliance status is claimed by this document.
+
+
+## Authentication limitation
+
+OAuth 2.1 authorization-server discovery, dynamic client registration, refresh tokens and per-user consent are not implemented in this milestone. Use the documented fixed-header machine bearer or short-lived session bearer only; do not select OAuth mode in Cowork or another MCP client. A future multi-user/team rollout should add OS-owned OAuth before distributing connectors broadly.
