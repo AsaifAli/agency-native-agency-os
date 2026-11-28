@@ -16,5 +16,10 @@ CREATE ROLE agency_os_worker LOGIN PASSWORD 'local-only-test-worker-password'
   NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
 
 -- Dedicated NOBYPASSRLS login used by tenant-isolation integration tests.
+-- It inherits the API role's object/function grants but keeps its own login
+-- identity, allowing tests to verify the exact runtime role without using
+-- the application credential itself.
 CREATE ROLE agency_os_test_app LOGIN PASSWORD 'local-only-test-app-password'
   NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+GRANT agency_os_app TO agency_os_test_app;
+ALTER ROLE agency_os_test_app INHERIT;
