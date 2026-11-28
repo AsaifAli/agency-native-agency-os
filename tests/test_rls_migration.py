@@ -252,3 +252,21 @@ def test_ci_runs_human_rls_tests_with_a_dedicated_least_privilege_app_login():
     assert "AGENCY_OS_TEST_RLS_DATABASE_URL:" in workflow
     assert "agency_os_test_app:local-only-test-app-password" in workflow
     assert "AGENCY_OS_TEST_MIGRATOR_DATABASE_URL:" in workflow
+
+
+def test_agent_session_credential_migration_is_execution_bound_and_private():
+    root = PATH.parents[2]
+    migrations = root / "migrations" / "versions"
+    migration_path = next(migrations.glob("*agent_session_credentials*.py"))
+    migration = migration_path.read_text()
+    source = migration.lower()
+
+    assert "agent_session_credentials" in source
+    assert "enable row level security" in source
+    assert "force row level security" in source
+    assert "worker_has_execution_context" in source
+    assert "create_agent_session_with_credential" in source
+    assert "lookup_agent_session_credential" in source
+    assert "revoke all on table public.agent_session_credentials" in source
+    assert "agency_os_app" in source
+    assert "agency_os_worker" in source
