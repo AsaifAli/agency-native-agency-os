@@ -198,7 +198,7 @@ def _acknowledge(session_factory, *, message: OutboxMessage, worker_id: str) -> 
 def _record_failure(
     session_factory, *, message: OutboxMessage, worker_id: str,
     error: Exception, base_retry_seconds: int, max_retry_seconds: int,
-) -> None:
+) -> bool:
     with session_factory() as db:
         row = db.query(OutboxEvent).filter(OutboxEvent.id == message.id).with_for_update().one_or_none()
         if (
