@@ -93,7 +93,7 @@ def test_startup_rls_inventory_matches_all_migration_tables():
     expected = set(MIGRATION.ORG_TABLES) | {
         "organizations", "browser_sessions", "execution_attempts",
         "project_outcomes", "outcome_measurements",
-        "orchestration_plan_delegations",
+        "orchestration_plan_delegations", "knowledge_items", "business_drafts",
     }
     assert REQUIRED_RLS_TABLES == expected | {"workspace_grants"}
 
