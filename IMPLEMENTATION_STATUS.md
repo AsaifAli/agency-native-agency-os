@@ -1,8 +1,8 @@
 # Agency OS — authoritative implementation status
 
-**Last reconciled:** 2026-11-28 17:02 UTC  
+**Last reconciled:** 2026-11-28 17:18 UTC  
 **Working branch:** `main` is the single active integration branch for founder-authorized work. Do not create parallel feature branches or PRs unless explicitly requested.  
-**Verified code baseline:** PR #71 was merged into `main` at 2026-11-28 16:28:33 UTC. The current verified code baseline is `6d70292596beeea86eb778a09fa04faeed06305e`; reviewed Revenue/Delivery/Outreach changes from the historical integration branch have been ported onto `main`, and `main` remains the sole active working branch.  
+**Verified code baseline:** PR #71 was merged into `main` at 2026-11-28 16:28:33 UTC. The last fully verified code baseline is `6d70292596beeea86eb778a09fa04faeed06305e`; additional Phase 4 provider-usage recovery changes are now on `main` through code commit `4b6a0d6b3d5d38bc63fd58227729d46da4700fac`. Reviewed Revenue/Delivery/Outreach changes from the historical integration branch have been ported onto `main`, and `main` remains the sole active working branch.  
 **Latest code-baseline CI:** [Run 46168046099](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46168046099) completed successfully: **687 backend tests passed in 54.82 seconds**, including PostgreSQL 16 integration, and frontend typecheck/production build passed. The subsequent commit `43c5e0f5c22594450e8fbd88bc75e607035c4e13` only reconciles the failure-injection documentation.  
 **Release posture:** **NO-GO for production.** Green CI does not establish live provider compatibility, staging isolation, backup restore, operational readiness or compliance.  
 **Release posture:** **NO-GO for production.** Green CI does not establish live provider compatibility, staging isolation, backup restore, operational readiness or compliance.
@@ -115,7 +115,7 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 - Complete Delivery requirement-to-test traceability, independent QA/rework metrics, production release gates, handover, support cases, SLA and renewal workflows.
 - Add automatic KPI ingestion, verified impact evidence, outcome revision/scope-change workflow and client acceptance/sign-off.
 - Add trusted Evaluation Harness runner attestation, immutable test/commit/environment manifests and non-bypassable release-blocking gates. Caller-supplied booleans are not trusted evidence.
-- Complete provider routing/resilience, per-execution usage/cost accounting, budgets, margin/forecast and founder emergency disable controls.
+- Provider usage recovery is now implemented as a bounded workspace-scoped maintenance pass: it fetches Claude session usage only after the provider reports idle, keeps HTTP outside DB transactions, rechecks abandoned execution state under lock, persists normalized snapshots with a hash/timestamp/audit event, and backs off pending/error reads for five minutes. Unit tests cover idempotency, non-idle deferral, read-failure cooldown and execution-state fencing; latest code CI remains pending. A separate append-only usage-observation ledger, provider reconciliation for sessions without durable IDs, per-execution USD settlement, workspace reservations, cumulative budgets, margin/forecast and founder emergency disable controls remain incomplete.
 
 ### P2/P3 — Founder Console and operations
 - Dashboard `System` / `Light` / `Dark` theme support is merged in PR #65 and its frontend lint/typecheck/build/browser checks passed. Browser-based end-to-end critical-flow and accessibility tests remain.
