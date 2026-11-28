@@ -25,9 +25,19 @@ def test_app_can_only_authenticate_credentials_through_the_database_function():
                         current_user,
                         'agency_os_private.authenticate_mcp_session_credential(text,text,integer)',
                         'EXECUTE'
+                    ),
+                    has_function_privilege(
+                        current_user,
+                        'agency_os_private.load_mcp_provider_credential(text)',
+                        'EXECUTE'
+                    ),
+                    has_function_privilege(
+                        current_user,
+                        'agency_os_private.attach_mcp_provider_credential(text,text,text)',
+                        'EXECUTE'
                     )
             """)).one()
-            assert tuple(privileges) == (False, True)
+            assert tuple(privileges) == (False, True, False, False)
             with pytest.raises(DBAPIError):
                 connection.execute(text(
                     "SELECT * FROM public.machine_session_credentials LIMIT 1"
