@@ -77,6 +77,12 @@
       "revision": "83067222c3d99b5afed2cb90c4c3dc301a4b0729",
       "license": "CC-BY-4.0 for content; Apache-2.0 for code",
       "use": "Reviewed as a founder operating-system reference. Original Agency OS skills independently authored from stage-aware triage, recurring review, advisor perspectives and evidence-backed learning concepts; no source files or scripts copied."
+    },
+    "anthropic-cowork-docs": {
+      "repository": "https://support.claude.com/en/articles/13345190-get-started-with-claude-cowork",
+      "revision": "Documentation reviewed 2026-11-28; page reference rather than a Git revision.",
+      "license": "Anthropic product documentation; summarized facts only, no source text copied.",
+      "use": "Grounded Cowork capabilities and operating caveats including Projects, connectors, browser work, local files, subagents, scheduled tasks and deliverables."
     }
   },
   "skills": [
@@ -590,7 +596,7 @@
       "category": "operations",
       "description": "Use Claude Cowork for bounded cross-app research and deliverables while preserving Agency OS authority, client isolation and human review.",
       "sources": [
-        "anthropic-skills",
+        "anthropic-cowork-docs",
         "agent-skills-spec"
       ],
       "recommended_departments": [
