@@ -1,29 +1,29 @@
 # Agency OS — authoritative implementation status
 
-**Last reconciled:** 2026-11-28  
-**Candidate source of truth:** the current head of `integration/agency-os-consolidated-2026-11` tracked by [PR #71](https://github.com/AsaifAli/agency-native-agency-os/pull/71).  
-**Review PR:** [#71 — Consolidated Agency OS integration](https://github.com/AsaifAli/agency-native-agency-os/pull/71), open and mergeable against `main`.  
-**Current main:** `c5ec7b462835f592edb0db1a31564401423e3467`; PR #71 has not been merged.  
-**Included work:** PR #68 security hardening and worker/RLS capability changes, PR #69 hosted-provider-only operating model, and PR #70 Private Operations foundation are reconciled into the PR #71 candidate.  
-**Release posture:** **NO-GO for production.** Passing CI and isolated database tests do not establish production readiness.
+**Last reconciled:** 2026-11-28 16:30 UTC  
+**Source of truth:** `main` at `f07a8b7b8a864cbc08da35bf4b4c422cd4baf25e`.  
+**Consolidation:** [PR #71](https://github.com/AsaifAli/agency-native-agency-os/pull/71) was merged into `main` at 2026-11-28 16:28:33 UTC. Its integration branch is historical; continue work on `main` rather than opening parallel feature branches.  
+**Included work:** PRs #68, #69 and #70, plus the learning/Cowork/Code integration work in PR #71, are now on `main`.  
+**Latest main CI:** [Run 46165349483](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46165349483) completed successfully. Backend and frontend jobs passed, including PostgreSQL role bootstrap/migrations/integration tests, Python compilation, hardened runtime image checks, frontend typecheck and production build. No new test count is inferred from job status alone.  
+**Release posture:** **NO-GO for production.** Green CI does not establish live provider compatibility, staging isolation, backup restore, operational readiness or compliance.
 
-This file describes the consolidated candidate, not the current `main` branch. Historical branch comparisons and superseded PR checkpoints are not active blockers. See `docs/CONSOLIDATION_EXECUTION_LEDGER.md` for the integration record and `docs/PRODUCTION_GRADE_MASTER_CHECKLIST.md` for release gates.
+This file describes the merged `main` baseline. Historical PR/branch checkpoints remain historical evidence, not active integration work. See `docs/CONSOLIDATION_EXECUTION_LEDGER.md` and `docs/PRODUCTION_GRADE_MASTER_CHECKLIST.md` for historical integration and release gates.
 
-## Verification evidence on the consolidated candidate
+## Verification evidence on merged `main`
 
 | Check | Recorded result | Qualification |
 |---|---|---|
-| Backend pytest + PostgreSQL 16 integration | **579 passed, 0 skipped, 2 warnings** | CI run [46133997208](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46133997208) on the current candidate head. |
+| Backend pytest + PostgreSQL 16 integration | Passed | Main CI run [46165349483](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46165349483); backend job completed successfully, including isolated PostgreSQL 16 integration. |
 | Human tenant/workspace RLS | Passed in live PostgreSQL 16 CI | Dedicated `agency_os_test_app` NOBYPASSRLS login; cross-org/workspace access, grants/revocation and pooled-context behavior executed. |
 | Worker capability boundary | Passed in live PostgreSQL 16 CI | Actual `agency_os_worker` NOBYPASSRLS login; capability, forged-GUC, direct-table/function privilege and scope checks executed. |
 | Browser-session retention, orchestration-link RLS, outcome isolation and audit immutability | Passed in live PostgreSQL 16 CI | Previously skipped suites now execute; append-only evidence is preserved by fixtures. |
 | PostgreSQL role bootstrap and migration upgrade | Passed | PostgreSQL 16 role setup, Alembic graph validation, full upgrade to head and Python compilation passed. Disposable CI database only. |
-| Frontend TypeScript and Next.js production build | Passed | CI run above; no frontend lint result is claimed by this workflow. |
-| Pull-request CI | Passed | [Run 46134005729](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46134005729) completed successfully. |
+| Frontend TypeScript and Next.js production build | Passed | Main CI run above; no frontend lint result is claimed by this workflow. |
+| Main push CI | Passed | [Run 46165349483](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46165349483) completed successfully after PR #71 was merged. |
 | Live Claude/Anthropic provider compatibility | Not verified | No live provider provisioning, credentials or production provider execution claimed. |
 | Production migration, deployment, restore drill or compliance assessment | Not performed | Requires separate staging/production controls and explicit founder go/no-go. |
 
-The two backend warnings are dependency deprecations (Starlette/httpx and Authlib/httpx); they did not fail CI. No production database migration, production deployment, external provider activation, client-data operation or compliance assessment is claimed.
+No production database migration, production deployment, external provider activation, client-data operation or compliance assessment is claimed.
 
 ## Mission and architecture
 
@@ -71,7 +71,7 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 - Delegation enforces direct-manager hierarchy, active members, enabled definitions/grants and founder exclusion.
 - Curated catalog of 18 reviewed, source-pinned skills with provenance and file digests. Skills are disabled, tool-free and public/synthetic-only; per-agent assignment and provider-side skill loading are not implemented.
 - Chief of Staff plan draft is bounded, tool-free and requires founder review before task materialization. Worker maintenance releases dependent tasks after prerequisites succeed and synchronizes task/delegation state.
-- Managed Agents adapter is opt-in and synthetic-first; it inspects provider Agent configuration, rejects unapproved built-in tools/MCP/skills/multiagent features, persists/resumes sessions, tracks workflow runs and routes non-completion to manual review. The optional MCP adapter uses session-local overrides and Anthropic Vault credentials; ambiguous provider session creation and OS persistence failures stop for manual review. Orphaned Vault credentials are reconciled by exact OS metadata. Automatic provider-session reconciliation remains unimplemented.
+- Managed Agents adapter is opt-in and synthetic-first; it inspects provider Agent configuration, rejects unapproved built-in tools/MCP/skills/multiagent features, persists/resumes sessions, tracks workflow runs and routes non-completion to manual review. The adapter contains an OS-mediated custom-tool callback path, but live Anthropic account/API compatibility and provider execution have not been verified. The separate Vault-backed provider-MCP compatibility path is disabled and must not be enabled alongside the callback path. Cowork and Claude Code use the separate generic Agency MCP gateway. Automatic provider-session reconciliation remains unimplemented.
 - Managed Agents is beta. Live account provisioning, API compatibility, environment sandbox/egress, ambiguous-create reconciliation and production eligibility are unverified. It is not eligible for ZDR or HIPAA BAA.
 - Claude Agent SDK adapter is not implemented. Recursive supervisor reasoning, dynamic replanning, delegated per-agent machine identities and live client-data execution are not implemented.
 
@@ -79,7 +79,7 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 - OS-owned machine identities use one-time displayed credentials stored as digests, bounded expiry, revocation and workspace/data-class scopes.
 - Agent sessions are persisted and bounded. Every Tool Gateway entry point now derives its tool allowlist from OS-issued machine scopes and enforces a 100-successful-call session ceiling; adapter-provided allowlists/limits can only narrow that policy. Tool calls also pass machine/session checks, data-class policy, input/output protection, typed schema validation, workforce capability checks, idempotency, durable invocation records and audit.
 - Code-owned registry currently includes read-only health and public lead-research draft capture. Research capture validates bounded public HTTPS source references and stores a founder-review draft; it does not create a CRM contact/lead or send outreach.
-- The optional Streamable HTTP MCP transport is now implemented in the Claude Managed Agents adapter layer over the existing Tool Gateway and is disabled by default. It uses a session-path bearer credential, PostgreSQL hash-only storage, worker-capability issuance/lifecycle functions, Anthropic Vault static-bearer credentials, exact session-local MCP server/toolset overrides, limited-network environment validation, and provider metadata reconciliation. MCP discovery/invocation exposes only explicitly configured read-only tools and delegates every call to the OS Tool Gateway; it has no independent tool registry or direct business-table access. Host/Origin checks, DNS-rebinding protection, body limits, per-process concurrency and database request-rate limiting are included. See `docs/CLAUDE_MANAGED_MCP_ADAPTER_DESIGN.md`. The old `feature/managed-agents-mcp-bridge` branch remains unsafe to merge wholesale because its migration ancestry and auth contracts are incompatible; do not cherry-pick it wholesale. Live Anthropic Vault/session/MCP smoke testing is not done. A bounded cleanup/reconciliation worker for `delete_pending` Vault credentials remains to be implemented. Tool grants for client-data and side-effecting operations remain disabled. The workforce capability model stores `budget_minor`, but the current Tool Gateway and Managed Agents callback do not reserve or settle spend against it; it is not yet an enforceable runtime spending cap.
+- The generic Streamable HTTP Agency MCP gateway for Claude Code and eligible Cowork clients is implemented and disabled by default. It uses founder-provisioned workspace-scoped service identities, short-lived session credentials, digest-only token storage, session revalidation and the existing Tool Gateway; it has no independent tool registry or direct business-table access. The Managed Agents custom-tool callback is a separate worker-mediated path. The Vault-backed provider-MCP compatibility transport is disabled and is not the Code/Cowork gateway. Live Code/Cowork connector and Anthropic provider smoke tests remain pending. Per-execution sandbox isolation, runtime egress enforcement and resource quotas are not implemented or verified. The workforce capability model stores `budget_minor`, but no cumulative execution reservation/settlement enforces it.
 
 ### Revenue, Delivery and RAAS
 - CRM includes client/contact/lead/opportunity records, append-only contact activity timeline, source/qualification notes and suppression reasons.
@@ -127,10 +127,10 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 
 ## Immediate work order
 
-1. Consolidated candidate stabilization: **CI complete for the current PR #71 candidate**; exact-main verification remains pending until the PR is merged.
+1. Consolidated baseline: **PR #71 is merged**; `main` at `f07a8b7b8a864cbc08da35bf4b4c422cd4baf25e` has successful CI run `46165349483`.
 2. Continue tenant/RLS and Data Protection Gateway inventory and route-by-route negative tests. Live PostgreSQL 16 human/worker isolation suites now execute in CI; broader API/object/artifact coverage remains open.
 3. Artifact/object storage isolation and retention lifecycle.
-4. Claude Managed Agents MCP lifecycle hardening: delete-pending cleanup worker, provider smoke test, and multi-replica/crash-recovery drills.
+4. Phase 4 runtime hardening: prove the active Managed Agents custom-tool lifecycle and Code/Cowork Agency MCP path with synthetic data; only implement Vault cleanup if the disabled Vault compatibility transport remains selected. Add worker/provider recovery drills.
 5. Worker/outbox recovery and reconciliation acceptance.
 6. Revenue provenance, dedupe and governed outreach.
 7. Delivery QA, handover, support and RAAS evidence.
@@ -154,7 +154,7 @@ npx tsc --noEmit
 npm run build
 cd ..
 
-# Focused security regressions in the consolidated PR #71 candidate
+# Focused security regressions on merged main
 python -m pytest -q tests/test_data_protection.py tests/test_log_sanitization.py tests/test_audit_payload_protection.py tests/test_tool_gateway_policy.py tests/test_machine_identity.py tests/test_rls_migration.py
 
 # Full backend suite
@@ -167,7 +167,7 @@ docker compose -p agency-os-pg-test \
   --exit-code-from postgres-tests postgres-tests
 ```
 
-Then run browser critical-flow/accessibility tests and verify the exact merged commit. PR #71 remains open for review; the current candidate CI is green, but merge and production release remain separate decisions. Live provider credentials, DNS, object storage, email/webhooks, staging deployment and backup restore require founder-environment access and will be presented as a final checklist. Production migration/deployment and destructive data actions require separate explicit approval.
+Then run browser critical-flow/accessibility tests and verify the exact `main` commit. PR #71 is merged; production release remains a separate decision. Live provider credentials, DNS, object storage, email/webhooks, staging deployment and backup restore require founder-environment access and will be presented as a final checklist. Production migration/deployment and destructive data actions require separate explicit approval.
 
 
 ## Historical founder verification update — 2026-11-27 (pre-consolidation)
