@@ -123,13 +123,15 @@ def test_mcp_credential_hash_is_not_readable_and_auth_is_database_owned():
             worker_function_privileges = connection.execute(text("""
                 SELECT
                     has_function_privilege(current_user,
+                      'agency_os_private.load_mcp_provider_credential(text)', 'EXECUTE'),
+                    has_function_privilege(current_user,
                       'agency_os_private.attach_mcp_provider_credential(text,text,text)', 'EXECUTE'),
                     has_function_privilege(current_user,
                       'agency_os_private.revoke_mcp_session_credential(text,text)', 'EXECUTE'),
                     has_function_privilege(current_user,
                       'agency_os_private.mark_mcp_provider_credential_archived(text,text)', 'EXECUTE')
             """)).one()
-            assert tuple(worker_function_privileges) == (True, True, True)
+            assert tuple(worker_function_privileges) == (True, True, True, True)
 
             # Caller-forged tenant GUCs cannot satisfy the execution-bound INSERT policy.
             connection.execute(
@@ -159,6 +161,9 @@ def test_mcp_credential_hash_is_not_readable_and_auth_is_database_owned():
             connection.rollback()
             # The worker may call the bounded lifecycle functions, but forged
             # tenant GUCs cannot make them act without a live execution capability.
+            assert connection.execute(text("""
+                SELECT * FROM agency_os_private.load_mcp_provider_credential(:execution_id)
+            """), {"execution_id": "f1b2c3d4-e5f6-4789-9012-1234567890ab"}).all() == []
             assert connection.execute(text("""
                 SELECT agency_os_private.attach_mcp_provider_credential(
                     :credential_id, 'vlt_test', 'cred_test'
