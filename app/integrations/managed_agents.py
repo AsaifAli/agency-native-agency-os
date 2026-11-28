@@ -912,11 +912,16 @@ class ManagedAgentsRuntime(AgentRuntime):
                         request.persist_control_event(str(interrupt_action), interrupt_event_id)
                     interrupt_sent = True
 
-                session = self._request(
-                    client, "GET", f"/v1/sessions/{session_id}"
-                )
+                try:
+                    session = self._request(
+                        client, "GET", f"/v1/sessions/{session_id}"
+                    )
+                except RuntimeNotConfiguredError:
+                    cleanup_mcp("MCP_PROVIDER_SESSION_UNAVAILABLE")
+                    raise
                 status = session.get("status")
                 if status in {"failed", "error", "archived", "terminated"}:
+                    cleanup_mcp("MCP_SESSION_TERMINAL_FAILURE")
                     if interrupt_sent and status == "terminated":
                         if interrupt_action == "pause":
                             raise RuntimeManualReviewRequired("Provider terminated the session during a pause request; resume is not safe.")
@@ -927,7 +932,11 @@ class ManagedAgentsRuntime(AgentRuntime):
 
                 # Custom tool events can arrive while a workflow is still running;
                 # process them before waiting for session.status_idle.
-                events = self._list_events(client, session_id)
+                try:
+                    events = self._list_events(client, session_id)
+                except RuntimeNotConfiguredError:
+                    cleanup_mcp("MCP_PROVIDER_EVENTS_UNAVAILABLE")
+                    raise
                 if interrupt_sent:
                     interrupt_processed = any(
                         event.get("type") == "user.interrupt"
@@ -942,12 +951,14 @@ class ManagedAgentsRuntime(AgentRuntime):
                     ):
                         if interrupt_action == "pause":
                             raise RuntimePaused("Claude Managed Agents acknowledged the pause.")
+                        cleanup_mcp("MCP_SESSION_CANCELLED")
                         raise RuntimeCancelled("Claude Managed Agents acknowledged the cancellation.")
                     self.sleep(self.config.claude_managed_poll_interval_seconds)
                     continue
                 if any(event.get("type") == "session.error" for event in events):
-                    raise RuntimeExecutionError(
-                        "Claude Managed Agents reported a session error."
+                    cleanup_mcp("MCP_SESSION_ERROR")
+                    raise RuntimeNotConfiguredError(
+                        "Claude Managed Agents reported a provider session or MCP connection error."
                     )
                 processed = self._process_custom_tool_events(
                     client,
@@ -973,7 +984,11 @@ class ManagedAgentsRuntime(AgentRuntime):
                     stop_reason = idle_events[-1].get("stop_reason", {}) if idle_events else {}
                     stop_type = stop_reason.get("type") if isinstance(stop_reason, dict) else None
                     if stop_type == "end_turn":
-                        return self._extract_result(events, session_id)
+                        try:
+                            result = self._extract_result(events, session_id)
+                        finally:
+                            cleanup_mcp("MCP_SESSION_COMPLETED")
+                        return result
                     if (
                         stop_type == "requires_action"
                         and self._waiting_for_custom_tool_resume(events, enabled_tools)
@@ -981,7 +996,12 @@ class ManagedAgentsRuntime(AgentRuntime):
                         self.sleep(self.config.claude_managed_poll_interval_seconds)
                         continue
                     if stop_type in {"requires_action", "budget_reached", "refusal", "retries_exhausted"}:
-                        return self._extract_result(events, session_id)
+                        try:
+                            result = self._extract_result(events, session_id)
+                        finally:
+                            if stop_type != "requires_action":
+                                cleanup_mcp("MCP_SESSION_TERMINAL_RESULT")
+                        return result
                     raise RuntimeManualReviewRequired(
                         "Managed Agent session is idle without a confirmed completion reason."
                     )
