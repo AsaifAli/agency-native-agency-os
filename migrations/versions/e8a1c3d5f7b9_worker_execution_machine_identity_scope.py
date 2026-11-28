@@ -48,7 +48,6 @@ def upgrade() -> None:
             WHERE e.org_id = machine_identities.org_id
               AND e.workspace_id = machine_identities.workspace_id
               AND e.agent_id = machine_identities.subject_id
-              AND e.status::text = 'running'
               AND agency_os_private.worker_has_execution_context(
                     e.org_id, e.workspace_id, e.id
               )
