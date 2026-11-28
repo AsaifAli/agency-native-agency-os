@@ -86,6 +86,7 @@ def get_agent_versions(
 ):
     require_membership(org_id, p, db)
     require_workspace_access_from_context(org_id, workspace_id, db)
+    require_founder_authority(db, org_id, p.user.id)
     agent = _agent(db, org_id, workspace_id, agent_id)
     try:
         versions = list_agent_versions(
