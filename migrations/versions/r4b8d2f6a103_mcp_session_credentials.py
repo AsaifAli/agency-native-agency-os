@@ -157,6 +157,11 @@ def upgrade() -> None:
                AND s.org_id = cred.org_id
                AND s.workspace_id = cred.workspace_id
                AND s.machine_identity_id = mi.id
+              JOIN public.executions AS e
+                ON e.org_id = cred.org_id
+               AND e.workspace_id = cred.workspace_id
+               AND e.machine_session_id = cred.session_id
+               AND e.status::text = 'running'
              WHERE cred.id = p_credential_id
                AND cred.token_hash = p_token_hash
                AND cred.revoked_at IS NULL
@@ -166,7 +171,7 @@ def upgrade() -> None:
                AND s.status = 'active'
                AND s.expires_at > v_now
                AND s.data_class IN ('synthetic', 'public')
-             FOR UPDATE OF cred, mi, s;
+             FOR UPDATE OF cred, mi, s, e;
 
             IF NOT FOUND THEN
                 RETURN;
@@ -243,6 +248,11 @@ def upgrade() -> None:
                AND s.org_id = cred.org_id
                AND s.workspace_id = cred.workspace_id
                AND s.machine_identity_id = mi.id
+              JOIN public.executions AS e
+                ON e.org_id = cred.org_id
+               AND e.workspace_id = cred.workspace_id
+               AND e.machine_session_id = cred.session_id
+               AND e.status::text = 'running'
              WHERE cred.id = p_credential_id
                AND cred.token_hash = p_token_hash
                AND cred.org_id = p_org_id
