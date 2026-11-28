@@ -134,7 +134,7 @@ def test_workspace_authorization_migration_covers_every_workspace_owned_table():
     expected.difference_update({
         "project_outcomes", "outcome_measurements",
         "orchestration_plan_delegations", "knowledge_items", "business_drafts",
-        "machine_session_credentials", "learning_candidates", "artifacts",
+        "machine_session_credentials", "learning_candidates", "artifacts", "qa_issues",
     })
     assert set(migration.WORKSPACE_TABLES) == expected
 
@@ -377,3 +377,19 @@ def test_artifact_metadata_migration_enforces_workspace_rls_and_has_no_upload_su
     assert "ck_artifacts_available_requires_clean_scan" in source
     assert "TO agency_os_app, agency_os_worker" not in source
     assert "UploadFile" not in source and "presigned" not in source.lower()
+
+
+def test_qa_issue_table_has_workspace_rls_and_no_worker_access():
+    migration_path = PATH.with_name("d1e3f5a7b9c2_qa_issue_lifecycle.py")
+    source = migration_path.read_text()
+    from app.db import REQUIRED_RLS_TABLES
+
+    assert "qa_issues" in REQUIRED_RLS_TABLES
+    assert "ENABLE ROW LEVEL SECURITY" in source
+    assert "FORCE ROW LEVEL SECURITY" in source
+    assert "user_has_workspace_access" in source
+    assert "GRANT SELECT, INSERT, UPDATE ON TABLE public.qa_issues TO agency_os_app" in source
+    assert "REVOKE ALL ON TABLE public.qa_issues FROM agency_os_worker" in source
+    assert "REVOKE DELETE ON TABLE public.qa_issues FROM agency_os_app" in source
+    assert "fk_qa_issues_task_scope" in source
+    assert "fk_qa_issues_retest_evaluation_scope" in source
