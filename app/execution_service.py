@@ -237,6 +237,7 @@ def create_execution(
         agent_id=agent.id,
         agent_version_id=agent_version.id,
         required_capability_action=effective_capability_action,
+        workforce_member_id=workforce_member.id if workforce_member is not None else None,
         requested_by=requested_by,
         idempotency_key=idempotency_key,
         runtime=agent_version.runtime,
@@ -308,13 +309,21 @@ def current_execution_authorization_error(
     if not agent.enabled:
         return ("AGENT_DISABLED", "Agent was disabled after this execution was queued.")
 
-    member = db.query(WorkforceMember).filter_by(
+    member_query = db.query(WorkforceMember).filter_by(
         org_id=execution.org_id,
         workspace_id=execution.workspace_id,
         agent_id=agent.id,
-    ).one_or_none()
+    )
+    if execution.workforce_member_id:
+        member_query = member_query.filter_by(id=execution.workforce_member_id)
+    member = member_query.one_or_none()
     if member is None:
-        return None  # Legacy non-workforce agents have no WorkforceCapability record.
+        if execution.workforce_member_id:
+            return (
+                "WORKFORCE_MEMBER_UNAVAILABLE",
+                "The workforce member bound to this execution is no longer visible or available.",
+            )
+        return None  # Legacy non-workforce executions have no pinned member ID.
     if member.status != "active" or member.is_founder_reserved:
         return (
             "WORKFORCE_MEMBER_INACTIVE",
