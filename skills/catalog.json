@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": "1.1.0",
+  "catalog_version": "1.2.0",
   "policy": {
     "default_enabled": false,
     "default_allowed_tools": [],
@@ -552,6 +552,56 @@
         "chief-of-staff",
         "project-management-office",
         "quality-assurance-security"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "agency-learning-loop",
+      "path": "agency-learning-loop/SKILL.md",
+      "category": "operations",
+      "description": "Review Revenue and Delivery outcomes, turn verified evidence into scoped lessons, and propose evaluated improvements without self-modification.",
+      "sources": [
+        "ainative-os",
+        "founder-os"
+      ],
+      "recommended_departments": [
+        "chief-of-staff",
+        "business-development-sales",
+        "project-management-office",
+        "quality-assurance-security"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "cowork-hybrid-operations",
+      "path": "cowork-hybrid-operations/SKILL.md",
+      "category": "operations",
+      "description": "Use Claude Cowork for bounded cross-app research and deliverables while preserving Agency OS authority, client isolation and human review.",
+      "sources": [
+        "anthropic-skills",
+        "agent-skills-spec"
+      ],
+      "recommended_departments": [
+        "chief-of-staff",
+        "market-research-intelligence",
+        "business-development-sales",
+        "solutions-consulting-strategy",
+        "marketing-brand",
+        "finance-accounts",
+        "project-management-office",
+        "delivery-implementation"
       ],
       "review_status": "reviewed",
       "enabled": false,
