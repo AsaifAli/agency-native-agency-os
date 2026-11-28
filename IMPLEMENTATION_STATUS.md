@@ -13,13 +13,13 @@ This file describes the consolidated candidate, not the current `main` branch. H
 
 | Check | Recorded result | Qualification |
 |---|---|---|
-| Backend pytest + PostgreSQL 16 integration | **576 passed, 0 skipped, 2 warnings** | CI run [46132870973](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46132870973) on candidate SHA `4052212c28a125a46dc2f727d726ebfef7048eec`. |
+| Backend pytest + PostgreSQL 16 integration | **579 passed, 0 skipped, 2 warnings** | CI run [46133997208](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46133997208) on the current candidate head. |
 | Human tenant/workspace RLS | Passed in live PostgreSQL 16 CI | Dedicated `agency_os_test_app` NOBYPASSRLS login; cross-org/workspace access, grants/revocation and pooled-context behavior executed. |
 | Worker capability boundary | Passed in live PostgreSQL 16 CI | Actual `agency_os_worker` NOBYPASSRLS login; capability, forged-GUC, direct-table/function privilege and scope checks executed. |
 | Browser-session retention, orchestration-link RLS, outcome isolation and audit immutability | Passed in live PostgreSQL 16 CI | Previously skipped suites now execute; append-only evidence is preserved by fixtures. |
 | PostgreSQL role bootstrap and migration upgrade | Passed | PostgreSQL 16 role setup, Alembic graph validation, full upgrade to head and Python compilation passed. Disposable CI database only. |
 | Frontend TypeScript and Next.js production build | Passed | CI run above; no frontend lint result is claimed by this workflow. |
-| Pull-request CI | Passed | [Run 46132876408](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46132876408) completed successfully. |
+| Pull-request CI | Passed | [Run 46134005729](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46134005729) completed successfully. |
 | Live Claude/Anthropic provider compatibility | Not verified | No live provider provisioning, credentials or production provider execution claimed. |
 | Production migration, deployment, restore drill or compliance assessment | Not performed | Requires separate staging/production controls and explicit founder go/no-go. |
 
@@ -58,7 +58,7 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 - Workspace-scoped execution history and execution trace APIs; Founder Console Processes and Monitoring views.
 
 ### Audit, privacy and retention
-- Audit payloads reject invalid/oversized structures, detect known credential-bearing fields fail-closed and redact supported free-text/structured PII. The consolidated candidate removes the generic audit exemption for `resume_token`; resume identifiers remain validated only in the narrowly scoped execution-control boundary. Audit-token and worker-function privilege regressions passed in CI run `46132870973`.
+- Audit payloads reject invalid/oversized structures, detect known credential-bearing fields fail-closed and redact supported free-text/structured PII. The consolidated candidate removes the generic audit exemption for `resume_token`; resume identifiers remain validated only in the narrowly scoped execution-control boundary. Audit-token, worker-function privilege and Managed Agents ambiguous-create regressions passed in CI run `46133997208`.
 - PostgreSQL audit events reject UPDATE/DELETE by application and worker roles. This is append-only protection, **not cryptographic tamper-evidence**; hash chaining or externally anchored integrity checkpoints are not implemented.
 - Browser sessions store a digest of the JWT identifier, support server-side revocation and rotation, and are pruned in bounded batches.
 - Agent sessions are constrained by machine identity data-class grants and cannot outlive the identity.
@@ -96,7 +96,7 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 - Complete a route/function/role/grant/ownership inventory for RLS, SECURITY DEFINER functions and pooled-connection context; mapped ORM tables are now checked against the required RLS inventory, but global `users` identity-table access still needs separate review.
 - Complete negative cross-workspace tests for every API and nested object; organization membership must not substitute for exact workspace grant.
 - Prove isolation across current browser/agent sessions, tool outputs and logs, then across files, object storage, caches, search/RAG and generated artifacts when those paths are implemented. No file upload/extraction, object storage, RAG ingestion or business-data cache path currently exists; the signed website lead intake is a fixed-workspace CRM ingestion and does not call an AI provider.
-- Complete Data Protection Gateway classification/minimization/PII-secret detection/redaction for every ingestion, file extraction, RAG, connector, provider callback, tool, log, cache and artifact path. Current implemented provider-facing boundaries cover Managed Agents requests/results/callbacks, Tool Gateway input/output, audit payloads and structured logs. The consolidated security work adds structured credential-key rejection, structured PII-field redaction and provider event-ID protection; the current regression suite passed in CI run `46132870973`. No file upload/extraction, object storage, RAG ingestion or general connector ingestion path is currently implemented. There is no automated content classifier; current runtime eligibility is a conservative data-class/authorization gate.
+- Complete Data Protection Gateway classification/minimization/PII-secret detection/redaction for every ingestion, file extraction, RAG, connector, provider callback, tool, log, cache and artifact path. Current implemented provider-facing boundaries cover Managed Agents requests/results/callbacks, Tool Gateway input/output, audit payloads and structured logs. The consolidated security work adds structured credential-key rejection, structured PII-field redaction and provider event-ID protection; the current regression suite passed in CI run `46133997208`. No file upload/extraction, object storage, RAG ingestion or general connector ingestion path is currently implemented. There is no automated content classifier; current runtime eligibility is a conservative data-class/authorization gate.
 - Enforce per-client policy and runtime eligibility before any provider receives data.
 - Complete scoped credential rotation, egress allowlists/SSRF defenses, sandbox isolation, resource limits, malware-safe file processing and secrets-history review.
 - Add cryptographic audit integrity checkpoints; current append-only trigger alone is not cryptographic tamper-evidence.
@@ -127,7 +127,7 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 
 ## Immediate work order
 
-1. Consolidated candidate stabilization: **CI complete for PR #71 head `4052212c`**; exact-main verification remains pending until the PR is merged.
+1. Consolidated candidate stabilization: **CI complete for the current PR #71 candidate**; exact-main verification remains pending until the PR is merged.
 2. Continue tenant/RLS and Data Protection Gateway inventory and route-by-route negative tests. Live PostgreSQL 16 human/worker isolation suites now execute in CI; broader API/object/artifact coverage remains open.
 3. Artifact/object storage isolation and retention lifecycle.
 4. OS MCP adapter over the Tool Gateway, with all grants fail-closed.
@@ -170,7 +170,7 @@ docker compose -p agency-os-pg-test \
 Then run browser critical-flow/accessibility tests and verify the exact merged commit. PR #71 remains open for review; the current candidate CI is green, but merge and production release remain separate decisions. Live provider credentials, DNS, object storage, email/webhooks, staging deployment and backup restore require founder-environment access and will be presented as a final checklist. Production migration/deployment and destructive data actions require separate explicit approval.
 
 
-## Latest founder verification update — 2026-11-27
+## Historical founder verification update — 2026-11-27 (pre-consolidation)
 
 - On pre-fix PR head `88697b83bae5f1728cffab7c3c44707e368cd114`, the full host suite reported **538 passed, 3 failed, 20 skipped**. Two failures were resume audit events persisting `resume_token` after the generic audit exemption was removed; the resume flow now emits only `provider_session_reuse_required` in the audit payload, with a regression assertion that the token is absent. The third failure expected 404 for an unregistered tool even though the test identity lacked the invocation scope; the test now supplies the specific scope so the expected 404 tests registry absence rather than authorization denial.
 - The isolated PostgreSQL suite on that same pre-fix head reported **106 passed, 1 failed**; the sole failure was the same resume audit-token issue. The fixes are committed on the PR branch; focused, full and PostgreSQL suites must be rerun on the current head before merge.
@@ -191,5 +191,5 @@ Founder-reported test results on the exact PR head after fast-forwarding to `41f
 
 ## Additional independent-review finding — 2026-11-27
 
-- A second-pass review found that the generic `protect_untrusted_payload` API still exposed a caller-selected `resume_token` trusted-identifier exemption. This was narrower than arbitrary-key trust but still violated the intended rule that resume tokens are trusted only inside the validated execution `control_request`. The generic allowlist is now limited to `draft_id`, `lead_id` and `research_record_id`, with a regression test asserting that callers cannot request the resume-token exemption. This code change postdates the reported green test run; rerun focused, full and isolated PostgreSQL suites before merge.
+- A second-pass review found that the generic `protect_untrusted_payload` API still exposed a caller-selected `resume_token` trusted-identifier exemption. This was narrower than arbitrary-key trust but still violated the intended rule that resume tokens are trusted only inside the validated execution `control_request`. The generic allowlist is now limited to `draft_id`, `lead_id` and `research_record_id`, with a regression test asserting that callers cannot request the resume-token exemption. This regression is included in the consolidated candidate; the current 579-test CI run passed.
 - Tool Gateway review confirmed that the successful-call ceiling is checked under the locked AgentSession row and persisted invocation rows retain the session ID. The 100-call ceiling remains a global interim cap, not a persisted per-session budget grant.
