@@ -1,4 +1,5 @@
 import os
+import uuid
 os.environ["DATABASE_URL"] = "sqlite:///./test_agency_os.db"
 os.environ["DEV_AUTH_ENABLED"] = "true"
 
@@ -102,3 +103,83 @@ def test_user_submitted_evaluation_is_never_marked_as_release_verified():
     assert listed.status_code == 200
     assert listed.json()[0]["evidence_trust"] == "self_reported"
     assert listed.json()[0]["release_eligible"] is False
+
+
+def test_outcome_measurement_links_workspace_scoped_evaluation_run():
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer dev:eval-owner@test.local"}
+    org_id = _org_id()
+    suffix = uuid.uuid4().hex[:8]
+    workspace_id = "ws-eval-test"
+
+    project = client.post(
+        f"/v1/orgs/{org_id}/projects", headers=headers,
+        json={"workspace_id": workspace_id, "name": f"Evaluation evidence {suffix}"},
+    )
+    assert project.status_code == 201, project.text
+    outcome = client.post(
+        f"/v1/orgs/{org_id}/projects/{project.json()['id']}/outcomes",
+        headers=headers, json={
+            "workspace_id": workspace_id, "title": "Improve agent workflow reliability",
+            "problem_statement": "Workflow completion is not consistently verified.",
+            "desired_outcome": "Verify the workflow against an agreed evaluation pack.",
+            "metric_name": "Workflow evaluation score", "metric_unit": "score",
+            "direction": "increase", "target_value": "1",
+            "measurement_method": "Run the agent workflow evaluation pack against synthetic evidence.",
+            "acceptance_criteria": ["The agreed workflow evaluation is reviewed."],
+        },
+    )
+    assert outcome.status_code == 201, outcome.text
+
+    evaluation_payload = {
+        "pack_name": "agent_workflow",
+        "expected": {"required_steps": ["plan"]},
+        "actual": {
+            "status": "completed", "completed_steps": ["plan"],
+            "tool_call_validity": 1, "policy_pass_rate": 1,
+            "approval_compliant": True, "execution_reliability": 1,
+            "fallback_rate": 0,
+        },
+    }
+    evaluation = client.post(
+        f"/v1/orgs/{org_id}/evaluations", headers=headers,
+        json={"workspace_id": workspace_id, **evaluation_payload},
+    )
+    assert evaluation.status_code == 201, evaluation.text
+    assert evaluation.json()["evidence_trust"] == "self_reported"
+    assert evaluation.json()["release_eligible"] is False
+
+    measurement_payload = {
+        "workspace_id": workspace_id, "value": "1", "source_type": "agency_measured",
+        "source_reference": "Evaluation run " + evaluation.json()["id"],
+        "evidence_summary": "Evaluation result attached for review; not independent release verification.",
+        "supporting_evaluation_run_id": evaluation.json()["id"],
+    }
+    measurement = client.post(
+        f"/v1/orgs/{org_id}/outcomes/{outcome.json()['id']}/measurements",
+        headers=headers, json=measurement_payload,
+    )
+    assert measurement.status_code == 201, measurement.text
+    assert measurement.json()["supporting_evaluation_run_id"] == evaluation.json()["id"]
+
+    other_workspace = client.post(
+        f"/v1/orgs/{org_id}/workspaces", headers=headers,
+        json={"name": f"Foreign evaluation workspace {suffix}"},
+    )
+    assert other_workspace.status_code == 201, other_workspace.text
+    foreign_evaluation = client.post(
+        f"/v1/orgs/{org_id}/evaluations", headers=headers,
+        json={"workspace_id": other_workspace.json()["id"], **evaluation_payload},
+    )
+    assert foreign_evaluation.status_code == 201, foreign_evaluation.text
+
+    cross_workspace = client.post(
+        f"/v1/orgs/{org_id}/outcomes/{outcome.json()['id']}/measurements",
+        headers=headers, json={
+            **measurement_payload,
+            "source_reference": "Foreign evaluation run " + foreign_evaluation.json()["id"],
+            "supporting_evaluation_run_id": foreign_evaluation.json()["id"],
+        },
+    )
+    assert cross_workspace.status_code == 404
+
