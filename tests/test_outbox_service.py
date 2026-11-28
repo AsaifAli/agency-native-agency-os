@@ -236,3 +236,42 @@ def test_dispatch_renews_lease_during_long_running_handler(outbox_context):
     row = ctx["db"].query(OutboxEvent).filter_by(id=event_id).one()
     assert result == (1, 0, 0)
     assert row.status == "published"
+
+
+def test_outbox_summary_evaluates_configurable_warning_thresholds(outbox_context, monkeypatch):
+    from app.config import settings
+    from app.outbox_service import summarize_outbox
+
+    ctx = outbox_context
+    now = datetime.now(timezone.utc)
+    add_event(
+        ctx,
+        created_at=now - timedelta(seconds=120),
+    )
+    add_event(
+        ctx,
+        status="processing",
+        claimed_by="expired-worker",
+        lease_expires_at=now - timedelta(seconds=5),
+    )
+    add_event(ctx, status="dead_letter", attempts=3, max_attempts=3)
+
+    monkeypatch.setattr(settings, "outbox_pending_age_warning_seconds", 60)
+    monkeypatch.setattr(settings, "outbox_expired_lease_warning_count", 1)
+    monkeypatch.setattr(settings, "outbox_dead_letter_warning_count", 1)
+
+    summary = summarize_outbox(
+        ctx["db"], org_id=ctx["org_id"], workspace_id=ctx["workspace_id"], now=now,
+    )
+
+    assert summary["health"] == "warning"
+    assert summary["alerts"] == [
+        "pending_age_exceeded",
+        "expired_leases_detected",
+        "dead_letter_threshold_exceeded",
+    ]
+    assert summary["thresholds"] == {
+        "pending_age_warning_seconds": 60,
+        "expired_lease_warning_count": 1,
+        "dead_letter_warning_count": 1,
+    }
