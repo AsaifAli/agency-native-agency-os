@@ -542,3 +542,8 @@ class EvaluationRun(Base):
     evidence_trust: Mapped[str] = mapped_column(String(32), default="self_reported", nullable=False)
     created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+# Register workforce tables before metadata creation so Execution's scoped
+# workforce-member foreign key is always resolvable, including test/bootstrap
+# processes that import app.models directly.
+import app.workforce_models  # noqa: E402,F401
