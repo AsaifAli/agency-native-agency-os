@@ -103,6 +103,71 @@ class Workspace(Base):
     created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
 
+class Artifact(Base):
+    """Workspace-owned artifact metadata; bytes live only in private object storage."""
+    __tablename__ = "artifacts"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id"],
+            ["workspaces.org_id", "workspaces.id"],
+            ondelete="CASCADE",
+            name="fk_artifacts_workspace_org",
+        ),
+        CheckConstraint(
+            "scope_type IN ('workspace', 'thread')",
+            name="ck_artifacts_scope_type",
+        ),
+        CheckConstraint(
+            "(scope_type = 'workspace' AND scope_id = workspace_id) OR "
+            "(scope_type = 'thread' AND length(scope_id) BETWEEN 1 AND 160)",
+            name="ck_artifacts_scope_binding",
+        ),
+        CheckConstraint(
+            "status IN ('initiated', 'quarantined', 'scanning', 'available', 'rejected', 'failed', 'deleting', 'deleted')",
+            name="ck_artifacts_status",
+        ),
+        CheckConstraint(
+            "classification IN ('synthetic', 'public', 'commercial', 'confidential', 'regulated')",
+            name="ck_artifacts_classification",
+        ),
+        CheckConstraint("byte_size >= 0", name="ck_artifacts_byte_size_nonnegative"),
+        CheckConstraint("sha256 IS NULL OR length(sha256) = 64", name="ck_artifacts_sha256_length"),
+        CheckConstraint(
+            "status NOT IN ('quarantined', 'scanning', 'available') OR object_key IS NOT NULL",
+            name="ck_artifacts_storage_key_for_stored_states",
+        ),
+        CheckConstraint(
+            "status != 'available' OR (object_key IS NOT NULL AND sha256 IS NOT NULL "
+            "AND byte_size > 0 AND scan_result = 'clean' AND scanner_name IS NOT NULL "
+            "AND scanner_version IS NOT NULL)",
+            name="ck_artifacts_available_requires_clean_scan",
+        ),
+        UniqueConstraint("storage_provider", "object_key", name="uq_artifacts_storage_object"),
+        Index("ix_artifacts_org_workspace_scope", "org_id", "workspace_id", "scope_type", "scope_id"),
+        Index("ix_artifacts_org_workspace_status", "org_id", "workspace_id", "status"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    scope_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    scope_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="initiated", nullable=False)
+    classification: Mapped[str] = mapped_column(String(20), default="synthetic", nullable=False)
+    storage_provider: Mapped[str] = mapped_column(String(40), default="pending", nullable=False)
+    object_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(160), nullable=False)
+    byte_size: Mapped[int] = mapped_column(nullable=False, default=0)
+    sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_by_principal: Mapped[str] = mapped_column(String(200), nullable=False)
+    scanner_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    scanner_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    scan_result: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    retention_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now, nullable=False)
+
+
 class WorkspaceGrant(Base):
     """Auditable, independently revocable human access to one workspace."""
     __tablename__ = "workspace_grants"
@@ -253,6 +318,14 @@ class Execution(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=now, onupdate=now, nullable=False
     )
+
+    @property
+    def provider_usage(self) -> dict | None:
+        """Expose normalized provider usage without exposing the execution transcript."""
+        if not isinstance(self.result, dict):
+            return None
+        usage = self.result.get("usage")
+        return usage if isinstance(usage, dict) else None
 
 
 class ExecutionAttempt(Base):

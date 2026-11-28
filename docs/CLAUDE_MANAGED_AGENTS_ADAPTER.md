@@ -23,7 +23,7 @@ Managed Agents is beta and is not Zero Data Retention or HIPAA BAA eligible. The
 
 - Requires an explicit enable flag, API key, pre-created Managed Agent ID and environment ID.
 - Before creating or resuming a session, retrieves the provider Agent and fails closed if it is archived, has built-in toolsets, MCP servers, provider skills or multiagent features configured. Exact OS-registered custom tools are the only permitted provider tools. Their callbacks are executed by the OS worker and authorized by the shared Tool Gateway.
-- Sends the pre-created Agent ID, environment, bounded budget, metadata and initial task event.
+- Sends the pre-created Agent ID, environment, bounded budget, metadata (including the durable OS execution ID) and initial task event.
 - Uses the OS Agent instructions/department and persisted OS Task as task-specific context.
 - Persists the session ID to the active execution attempt after a successful create response; subsequent attempts reuse the saved session ID.
 - Polls session state while worker heartbeat maintains the OS execution lease.
@@ -76,11 +76,15 @@ Provision a founder-approved machine identity for the agent in the intended work
 
 ## Reliability caveat
 
-If Anthropic creates a session but the response containing its ID is lost before the OS receives it, the OS cannot currently reconcile that ambiguous create. Do not enable unattended production execution until provider-side idempotency/reconciliation or webhook-based recovery is implemented and tested. A persisted session ID supports resume, but it does not solve the ambiguous-create window.
+The current Create Session API reference documents session metadata but does not document an idempotency-key parameter/header. The List Sessions API can filter by agent and creation time and returns session metadata, but it does not expose a metadata query filter. See the [Create Session API](https://platform.claude.com/docs/en/api/beta/sessions/create) and [List Sessions API](https://platform.claude.com/docs/en/api/beta/sessions/list).
+
+The adapter now includes the durable Agency OS execution ID in provider session metadata. If session creation returns a transport error, 429/5xx, malformed success response, unusable session ID, or the OS cannot persist the returned ID, the adapter raises a non-retryable `RuntimeManualReviewRequired` outcome. The worker records `RUNTIME_REQUIRES_REVIEW` without scheduling an automatic retry. This prevents a blind second `POST /v1/sessions` and makes manual provider-console/list reconciliation possible using the execution metadata.
+
+Automatic provider-session reconciliation is **not implemented**. A human must resolve an ambiguous create before the execution is retried or replaced. Do not enable unattended production execution until the provider's idempotency/reconciliation contract is verified and the full recovery path is implemented and tested. A persisted session ID continues to support normal resume.
 
 ## Validation status
 
-Mock adapter tests cover provider Agent inspection, tool isolation rejection, request shape, session persistence/resume, workflow-run completion, manual-review pauses, transient errors and data eligibility. CI does not prove live provider compatibility, actual provider Agent/Environment settings, live sandbox isolation or production suitability.
+Mock adapter tests cover provider Agent inspection, tool isolation rejection, request shape and execution metadata, session persistence/resume, workflow-run completion, ambiguous session-create failures, persistence failures, malformed responses, manual-review pauses, transient errors and data eligibility. CI does not prove live provider compatibility, actual provider Agent/Environment settings, live sandbox isolation or production suitability.
 
 
 ## OS custom-tool integration status — 2026-11-25

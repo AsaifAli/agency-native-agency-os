@@ -14,6 +14,7 @@ const groups = [
       ["Agent Studio", "/agents", "✳"],
       ["Tasks", "/tasks", "☷"],
       ["Operations", "/operations", "◉"],
+      ["Private Operations", "/private-ops", "✧"],
       ["Approvals", "/approvals", "✓"],
       ["Leads", "/leads", "◎"],
       ["Outreach", "/outreach", "✉"],

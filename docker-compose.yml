@@ -39,6 +39,18 @@ services:
 
   api:
     build: .
+    user: "10001:10001"
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 1g
+    cpus: 1.50
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=128m
     env_file: .env.runtime
     environment:
       PROCESS_ROLE: api
@@ -64,6 +76,17 @@ services:
 
   worker:
     build: .
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 1.00
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
     env_file: .env.runtime
     environment:
       PROCESS_ROLE: worker

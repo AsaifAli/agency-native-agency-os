@@ -2,11 +2,11 @@
 
 ## Implementation status
 
-Migration `t0a1b2c3d4e5` enables and FORCEs RLS for organization-scoped model tables, `organizations` and `browser_sessions`. Follow-up migration `u1b2c3d4e5f6` adds RLS to `execution_attempts`, scopes org-level outbox events and adds two private SECURITY DEFINER worker operations. The worker role is changed to non-superuser `NOBYPASSRLS`; it enumerates org/workspace identifiers through a narrowly granted function, then runs normal queue, execution, session and outbox queries with a transaction-local exact workspace context. Browser-session retention runs through a bounded, audited SECURITY DEFINER function. Direct worker privileges on users, browser sessions, memberships, founder authorities and machine identities are revoked. API and worker startup verify their PostgreSQL role attributes and fail closed unless every expected tenant table (49 organization-scoped tables plus `organizations`, `browser_sessions` and `execution_attempts`: 52 total) exists, has both ENABLE and FORCE ROW LEVEL SECURITY, and has at least one policy. The inventory is kept in `app/db.py` and a regression test compares it with the migration's `ORG_TABLES` definition.
+The PostgreSQL security model uses additive migrations to enable and FORCE RLS across the tenant-owned schema, including organization-scoped records, workspace-owned records, `organizations`, `browser_sessions`, `execution_attempts`, outcome evidence, orchestration links and Private Operations records. The current startup inventory is maintained in `app/db.py` (`REQUIRED_RLS_TABLES`, currently 58 tables) and startup fails closed if an expected table is missing RLS, FORCE RLS or a policy. Dedicated runtime roles are non-superusers and `NOBYPASSRLS`; the migrator is the only role with `BYPASSRLS` and owns migrated objects. Worker scope discovery is an atomic bounded claim. Execution work uses a PID/transaction-bound lease capability; maintenance uses a separate short-lived workspace capability. The legacy global workspace enumerator is not an authorized worker entry point. Browser-session retention runs through a bounded, audited SECURITY DEFINER function, and direct worker privileges on sensitive tables are revoked. PostgreSQL integration tests verify role grants, worker capabilities, human workspace grants, machine identity lookup, append-only audit and outcome evidence.
 
 **Validation status:** the user applied migration `u1b2c3d4e5f6` and completed the worker role grant/bootstrap step against the isolated PostgreSQL Compose test database. The configured `postgres-tests` image then passed **22 tests (22 passed, 0 failed)**, including the worker-role RLS integration tests. This is isolated local test evidence, not a production migration rehearsal or production approval. The assistant-side development environment has no Docker daemon or live PostgreSQL service.
 
-Human organization membership currently grants access to all workspaces in that organization. There is no per-user workspace membership/assignment model yet; human workspace restrictions still rely on route-level `org_id`/`workspace_id` checks. Machine identities are database-enforced to their exact workspace.
+Human access requires both active organization membership and an explicit, auditable `workspace_grants` row. Existing membership access was backfilled when the workspace-grant migration was introduced; future workspace access changes are explicit. Machine identities are database-enforced to their exact workspace. Worker data access uses a separate execution- or maintenance-capability context.
 
 ## Roles
 
@@ -17,7 +17,11 @@ Human organization membership currently grants access to all workspaces in that 
 | `agency_os_app` | API only | Non-owner, `NOBYPASSRLS` | All API queries are subject to tenant RLS |
 | `agency_os_worker` | Worker only | Non-owner, non-superuser, `NOBYPASSRLS` | Workspace-scoped queue processing with explicit transaction-local RLS context |
 
-The worker role is non-superuser `NOBYPASSRLS`. Its code enumerates workspace identifiers through the private scope function and processes one workspace at a time with transaction-local RLS context. The scope function and browser-session retention function are the only cross-workspace SECURITY DEFINER entry points granted to the worker. The worker still has operational authority to process every workspace; PostgreSQL custom GUC context is defense-in-depth against missing predicates, not a boundary against arbitrary SQL execution under the worker credential. For isolation against a compromised worker credential, use per-tenant worker credentials or move all tenant data operations behind narrowly scoped database functions. The API must never receive migrator or worker credentials.
+The worker role is non-superuser `NOBYPASSRLS`. It claims one workspace at a time through bounded execution/maintenance capability functions and processes it with transaction-local RLS context. It has no general-purpose global workspace-list function. Worker claim/lease lifecycle functions and bounded browser-session retention are narrowly scoped SECURITY DEFINER entry points; none grants arbitrary tenant-table access. The worker still has operational authority to process every workspace; PostgreSQL custom GUC context is defense-in-depth against missing predicates, not a boundary against arbitrary SQL execution under the worker credential. For isolation against a compromised worker credential, use per-tenant worker credentials or move all tenant data operations behind narrowly scoped database functions. The API must never receive migrator or worker credentials.
+
+### Shared user identity directory
+
+`public.users` is intentionally excluded from tenant RLS because it stores only the agency's shared, pre-provisioned internal identities; it is not a client/contact directory. This is a deliberate global identity boundary, not a tenant-owned business-data exception to copy elsewhere. The API role may read identities for authentication and same-agency operational references, and may update only `oidc_issuer` and `oidc_subject` when linking a verified, pre-provisioned OIDC account. It cannot insert/delete users or update email, display name, active state or the primary key. The worker has no privileges on `users`. Provisioning and profile/activation changes remain trusted migrator/founder-admin operations. Client people belong in workspace-scoped `contacts`, never in `users`.
 
 ## Local Compose setup
 
@@ -44,11 +48,11 @@ Do not reset/delete the volume. Back up first.
 ## Context behavior
 
 - Human authentication binds `agency_os.user_id` transaction-locally after resolving the active user.
-- Machine authentication first binds only the supplied identity ID for one-row lookup; after digest verification it binds the machine organization and exact workspace.
+- Machine authentication first binds only the supplied identity ID for one-row lookup; after digest verification it retains that exact identity ID together with the machine organization and exact workspace. Service-session credential SECURITY DEFINER functions require all three context values to match their target parameters and reject cross-identity calls.
 - Signed website intake binds only its configured org/workspace after signature and idempotency checks.
 - SQLAlchemy reapplies context after each new transaction. `set_config(..., true)` resets at commit/rollback so pooled connections do not retain a previous request's tenant identity.
-- A restricted `SECURITY DEFINER` membership predicate is owned by `agency_os_migrator`; execute is revoked from PUBLIC and granted to API and worker roles. For `session_user = 'agency_os_worker'`, it always returns false so the worker cannot use it as a membership oracle.
-- Worker scope enumeration returns only org/workspace identifiers. All worker data queries use a workspace-scoped session factory. Execution attempts inherit their parent execution's RLS scope.
+- Restricted `SECURITY DEFINER` organization/workspace access predicates are owned by `agency_os_migrator`; execute is revoked from PUBLIC and granted only to API and worker roles. Each predicate requires its actor argument to equal the transaction-local authenticated user. Worker calls always return false, and API callers cannot use the helpers as cross-user membership/workspace oracles.
+- Worker scope discovery is an atomic, bounded claim, not a global workspace list. Execution work uses a PID/transaction-bound lease capability; maintenance uses a separate short-lived workspace capability. Execution attempts inherit their parent execution's RLS scope.
 - Browser-session retention is a bounded, audited SECURITY DEFINER operation; the worker has no direct browser-session table privileges.
 - Default privileges no longer automatically grant future public tables or sequences to the worker; new worker dependencies require explicit reviewed grants.
 
@@ -56,7 +60,7 @@ Custom PostgreSQL GUCs are defense-in-depth against missing tenant predicates, n
 
 ## Live test
 
-Apply migrations to a disposable PostgreSQL 16 database and create the four roles. Then run:
+Apply migrations to a disposable PostgreSQL 16 database and create the bootstrap, migrator, app, test-app and worker roles using `docker/postgres/test-init.sql`. The `agency_os_test_app` login inherits `agency_os_app` grants but remains a separate `NOBYPASSRLS` session identity. Then run:
 
 ```bash
 AGENCY_OS_TEST_RLS_ADMIN_DATABASE_URL='postgresql+psycopg://agency_os_migrator:...@localhost:5432/agency_os_test' \

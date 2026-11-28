@@ -1,16 +1,19 @@
 """Claude Managed Agents adapter with durable sessions and OS-owned custom tools.
 
-Only exact custom tools from the Agency OS registry are permitted. Built-in
-provider tools, MCP servers, skills and provider multiagent features remain
-disabled until their actions can be reconciled into OS-owned policy and audit.
+Only exact custom tools from the Agency OS registry are permitted.
+The optional Claude MCP transport exposes only OS-authorized read-only tools;
+session credentials, approvals, tool execution and audit remain OS-owned.
 A provider session completes only after all workflow runs end and the primary
 turn reaches end_turn.
 """
 from __future__ import annotations
 
 import json
+import math
+import re
 import time
 from typing import Callable
+from urllib.parse import urlparse
 
 import httpx
 
@@ -81,6 +84,249 @@ class ManagedAgentsRuntime(AgentRuntime):
             raise RuntimeExecutionError(
                 "Claude Managed Agents returned an invalid response."
             ) from exc
+
+    def _validate_mcp_environment(self, client: httpx.Client) -> None:
+        environment = self._request(
+            client, "GET", f"/v1/environments/{self.config.claude_managed_environment_id}"
+        )
+        if not isinstance(environment, dict) or environment.get("archived_at") is not None:
+            raise RuntimeNotConfiguredError("Claude MCP requires an active cloud environment.")
+        environment_config = environment.get("config")
+        if not isinstance(environment_config, dict) or environment_config.get("type") != "cloud":
+            raise RuntimeNotConfiguredError("Claude MCP is supported only in a managed cloud environment.")
+        networking = environment_config.get("networking")
+        host = urlparse(self.config.claude_managed_mcp_public_base_url).hostname
+        allowed_hosts = networking.get("allowed_hosts") if isinstance(networking, dict) else None
+        if (
+            not isinstance(networking, dict)
+            or networking.get("type") != "limited"
+            or networking.get("allow_mcp_servers") is True
+            or not isinstance(allowed_hosts, list)
+            or host not in allowed_hosts
+        ):
+            raise RuntimeNotConfiguredError(
+                "Claude MCP requires limited environment networking, an exact MCP host allowlist entry, "
+                "and allow_mcp_servers=false."
+            )
+
+    def _mcp_session_url(self, os_session_id: str) -> str:
+        origin = self.config.claude_managed_mcp_public_base_url.rstrip("/")
+        return f"{origin}/v1/integrations/claude/mcp/sessions/{os_session_id}"
+
+    def _list_mcp_vault_credentials(
+        self, client: httpx.Client, vault_id: str
+    ) -> list[dict]:
+        path = f"/v1/vaults/{vault_id}/credentials"
+        params: dict[str, object] = {"limit": 100}
+        credentials: list[dict] = []
+        for _page_number in range(10):
+            response = self._request(client, "GET", path, params=params)
+            if not isinstance(response, dict) or not isinstance(response.get("data"), list):
+                raise RuntimeManualReviewRequired(
+                    "Anthropic Vault credential listing returned an unusable response."
+                )
+            credentials.extend(
+                item for item in response["data"] if isinstance(item, dict)
+            )
+            next_page = response.get("next_page")
+            if not next_page:
+                return credentials
+            if not isinstance(next_page, str):
+                raise RuntimeManualReviewRequired(
+                    "Anthropic Vault returned an invalid credential pagination token."
+                )
+            params = {"limit": 100, "page": next_page}
+        raise RuntimeManualReviewRequired(
+            "Anthropic Vault credential reconciliation exceeded its bounded page limit."
+        )
+
+    @staticmethod
+    def _mcp_vault_credential_matches(
+        credential: dict, *, session_id: str, execution_id: str, mcp_url: str
+    ) -> bool:
+        metadata = credential.get("metadata")
+        auth = credential.get("auth")
+        return (
+            credential.get("archived_at") is None
+            and isinstance(metadata, dict)
+            and metadata.get("agency_os_session_id") == session_id
+            and metadata.get("agency_os_execution_id") == execution_id
+            and metadata.get("agency_os_mcp_server_url") == mcp_url
+            and isinstance(auth, dict)
+            and auth.get("type") == "static_bearer"
+            and auth.get("mcp_server_url") == mcp_url
+        )
+
+    def _archive_mcp_vault_credential(
+        self, client: httpx.Client, vault_id: str, credential_id: str
+    ) -> None:
+        self._request(
+            client,
+            "POST",
+            f"/v1/vaults/{vault_id}/credentials/{credential_id}/archive",
+        )
+
+    def _reconcile_mcp_vault_credential(
+        self,
+        client: httpx.Client,
+        *,
+        vault_id: str,
+        session_id: str,
+        execution_id: str,
+        mcp_url: str,
+    ) -> str:
+        credentials = self._list_mcp_vault_credentials(client, vault_id)
+        matches = [
+            item for item in credentials
+            if self._mcp_vault_credential_matches(
+                item, session_id=session_id, execution_id=execution_id, mcp_url=mcp_url
+            )
+        ]
+        if len(matches) == 1 and isinstance(matches[0].get("id"), str):
+            return matches[0]["id"]
+        if len(matches) > 1:
+            archive_failed = False
+            for item in matches:
+                credential_id = item.get("id")
+                if isinstance(credential_id, str) and credential_id:
+                    try:
+                        self._archive_mcp_vault_credential(client, vault_id, credential_id)
+                    except Exception:
+                        archive_failed = True
+            detail = "Multiple matching Vault credentials were found."
+            if archive_failed:
+                detail += " One or more duplicates could not be archived."
+            raise RuntimeManualReviewRequired(detail)
+        raise RuntimeManualReviewRequired(
+            "Anthropic Vault credential creation is ambiguous and no exact matching credential was found."
+        )
+
+    def _create_mcp_vault_credential(
+        self,
+        client: httpx.Client,
+        *,
+        request: ExecutionRequest,
+        os_session_id: str,
+        token: str,
+        mcp_url: str,
+    ) -> str:
+        vault_id = self.config.claude_managed_mcp_vault_id
+        metadata = {
+            "agency_os_execution_id": request.execution_id or "",
+            "agency_os_session_id": os_session_id,
+            "agency_os_mcp_server_url": mcp_url,
+        }
+        body = {
+            "display_name": f"Agency OS MCP session {os_session_id[:12]}",
+            "auth": {
+                "type": "static_bearer",
+                "token": token,
+                "mcp_server_url": mcp_url,
+            },
+            "metadata": metadata,
+        }
+        try:
+            created = self._request(
+                client, "POST", f"/v1/vaults/{vault_id}/credentials", json=body
+            )
+        except (RuntimeTransientError, RuntimeExecutionError):
+            return self._reconcile_mcp_vault_credential(
+                client, vault_id=vault_id, session_id=os_session_id,
+                execution_id=request.execution_id or "", mcp_url=mcp_url,
+            )
+
+        if (
+            isinstance(created, dict)
+            and isinstance(created.get("id"), str)
+            and self._mcp_vault_credential_matches(
+                created,
+                session_id=os_session_id,
+                execution_id=request.execution_id or "",
+                mcp_url=mcp_url,
+            )
+        ):
+            return created["id"]
+        return self._reconcile_mcp_vault_credential(
+            client, vault_id=vault_id, session_id=os_session_id,
+            execution_id=request.execution_id or "", mcp_url=mcp_url,
+        )
+
+    def _cleanup_mcp_credential(
+        self,
+        client: httpx.Client,
+        request: ExecutionRequest,
+        *,
+        os_credential_id: str,
+        provider_credential_id: str | None,
+        reason: str,
+    ) -> None:
+        if request.revoke_mcp_session_credential is None:
+            raise RuntimeManualReviewRequired(
+                "The MCP credential cannot be revoked through the OS worker lifecycle."
+            )
+        try:
+            request.revoke_mcp_session_credential(os_credential_id, reason)
+        except Exception as exc:
+            raise RuntimeManualReviewRequired(
+                "The OS could not revoke the MCP session credential; manual review is required."
+            ) from exc
+
+        if provider_credential_id is None:
+            return
+        vault_id = self.config.claude_managed_mcp_vault_id
+        try:
+            self._archive_mcp_vault_credential(client, vault_id, provider_credential_id)
+        except Exception as exc:
+            # The OS token is already revoked; the persisted delete_pending state
+            # allows a later bounded cleanup/reconciliation job.
+            raise RuntimeManualReviewRequired(
+                "The OS credential is revoked, but Anthropic Vault archival remains pending."
+            ) from exc
+        if request.mark_mcp_provider_credential_archived is None:
+            raise RuntimeManualReviewRequired(
+                "The provider credential was archived but OS archival state could not be persisted."
+            )
+        try:
+            request.mark_mcp_provider_credential_archived(
+                os_credential_id, provider_credential_id
+            )
+        except Exception as exc:
+            raise RuntimeManualReviewRequired(
+                "The provider credential was archived but OS archival state could not be persisted."
+            ) from exc
+
+    def _mcp_agent_override(self, enabled_tools: dict, mcp_url: str) -> dict:
+        custom_tools = [
+            tool for tool in managed_agent_custom_tool_definitions()
+            if tool.get("name") in enabled_tools
+        ]
+        configured_keys = sorted(
+            key.strip()
+            for key in self.config.claude_managed_mcp_enabled_tool_keys.split(",")
+            if key.strip()
+        )
+        mcp_toolset = {
+            "type": "mcp_toolset",
+            "mcp_server_name": "agency_os",
+            "default_config": {
+                "enabled": False,
+                "permission_policy": {"type": "always_allow"},
+            },
+            "configs": [
+                {
+                    "name": key,
+                    "enabled": True,
+                    "permission_policy": {"type": "always_allow"},
+                }
+                for key in configured_keys
+            ],
+        }
+        return {
+            "type": "agent_with_overrides",
+            "id": self.config.claude_managed_agent_id,
+            "mcp_servers": [{"type": "url", "name": "agency_os", "url": mcp_url}],
+            "tools": [*custom_tools, mcp_toolset],
+        }
 
     def _task_prompt(self, request: ExecutionRequest) -> str:
         if (request.request_metadata or {}).get("purpose") == "workforce.plan_draft":
@@ -348,18 +594,87 @@ class ManagedAgentsRuntime(AgentRuntime):
                 open_runs.discard(run_id)
         return open_runs
 
-    def _extract_result(self, events: list[dict], session_id: str) -> ExecutionResult:
+    @staticmethod
+    def _normalize_usage(usage: object) -> dict | None:
+        """Keep only bounded, numeric usage fields from the provider session."""
+        if usage is None:
+            return None
+        if not isinstance(usage, dict):
+            raise RuntimeManualReviewRequired("Claude Managed Agents returned malformed session usage.")
+        normalized: dict = {}
+        for key in ("input_tokens", "output_tokens", "cache_read_input_tokens"):
+            value = usage.get(key)
+            if value is None:
+                continue
+            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 10**12:
+                raise RuntimeManualReviewRequired("Claude Managed Agents returned invalid token usage.")
+            normalized[key] = value
+        cache_creation = usage.get("cache_creation")
+        if cache_creation is not None:
+            if not isinstance(cache_creation, dict):
+                raise RuntimeManualReviewRequired("Claude Managed Agents returned invalid cache usage.")
+            cache_total = 0
+            for key in ("ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens"):
+                value = cache_creation.get(key, 0)
+                if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 10**12:
+                    raise RuntimeManualReviewRequired("Claude Managed Agents returned invalid cache usage.")
+                cache_total += value
+            normalized["cache_creation_input_tokens"] = cache_total
+        list_cost = usage.get("list_cost")
+        if list_cost is not None:
+            if (
+                not isinstance(list_cost, dict)
+                or list_cost.get("currency") != "USD"
+                or not isinstance(list_cost.get("amount"), str)
+                or re.fullmatch(r"(?:0|[1-9][0-9]{0,11})", list_cost["amount"]) is None
+            ):
+                raise RuntimeManualReviewRequired("Claude Managed Agents returned invalid or unsupported list-cost usage.")
+            normalized["list_cost_minor"] = int(list_cost["amount"])
+            normalized["currency"] = "USD"
+        active_seconds = usage.get("active_seconds")
+        if active_seconds is not None:
+            if (
+                isinstance(active_seconds, bool)
+                or not isinstance(active_seconds, (int, float))
+                or not math.isfinite(active_seconds)
+                or not 0 <= active_seconds <= 31_536_000
+            ):
+                raise RuntimeManualReviewRequired("Claude Managed Agents returned invalid active-time usage.")
+            normalized["active_seconds"] = float(active_seconds)
+        server_tool_use = usage.get("server_tool_use")
+        if server_tool_use is not None:
+            if not isinstance(server_tool_use, dict):
+                raise RuntimeManualReviewRequired("Claude Managed Agents returned invalid server-tool usage.")
+            counts = {}
+            for key in ("web_search_requests", "web_fetch_requests"):
+                value = server_tool_use.get(key, 0)
+                if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 10**9:
+                    raise RuntimeManualReviewRequired("Claude Managed Agents returned invalid server-tool usage.")
+                counts[key] = value
+            normalized["server_tool_use"] = counts
+        return normalized or None
+
+    def _extract_result(
+        self, events: list[dict], session_id: str, session_usage: object = None,
+    ) -> ExecutionResult:
+        if session_usage is None:
+            usage_events = [event for event in events if event.get("type") == "session.usage"]
+            if usage_events:
+                session_usage = usage_events[-1].get("usage")
+        normalized_usage = self._normalize_usage(session_usage)
         idle_events = [event for event in events if event.get("type") == "session.status_idle"]
         stop_reason = idle_events[-1].get("stop_reason", {}) if idle_events else {}
         stop_type = stop_reason.get("type") if isinstance(stop_reason, dict) else None
 
         if self._open_workflow_runs(events):
             raise RuntimeManualReviewRequired(
-                "Managed Agent session became idle while a workflow run was still open."
+                "Managed Agent session became idle while a workflow run was still open.",
+                usage=normalized_usage,
             )
         if stop_type in {"requires_action", "budget_reached", "refusal", "retries_exhausted"}:
             raise RuntimeManualReviewRequired(
-                f"Managed Agent stopped for a review-required reason: {stop_type}."
+                f"Managed Agent stopped for a review-required reason: {stop_type}.",
+                usage=normalized_usage,
             )
         if stop_type != "end_turn":
             raise RuntimeManualReviewRequired(
@@ -394,6 +709,7 @@ class ManagedAgentsRuntime(AgentRuntime):
             external_run_id=session_id,
             status="succeeded",
             detail=detail[:16000],
+            usage=normalized_usage,
         )
 
     def start(self, request: ExecutionRequest) -> ExecutionResult:
@@ -428,11 +744,146 @@ class ManagedAgentsRuntime(AgentRuntime):
             enabled_tools = self._validate_provider_agent(client, request)
             resuming_existing_session = bool(request.external_run_id)
             session_id = request.external_run_id
+            mcp_state: dict | None = None
+
+            def cleanup_mcp(reason: str) -> None:
+                nonlocal mcp_state
+                if mcp_state is None:
+                    return
+                self._cleanup_mcp_credential(
+                    client,
+                    request,
+                    os_credential_id=mcp_state["credential_id"],
+                    provider_credential_id=mcp_state.get("provider_credential_id"),
+                    reason=reason,
+                )
+                mcp_state = None
+
+            if self.config.claude_managed_mcp_enabled:
+                self._validate_mcp_environment(client)
+                if resuming_existing_session:
+                    if request.get_mcp_provider_credential is None:
+                        raise RuntimeManualReviewRequired(
+                            "No OS-owned MCP provider credential lookup is available for session recovery."
+                        )
+                    mcp_state = request.get_mcp_provider_credential()
+                    if (
+                        not isinstance(mcp_state, dict)
+                        or not isinstance(mcp_state.get("credential_id"), str)
+                        or not isinstance(mcp_state.get("session_id"), str)
+                        or not isinstance(mcp_state.get("provider_credential_id"), str)
+                        or mcp_state.get("vault_id") != self.config.claude_managed_mcp_vault_id
+                    ):
+                        raise RuntimeManualReviewRequired(
+                            "The persisted MCP Vault credential is unavailable for this provider session."
+                        )
+
             if not session_id:
+                if self.config.claude_managed_mcp_enabled:
+                    # A previous worker may have crashed after issuing the OS
+                    # credential or creating the Vault credential but before
+                    # persisting the provider session ID. Never blindly create
+                    # a second provider session in that ambiguous state.
+                    if request.get_mcp_provider_credential is not None:
+                        orphan = request.get_mcp_provider_credential()
+                    else:
+                        orphan = None
+                    if isinstance(orphan, dict):
+                        mcp_state = orphan
+                        orphan_provider_id = orphan.get("provider_credential_id")
+                        if not isinstance(orphan_provider_id, str) or not orphan_provider_id:
+                            try:
+                                orphan_provider_id = self._reconcile_mcp_vault_credential(
+                                    client,
+                                    vault_id=self.config.claude_managed_mcp_vault_id,
+                                    session_id=orphan["session_id"],
+                                    execution_id=request.execution_id or "",
+                                    mcp_url=self._mcp_session_url(orphan["session_id"]),
+                                )
+                                mcp_state["provider_credential_id"] = orphan_provider_id
+                                if request.persist_mcp_provider_credential is None:
+                                    raise RuntimeManualReviewRequired(
+                                        "The orphaned Vault credential cannot be attached to OS state."
+                                    )
+                                request.persist_mcp_provider_credential(
+                                    orphan["credential_id"],
+                                    self.config.claude_managed_mcp_vault_id,
+                                    orphan_provider_id,
+                                )
+                            except Exception:
+                                cleanup_mcp("MCP_ORPHANED_CREDENTIAL")
+                                raise RuntimeManualReviewRequired(
+                                    "An orphaned MCP session credential was found; its provider state "
+                                    "requires manual reconciliation before another session can be created."
+                                ) from None
+                        cleanup_mcp("MCP_ORPHANED_CREDENTIAL")
+                        raise RuntimeManualReviewRequired(
+                            "An MCP credential from an interrupted provider create was revoked and archived. "
+                            "Reconcile the provider session before retrying."
+                        )
+
+                    if request.prepare_mcp_session is None:
+                        raise RuntimeManualReviewRequired(
+                            "No execution-scoped MCP session preparation callback is available."
+                        )
+                    prepared = request.prepare_mcp_session()
+                    if (
+                        not isinstance(prepared, dict)
+                        or not isinstance(prepared.get("session_id"), str)
+                        or not isinstance(prepared.get("credential_id"), str)
+                        or not isinstance(prepared.get("token"), str)
+                    ):
+                        raise RuntimeManualReviewRequired(
+                            "The OS did not return a complete MCP session credential."
+                        )
+                    mcp_state = {
+                        "credential_id": prepared["credential_id"],
+                        "session_id": prepared["session_id"],
+                        "provider_credential_id": None,
+                    }
+                    mcp_url = self._mcp_session_url(prepared["session_id"])
+                    try:
+                        provider_credential_id = self._create_mcp_vault_credential(
+                            client,
+                            request=request,
+                            os_session_id=prepared["session_id"],
+                            token=prepared["token"],
+                            mcp_url=mcp_url,
+                        )
+                        mcp_state["provider_credential_id"] = provider_credential_id
+                        if request.persist_mcp_provider_credential is None:
+                            raise RuntimeManualReviewRequired(
+                                "No OS persistence callback exists for the Anthropic Vault credential."
+                            )
+                        request.persist_mcp_provider_credential(
+                            prepared["credential_id"],
+                            self.config.claude_managed_mcp_vault_id,
+                            provider_credential_id,
+                        )
+                    except RuntimeManualReviewRequired:
+                        cleanup_mcp("MCP_VAULT_CREATE_AMBIGUOUS")
+                        raise
+                    except RuntimeNotConfiguredError:
+                        cleanup_mcp("MCP_VAULT_CREATE_REJECTED")
+                        raise
+                    except Exception as exc:
+                        cleanup_mcp("MCP_VAULT_PERSIST_FAILED")
+                        raise RuntimeManualReviewRequired(
+                            "The Anthropic Vault credential could not be persisted safely."
+                        ) from exc
+
                 body = {
                     # The Agent may expose only exact custom tools from the OS registry.
-                    "agent": self.config.claude_managed_agent_id,
+                    "agent": (
+                        self._mcp_agent_override(enabled_tools, mcp_url)
+                        if mcp_state is not None
+                        else self.config.claude_managed_agent_id
+                    ),
                     "environment_id": self.config.claude_managed_environment_id,
+                    **(
+                        {"vault_ids": [self.config.claude_managed_mcp_vault_id]}
+                        if mcp_state is not None else {}
+                    ),
                     "budget": {
                         "type": "limit",
                         "max_list_cost": {
@@ -446,6 +897,10 @@ class ManagedAgentsRuntime(AgentRuntime):
                         "agency_os_workspace_id": request.workspace_id[:512],
                         "agency_os_task_id": request.task_id[:512],
                         "agency_os_agent_id": request.agent_id[:512],
+                        **(
+                            {"agency_os_execution_id": request.execution_id[:512]}
+                            if request.execution_id else {}
+                        ),
                     },
                     "initial_events": [
                         {
@@ -456,17 +911,51 @@ class ManagedAgentsRuntime(AgentRuntime):
                         }
                     ],
                 }
-                created = self._request(client, "POST", "/v1/sessions", json=body)
+                try:
+                    created = self._request(client, "POST", "/v1/sessions", json=body)
+                except RuntimeNotConfiguredError:
+                    if mcp_state is not None:
+                        cleanup_mcp("MCP_SESSION_CREATE_REJECTED")
+                    raise
+                except (RuntimeTransientError, RuntimeExecutionError) as exc:
+                    if mcp_state is not None:
+                        cleanup_mcp("MCP_SESSION_CREATE_AMBIGUOUS")
+                    raise RuntimeManualReviewRequired(
+                        "Claude Managed Agents session creation outcome is ambiguous; "
+                        "reconcile the provider session before retrying."
+                    ) from exc
+
+                if not isinstance(created, dict):
+                    if mcp_state is not None:
+                        cleanup_mcp("MCP_SESSION_CREATE_MALFORMED")
+                    raise RuntimeManualReviewRequired(
+                        "Claude Managed Agents returned a malformed session creation "
+                        "response; provider reconciliation is required."
+                    )
                 session_id = created.get("id")
                 if not isinstance(session_id, str) or not session_id.strip():
-                    raise RuntimeExecutionError(
-                        "Claude Managed Agents did not return a session ID."
+                    if mcp_state is not None:
+                        cleanup_mcp("MCP_SESSION_CREATE_MALFORMED")
+                    raise RuntimeManualReviewRequired(
+                        "Claude Managed Agents may have created a session without "
+                        "returning a usable ID; provider reconciliation is required."
                     )
                 if request.persist_external_run_id is None:
-                    raise RuntimeExecutionError(
-                        "The worker did not provide a durable provider-session persistence callback."
+                    if mcp_state is not None:
+                        cleanup_mcp("MCP_SESSION_ID_PERSIST_FAILED")
+                    raise RuntimeManualReviewRequired(
+                        "The provider session was created but no durable OS persistence "
+                        "callback is available; reconcile before retrying."
                     )
-                request.persist_external_run_id(session_id)
+                try:
+                    request.persist_external_run_id(session_id)
+                except Exception:
+                    if mcp_state is not None:
+                        cleanup_mcp("MCP_SESSION_ID_PERSIST_FAILED")
+                    raise RuntimeManualReviewRequired(
+                        "The provider session was created but its ID could not be "
+                        "persisted by Agency OS; reconcile before retrying."
+                    ) from None
 
             resume_request = (request.request_metadata or {}).get("control_request") or {}
             if resume_request.get("action") == "resume" and resuming_existing_session:
@@ -537,11 +1026,16 @@ class ManagedAgentsRuntime(AgentRuntime):
                         request.persist_control_event(str(interrupt_action), interrupt_event_id)
                     interrupt_sent = True
 
-                session = self._request(
-                    client, "GET", f"/v1/sessions/{session_id}"
-                )
+                try:
+                    session = self._request(
+                        client, "GET", f"/v1/sessions/{session_id}"
+                    )
+                except RuntimeNotConfiguredError:
+                    cleanup_mcp("MCP_PROVIDER_SESSION_UNAVAILABLE")
+                    raise
                 status = session.get("status")
                 if status in {"failed", "error", "archived", "terminated"}:
+                    cleanup_mcp("MCP_SESSION_TERMINAL_FAILURE")
                     if interrupt_sent and status == "terminated":
                         if interrupt_action == "pause":
                             raise RuntimeManualReviewRequired("Provider terminated the session during a pause request; resume is not safe.")
@@ -552,7 +1046,11 @@ class ManagedAgentsRuntime(AgentRuntime):
 
                 # Custom tool events can arrive while a workflow is still running;
                 # process them before waiting for session.status_idle.
-                events = self._list_events(client, session_id)
+                try:
+                    events = self._list_events(client, session_id)
+                except RuntimeNotConfiguredError:
+                    cleanup_mcp("MCP_PROVIDER_EVENTS_UNAVAILABLE")
+                    raise
                 if interrupt_sent:
                     interrupt_processed = any(
                         event.get("type") == "user.interrupt"
@@ -567,12 +1065,14 @@ class ManagedAgentsRuntime(AgentRuntime):
                     ):
                         if interrupt_action == "pause":
                             raise RuntimePaused("Claude Managed Agents acknowledged the pause.")
+                        cleanup_mcp("MCP_SESSION_CANCELLED")
                         raise RuntimeCancelled("Claude Managed Agents acknowledged the cancellation.")
                     self.sleep(self.config.claude_managed_poll_interval_seconds)
                     continue
                 if any(event.get("type") == "session.error" for event in events):
-                    raise RuntimeExecutionError(
-                        "Claude Managed Agents reported a session error."
+                    cleanup_mcp("MCP_SESSION_ERROR")
+                    raise RuntimeNotConfiguredError(
+                        "Claude Managed Agents reported a provider session or MCP connection error."
                     )
                 processed = self._process_custom_tool_events(
                     client,
@@ -598,7 +1098,11 @@ class ManagedAgentsRuntime(AgentRuntime):
                     stop_reason = idle_events[-1].get("stop_reason", {}) if idle_events else {}
                     stop_type = stop_reason.get("type") if isinstance(stop_reason, dict) else None
                     if stop_type == "end_turn":
-                        return self._extract_result(events, session_id)
+                        try:
+                            result = self._extract_result(events, session_id, session.get("usage"))
+                        finally:
+                            cleanup_mcp("MCP_SESSION_COMPLETED")
+                        return result
                     if (
                         stop_type == "requires_action"
                         and self._waiting_for_custom_tool_resume(events, enabled_tools)
@@ -606,7 +1110,12 @@ class ManagedAgentsRuntime(AgentRuntime):
                         self.sleep(self.config.claude_managed_poll_interval_seconds)
                         continue
                     if stop_type in {"requires_action", "budget_reached", "refusal", "retries_exhausted"}:
-                        return self._extract_result(events, session_id)
+                        try:
+                            result = self._extract_result(events, session_id, session.get("usage"))
+                        finally:
+                            if stop_type != "requires_action":
+                                cleanup_mcp("MCP_SESSION_TERMINAL_RESULT")
+                        return result
                     raise RuntimeManualReviewRequired(
                         "Managed Agent session is idle without a confirmed completion reason."
                     )

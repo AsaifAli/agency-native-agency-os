@@ -99,15 +99,9 @@ def test_outcome_rows_are_workspace_isolated_and_measurements_are_append_only():
                 db.flush()
             db.rollback()
     finally:
-        with Admin() as db:
-            db.query(OutcomeMeasurement).filter_by(org_id=org.id).delete(synchronize_session=False)
-            db.query(ProjectOutcome).filter_by(org_id=org.id).delete(synchronize_session=False)
-            db.query(Project).filter_by(org_id=org.id).delete(synchronize_session=False)
-            db.query(WorkspaceGrant).filter_by(org_id=org.id).delete(synchronize_session=False)
-            db.query(Membership).filter_by(org_id=org.id).delete(synchronize_session=False)
-            db.query(Workspace).filter_by(org_id=org.id).delete(synchronize_session=False)
-            db.query(Organization).filter_by(id=org.id).delete(synchronize_session=False)
-            db.query(User).filter_by(id=user.id).delete(synchronize_session=False)
-            db.commit()
+        # Outcome measurements are append-only evidence. Keep this unique
+        # synthetic fixture and its FK parents in the disposable CI database;
+        # do not bypass the database trigger to clean it up.
+        pass
         app_engine.dispose()
         admin_engine.dispose()

@@ -22,7 +22,7 @@ from app.integrations.runtime import (
     RuntimeTransientError,
 )
 from app.worker.runtime_factory import get_runtime
-from app.worker.tool_executor import build_machine_tool_executor
+from app.worker.tool_executor import build_machine_mcp_session_preparer, build_machine_tool_executor
 from app.execution_controls import (
     acknowledge_execution_cancel,
     get_execution_control_request,
@@ -120,12 +120,14 @@ class LeaseHeartbeat:
 def _record_failure(
     session_factory: SessionFactory, *, execution_id: str, attempt_id: str,
     worker_id: str, error_code: str, error_message: str, retryable: bool,
+    provider_usage: dict | None = None,
 ) -> None:
     """Persist a sanitized failure in its own transaction."""
     with session_factory() as db:
         fail_execution(
             db, execution_id=execution_id, attempt_id=attempt_id, worker_id=worker_id,
             error_code=error_code, error_message=error_message, retryable=retryable,
+            provider_usage=provider_usage,
         )
         db.commit()
 
@@ -154,6 +156,8 @@ def _serialize_result(result: ExecutionResult) -> dict:
         "provider": result.provider, "external_run_id": result.external_run_id,
         "status": "succeeded", "detail": result.detail,
     }
+    if result.usage is not None:
+        payload["usage"] = result.usage
     serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     if len(serialized) > MAX_RUNTIME_RESULT_BYTES:
         raise ValueError("Runtime result exceeds the permitted size")
@@ -261,7 +265,8 @@ def process_one_execution(
         request = ExecutionRequest(
             org_id=execution.org_id, workspace_id=execution.workspace_id,
             task_id=execution.task_id, agent_id=execution.agent_id,
-            data_class=execution.data_class, client_authorized=execution.client_authorized,
+            data_class=execution.data_class, execution_id=execution.id,
+            client_authorized=execution.client_authorized,
             agent_name=agent.name, agent_department=agent.department,
             agent_instructions=agent.instructions, task_title=task.title,
             task_description=task.description,
@@ -349,6 +354,7 @@ def process_one_execution(
     )
     heartbeat.start()
     runtime_error: tuple[str, str, bool] | None = None
+    runtime_failure_usage: dict | None = None
     serialized_result: dict | None = None
     cancellation_requested = False
     pause_requested = False
@@ -364,6 +370,72 @@ def process_one_execution(
                 worker_id=worker_id,
                 session_ttl_seconds=settings.claude_managed_timeout_seconds,
             )
+            if settings.claude_managed_mcp_enabled:
+                request.prepare_mcp_session = build_machine_mcp_session_preparer(
+                    session_factory=session_factory,
+                    request=request,
+                    execution_id=execution_id,
+                    attempt_id=attempt_id,
+                    worker_id=worker_id,
+                    session_ttl_seconds=min(settings.claude_managed_timeout_seconds, 3600),
+                    provider_vault_id=settings.claude_managed_mcp_vault_id,
+                    max_active_vault_credentials=settings.claude_managed_mcp_max_active_credentials,
+                )
+                from app.session_credentials import (
+                    load_provider_credential_info,
+                    mark_provider_credential_archived,
+                    persist_provider_credential,
+                    revoke_session_credential,
+                )
+
+                def get_mcp_provider_credential() -> dict | None:
+                    with session_factory() as callback_db:
+                        return load_provider_credential_info(
+                            callback_db, execution_id=execution_id
+                        )
+
+                def persist_mcp_provider_credential(credential_id: str, vault_id: str, provider_id: str) -> None:
+                    with session_factory() as callback_db:
+                        persist_provider_credential(
+                            callback_db, credential_id=credential_id, vault_id=vault_id,
+                            provider_credential_id=provider_id, org_id=execution_org_id,
+                            workspace_id=execution_workspace_id,
+                        )
+
+                def revoke_mcp_session_credential(credential_id: str, reason: str) -> None:
+                    with session_factory() as callback_db:
+                        revoke_session_credential(
+                            callback_db, credential_id=credential_id, reason=reason,
+                            org_id=execution_org_id, workspace_id=execution_workspace_id,
+                        )
+
+                def mark_mcp_provider_credential_archived(credential_id: str, provider_id: str) -> None:
+                    with session_factory() as callback_db:
+                        mark_provider_credential_archived(
+                            callback_db, credential_id=credential_id,
+                            provider_credential_id=provider_id, org_id=execution_org_id,
+                            workspace_id=execution_workspace_id,
+                        )
+
+                request.prepare_mcp_session = build_machine_mcp_session_preparer(
+                    session_factory=session_factory,
+                    request=request,
+                    execution_id=execution_id,
+                    attempt_id=attempt_id,
+                    worker_id=worker_id,
+                    session_ttl_seconds=min(settings.claude_managed_timeout_seconds, 3600),
+                )
+                request.get_mcp_provider_credential = get_mcp_provider_credential
+                request.persist_mcp_provider_credential = persist_mcp_provider_credential
+                request.revoke_mcp_session_credential = revoke_mcp_session_credential
+                request.mark_mcp_provider_credential_archived = mark_mcp_provider_credential_archived
+
+                def revoke_terminal_mcp_credential(reason: str) -> None:
+                    if request.get_mcp_provider_credential is None:
+                        return
+                    info = request.get_mcp_provider_credential()
+                    if isinstance(info, dict) and isinstance(info.get("credential_id"), str):
+                        request.revoke_mcp_session_credential(info["credential_id"], reason)
         runtime_result = runtime.start(request)
         if request.control_check is not None and request.control_check() == "cancel":
             raise RuntimeCancelled("OS cancellation request observed after provider return.")
@@ -390,6 +462,8 @@ def process_one_execution(
         if runtime_error is None:
             serialized_result = _serialize_result(runtime_result)
     except DataProtectionBlocked as exc:
+        if settings.claude_managed_mcp_enabled and "revoke_terminal_mcp_credential" in locals():
+            revoke_terminal_mcp_credential("MCP_EXECUTION_DATA_PROTECTION_BLOCKED")
         data_protection_block_code = exc.code
         runtime_error = (
             "DATA_PROTECTION_BLOCKED",
@@ -397,16 +471,22 @@ def process_one_execution(
             False,
         )
     except RuntimeNotConfiguredError:
+        if settings.claude_managed_mcp_enabled and "revoke_terminal_mcp_credential" in locals():
+            revoke_terminal_mcp_credential("MCP_RUNTIME_NOT_CONFIGURED")
         runtime_error = (
             "RUNTIME_NOT_CONFIGURED", "The requested runtime is unavailable.", False,
         )
-    except RuntimeManualReviewRequired:
+    except RuntimeManualReviewRequired as exc:
+        if isinstance(exc.usage, dict):
+            runtime_failure_usage = exc.usage
         runtime_error = (
             "RUNTIME_REQUIRES_REVIEW",
             "The runtime requires human review before this execution can be treated as complete.",
             False,
         )
     except RuntimeCancelled:
+        if settings.claude_managed_mcp_enabled and "revoke_terminal_mcp_credential" in locals():
+            revoke_terminal_mcp_credential("MCP_EXECUTION_CANCELLED")
         cancellation_requested = True
     except RuntimePaused:
         pause_requested = True
@@ -416,6 +496,8 @@ def process_one_execution(
             "The runtime provider or network is temporarily unavailable.", True,
         )
     except RuntimeExecutionError:
+        if settings.claude_managed_mcp_enabled and "revoke_terminal_mcp_credential" in locals():
+            revoke_terminal_mcp_credential("MCP_RUNTIME_UNSUCCESSFUL")
         runtime_error = (
             "RUNTIME_UNSUCCESSFUL",
             "The runtime did not complete successfully.", True,
@@ -475,6 +557,7 @@ def process_one_execution(
             session_factory, execution_id=execution_id, attempt_id=attempt_id,
             worker_id=worker_id, error_code=error_code,
             error_message=error_message, retryable=retryable,
+            provider_usage=runtime_failure_usage,
         )
         return execution_id
 

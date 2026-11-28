@@ -110,3 +110,40 @@ def test_postgres_test_image_includes_its_contract_inputs():
     dockerfile = (ROOT / "Dockerfile.postgres-test").read_text()
     assert "COPY Dockerfile.postgres-test ." in dockerfile
     assert "COPY docker-compose.postgres-test.yml ." in dockerfile
+
+
+def test_api_and_worker_images_run_non_root_with_bounded_container_security():
+    dockerfile = (ROOT / "Dockerfile").read_text()
+    compose = (ROOT / "docker-compose.yml").read_text()
+
+    assert "groupadd --system --gid 10001 agency" in dockerfile
+    assert "useradd --system --uid 10001 --gid agency" in dockerfile
+    assert "USER 10001:10001" in dockerfile
+
+    import re
+
+    for service in ("api", "worker"):
+        match = re.search(rf"(?ms)^  {service}:\n(.*?)(?=^  [A-Za-z0-9_-]+:|\Z)", compose)
+        assert match is not None
+        service_block = match.group(1)
+        assert "read_only: true" in service_block
+        assert "cap_drop:" in service_block and "- ALL" in service_block
+        assert "no-new-privileges:true" in service_block
+        assert "pids_limit:" in service_block
+        assert "mem_limit:" in service_block
+        assert "cpus:" in service_block
+        assert "/tmp:" in service_block
+        assert "noexec" in service_block
+        assert "user: \"10001:10001\"" in service_block
+
+    assert "docker.sock" not in compose
+
+
+def test_ci_builds_and_executes_hardened_runtime_image():
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    assert "docker compose config --quiet" in workflow
+    assert "docker build --tag agency-os-runtime:ci ." in workflow
+    assert "--read-only --cap-drop=ALL --security-opt=no-new-privileges" in workflow
+    assert "os.geteuid()==10001" in workflow
+    assert "NoNewPrivs:" in workflow
+    assert "CapEff:" in workflow

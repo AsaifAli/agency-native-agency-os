@@ -2,9 +2,14 @@
 from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel, Field, field_validator
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth import Principal, get_principal, require_founder_authority, require_workspace_access_from_context
+from app.action_policy import (
+    require_approved_action, machine_identity_provision_resource_id,
+    machine_identity_revocation_resource_id,
+)
 from app.audit import record_event
 from app.db import get_db
 from app.data_protection import DataProtectionBlocked, sanitize_text
@@ -13,7 +18,8 @@ from app.machine_identity import (
     create_agent_session, get_machine_principal, issue_machine_credential,
 )
 from app.models import Agent, Workspace
-from app.security_models import AgentSession, MachineIdentity
+from app.security_models import AgentSession, MachineIdentity, MachineSessionCredential
+from app.session_credentials import MCPVaultCapacityError, issue_session_credential
 
 router = APIRouter(tags=["machine-security"])
 
@@ -70,10 +76,15 @@ class MachineSessionCreate(BaseModel):
     ttl_seconds: int = Field(default=3600, ge=60, le=86400)
 
 
+class MachineSessionCredentialCreate(BaseModel):
+    ttl_seconds: int = Field(default=900, ge=60, le=3600)
+
+
 @router.post("/v1/orgs/{org_id}/machine-identities", status_code=201)
 def create_machine_identity(
     org_id: str,
     body: MachineIdentityCreate,
+    approval_id: str,
     db: Session = Depends(get_db),
     principal: Principal = Depends(get_principal),
 ):
@@ -85,6 +96,23 @@ def create_machine_identity(
             raise HTTPException(404, "Agent not found")
         if not subject.enabled:
             raise HTTPException(409, "Agent must be enabled before provisioning a machine identity")
+    expected_payload = {
+        "operation": "create",
+        "name": body.name,
+        "subject_type": body.subject_type,
+        "subject_id": body.subject_id,
+        "scopes": sorted(body.scopes),
+        "allowed_data_classes": sorted(body.allowed_data_classes),
+        "ttl_days": body.ttl_days,
+    }
+    require_approved_action(
+        db, approval_id=approval_id, org_id=org_id,
+        workspace_id=body.workspace_id, action_type="security.permission.change",
+        resource_id=machine_identity_provision_resource_id(
+            body.workspace_id, body.subject_type, body.subject_id, body.name,
+        ), actor_user_id=principal.user.id,
+        expected_request_payload=expected_payload,
+    )
     raw_secret, digest, _ = issue_machine_credential()
     identity = MachineIdentity(
         org_id=org_id, workspace_id=body.workspace_id, name=body.name.strip(),
@@ -115,7 +143,7 @@ def create_machine_identity(
 
 @router.post("/v1/orgs/{org_id}/machine-identities/{identity_id}/revoke")
 def revoke_machine_identity(
-    org_id: str, identity_id: str, workspace_id: str,
+    org_id: str, identity_id: str, workspace_id: str, approval_id: str,
     db: Session = Depends(get_db),
     principal: Principal = Depends(get_principal),
 ):
@@ -126,6 +154,13 @@ def revoke_machine_identity(
     ).with_for_update().first()
     if identity is None:
         raise HTTPException(404, "Machine identity not found")
+    require_approved_action(
+        db, approval_id=approval_id, org_id=org_id,
+        workspace_id=workspace_id, action_type="security.permission.change",
+        resource_id=machine_identity_revocation_resource_id(identity.id),
+        actor_user_id=principal.user.id,
+        expected_request_payload={"operation": "revoke", "machine_identity_id": identity.id},
+    )
     if identity.revoked_at is None:
         now = datetime.now(timezone.utc)
         identity.revoked_at = now
@@ -161,3 +196,103 @@ def create_machine_session(
     return {"id": session.id, "org_id": session.org_id, "workspace_id": session.workspace_id,
             "machine_identity_id": session.machine_identity_id, "purpose": session.purpose,
             "data_class": session.data_class, "status": session.status, "expires_at": session.expires_at}
+
+
+@router.post("/v1/machine/sessions/{session_id}/mcp-credential", status_code=201)
+def create_machine_session_mcp_credential(
+    session_id: str,
+    body: MachineSessionCredentialCreate,
+    db: Session = Depends(get_db),
+    principal: MachinePrincipal = Depends(get_machine_principal),
+):
+    """Mint one short-lived, one-session MCP bearer for a provisioned identity."""
+    if principal.identity.subject_type != "service":
+        raise HTTPException(403, "Only founder-provisioned service identities may mint interactive MCP credentials")
+    if not {"sessions:create", "tools:invoke"}.issubset(set(principal.identity.scopes or [])):
+        raise HTTPException(403, "Machine identity cannot create session credentials")
+    try:
+        issued = issue_session_credential(
+            db, principal, session_id=session_id, ttl_seconds=body.ttl_seconds
+        )
+    except MCPVaultCapacityError as exc:
+        raise HTTPException(503, "MCP credential capacity is unavailable") from exc
+    except HTTPException:
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    db.commit()
+    return {
+        "credential_id": issued.credential_id,
+        "session_id": session_id,
+        "token": issued.token,
+        "expires_at": issued.expires_at,
+        "credential_version": issued.credential_version,
+        "warning": "This session credential is shown once. Store it in the MCP client's secret store; do not place it in prompts, source control, or logs.",
+    }
+
+
+@router.post("/v1/machine/sessions/{session_id}/revoke")
+def revoke_machine_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+    principal: MachinePrincipal = Depends(get_machine_principal),
+):
+    """Revoke one session and all of its credentials for the owning identity."""
+    identity = principal.identity
+    session = (
+        db.query(AgentSession)
+        .filter_by(
+            id=session_id, org_id=identity.org_id,
+            workspace_id=identity.workspace_id, machine_identity_id=identity.id,
+        )
+        .first()
+    )
+    if session is None:
+        raise HTTPException(404, "Machine session not found")
+    if identity.subject_type != "service":
+        raise HTTPException(403, "Only founder-provisioned service identities may revoke interactive MCP sessions")
+    if not {"sessions:create", "tools:invoke"}.issubset(set(identity.scopes or [])):
+        raise HTTPException(403, "Machine identity cannot revoke MCP sessions")
+    now = datetime.now(timezone.utc)
+    if db.get_bind().dialect.name == "postgresql":
+        revoked_count = db.execute(
+            text("""
+                SELECT agency_os_private.revoke_service_mcp_session_credentials(
+                    :org_id, :workspace_id, :machine_identity_id, :session_id
+                )
+            """),
+            {
+                "org_id": identity.org_id,
+                "workspace_id": identity.workspace_id,
+                "machine_identity_id": identity.id,
+                "session_id": session.id,
+            },
+        ).scalar_one()
+        if revoked_count < 0:
+            raise HTTPException(403, "Session revocation was denied by OS policy")
+    else:
+        credentials = (
+            db.query(MachineSessionCredential)
+            .filter_by(
+                org_id=identity.org_id, workspace_id=identity.workspace_id,
+                machine_identity_id=identity.id, session_id=session.id,
+            )
+            .with_for_update()
+            .all()
+        )
+        revoked_count = 0
+        for credential in credentials:
+            if credential.revoked_at is None:
+                credential.revoked_at = now
+                revoked_count += 1
+    if session.status == "active":
+        session.status = "cancelled"
+        session.ended_at = now
+    record_event(
+        db, identity.org_id, None, "agent_session.revoked",
+        "agent_session", session.id, identity.workspace_id,
+        {"revoked_count": revoked_count},
+    )
+    db.commit()
+    return {"session_id": session.id, "revoked": True, "credentials_revoked": revoked_count}

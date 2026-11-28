@@ -33,6 +33,7 @@ from app.worker_service import (
     recover_expired_execution_leases,
     start_execution,
     queue_ready_delegations,
+    _aggregate_provider_usage,
 )
 
 import time
@@ -1554,6 +1555,16 @@ def test_runtime_result_rejects_non_string_detail():
         processor_module._serialize_result(result)
 
 
+def test_runtime_result_preserves_normalized_provider_usage():
+    result = ExecutionResult(
+        provider="claude_managed_agents", external_run_id="sesn-usage",
+        status="succeeded", detail="Synthetic result",
+        usage={"input_tokens": 12, "output_tokens": 8, "list_cost_minor": 3, "currency": "USD"},
+    )
+    payload = processor_module._serialize_result(result)
+    assert payload["usage"] == result.usage
+
+
 def test_runtime_result_preserves_valid_unicode():
     result = ExecutionResult(
         provider="mock",
@@ -1632,9 +1643,12 @@ def test_fail_execution_redacts_and_bounds_error_message(worker_context):
         error_code="PROVIDER_ERROR",
         error_message=raw_message,
         retryable=False,
+        provider_usage={"list_cost_minor": 251, "currency": "USD"},
     )
     ctx["db"].commit()
 
+    assert failed_execution.result == {"usage": {"list_cost_minor": 251, "currency": "USD"}}
+    assert failed_attempt.result == failed_execution.result
     assert len(failed_execution.error_message) <= 1000
     assert len(failed_attempt.error_message) <= 1000
     assert "super-secret" not in failed_execution.error_message
@@ -2000,3 +2014,99 @@ def test_processor_injects_attempt_scoped_os_tool_executor_for_managed_agents(wo
 
     ctx["db"].expire_all()
     assert ctx["db"].get(Execution, execution.id).status == ExecutionStatus.succeeded
+
+
+def test_processor_persists_usage_when_provider_budget_requires_review(worker_context, monkeypatch):
+    from app.integrations.runtime import RuntimeManualReviewRequired
+    ctx = worker_context
+    execution, session_factory = mock_worker_context(ctx)
+
+    class BudgetReachedRuntime:
+        def start(self, request):
+            raise RuntimeManualReviewRequired(
+                "Provider session budget reached.",
+                usage={"input_tokens": 100, "output_tokens": 40,
+                       "list_cost_minor": 251, "currency": "USD"},
+            )
+
+    monkeypatch.setattr("app.worker.processor.get_runtime", lambda _name: BudgetReachedRuntime())
+    processed_id = process_one_execution(worker_id="provider-budget-review", session_factory=session_factory)
+    assert processed_id == execution.id
+    ctx["db"].expire_all()
+    saved = ctx["db"].get(Execution, execution.id)
+    attempt = ctx["db"].query(ExecutionAttempt).filter_by(execution_id=execution.id).one()
+    assert saved.status == ExecutionStatus.failed
+    assert saved.error_code == "RUNTIME_REQUIRES_REVIEW"
+    assert saved.provider_usage == {"input_tokens": 100, "output_tokens": 40,
+                                    "list_cost_minor": 251, "currency": "USD"}
+    assert attempt.result == saved.result
+
+
+
+def test_managed_agents_usage_adds_distinct_provider_sessions(worker_context):
+    ctx = worker_context
+    db = ctx["db"]
+    execution = create_worker_execution(ctx)
+    execution.runtime = "claude_managed_agents"
+    first_usage = {"input_tokens": 100, "output_tokens": 20, "list_cost_minor": 10,
+                   "currency": "USD"}
+    second_usage = {"input_tokens": 50, "output_tokens": 30, "list_cost_minor": 7,
+                    "currency": "USD"}
+    for number, session_id, usage in (
+        (1, "sesn-one", first_usage), (2, "sesn-two", second_usage),
+    ):
+        db.add(ExecutionAttempt(
+            execution_id=execution.id, attempt_number=number,
+            runtime="claude_managed_agents", external_run_id=session_id,
+            status=ExecutionAttemptStatus.failed,
+            result={"usage": usage},
+        ))
+    db.flush()
+
+    assert _aggregate_provider_usage(db, execution.id) == {
+        "input_tokens": 150, "output_tokens": 50, "list_cost_minor": 17,
+        "currency": "USD",
+    }
+
+def test_managed_agents_usage_uses_latest_cumulative_snapshot_for_resumed_session(worker_context):
+    ctx = worker_context
+    db = ctx["db"]
+    execution, first_attempt, worker_id = start_running_attempt(ctx)
+    execution.runtime = "claude_managed_agents"
+    first_attempt.runtime = "claude_managed_agents"
+    first_attempt.external_run_id = "sesn-shared"
+    first_usage = {
+        "input_tokens": 100, "output_tokens": 20, "list_cost_minor": 10,
+        "currency": "USD", "active_seconds": 1.5,
+        "server_tool_use": {"web_search_requests": 1, "web_fetch_requests": 0},
+    }
+    fail_execution(
+        db, execution_id=execution.id, attempt_id=first_attempt.id, worker_id=worker_id,
+        error_code="RUNTIME_REQUIRES_REVIEW", error_message="First attempt paused.",
+        retryable=True, provider_usage=first_usage,
+    )
+    now = datetime.now(timezone.utc)
+    execution.status = ExecutionStatus.running
+    execution.attempt_count = 2
+    execution.next_retry_at = None
+    second_attempt = ExecutionAttempt(
+        execution_id=execution.id, attempt_number=2, worker_id=worker_id,
+        runtime=execution.runtime, external_run_id="sesn-shared",
+        status=ExecutionAttemptStatus.running,
+        lease_expires_at=now + timedelta(seconds=120), heartbeat_at=now, started_at=now,
+    )
+    db.add(second_attempt); db.flush()
+    second_usage = {
+        "input_tokens": 150, "output_tokens": 50, "list_cost_minor": 17,
+        "currency": "USD", "active_seconds": 2.5,
+        "server_tool_use": {"web_search_requests": 1, "web_fetch_requests": 1},
+    }
+    complete_execution(
+        db, execution_id=execution.id, attempt_id=second_attempt.id, worker_id=worker_id,
+        result={"provider": "claude_managed_agents", "external_run_id": "sesn-shared",
+                "status": "succeeded", "detail": "Completed.", "usage": second_usage},
+    )
+    db.commit()
+    assert execution.provider_usage == second_usage
+    assert first_attempt.result["usage"] == first_usage
+    assert second_attempt.result["usage"] == second_usage

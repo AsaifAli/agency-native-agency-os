@@ -111,13 +111,13 @@ def set_rls_context(db: Session, *, user_id: str | None = None,
 # that samples only a few tables can silently miss a newly added unprotected
 # tenant table, so API and worker processes verify the complete set.
 REQUIRED_RLS_TABLES = frozenset({
-    "agent_sessions", "agents", "approvals", "audit_events",
+    "agent_sessions", "agents", "approvals", "artifacts", "audit_events",
     "call_sessions", "call_transcripts", "client_onboardings", "clients",
     "communication_blocks", "communication_consents", "contact_activities",
     "contacts", "contract_records", "delegations", "evaluation_runs",
     "executions", "founder_authorities", "invoice_records",
     "lead_research_drafts", "lead_research_records", "leads",
-    "machine_identities", "memberships", "milestones",
+    "machine_identities", "machine_session_credentials", "memberships", "milestones",
     "onboarding_checklist_items", "opportunities", "orchestration_plan_drafts",
     "orchestration_plan_delegations", "orchestration_plans", "outbound_message_events", "outbound_messages",
     "outbound_senders", "outbox_events", "outreach_drafts", "outcome_measurements", "payment_receipts",
@@ -127,6 +127,7 @@ REQUIRED_RLS_TABLES = frozenset({
     "workforce_members", "workforce_positions", "workforce_units", "workspaces",
     "workspace_grants",
     "organizations", "browser_sessions", "execution_attempts",
+    "knowledge_items", "business_drafts", "learning_candidates",
 })
 
 

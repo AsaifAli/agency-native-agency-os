@@ -1,4 +1,5 @@
 import pytest
+import uuid
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -9,7 +10,8 @@ from sqlalchemy.pool import StaticPool
 from app.auth import Principal, get_principal
 from app.db import Base, get_db, set_rls_context
 from app.machine_identity import authenticate_machine_token, authorize_tool_session, create_agent_session, expire_due_agent_sessions
-from app.models import FounderAuthority, Membership, Organization, Role, User, Workspace, WorkspaceGrant
+from app.models import Approval, ApprovalStatus, FounderAuthority, Membership, Organization, Role, User, Workspace, WorkspaceGrant
+from app.action_policy import machine_identity_provision_resource_id, machine_identity_revocation_resource_id
 from app.security_models import AgentSession, MachineIdentity, ToolInvocation
 from app.security_routes import router
 from app.tool_gateway_routes import router as tool_gateway_router
@@ -27,6 +29,7 @@ def security_client():
     import app.outreach.models  # noqa: F401
     import app.workforce_models  # noqa: F401
     import app.security_models  # noqa: F401
+    import app.private_ops_models  # noqa: F401
     Base.metadata.create_all(engine)
     db = factory()
     founder = User(email="security-founder@example.test")
@@ -74,15 +77,96 @@ def security_client():
     db.close(); Base.metadata.drop_all(engine); engine.dispose()
 
 
-def _create_identity(client, scopes=None, classes=None):
-    response = client.post(f"/v1/orgs/{client.org_id}/machine-identities", json={
+def _approved_security_change(client, resource_id, request_payload):
+    db = client.factory()
+    try:
+        approval = Approval(
+            org_id=client.org_id, workspace_id=client.workspace_id,
+            action_type="security.permission.change", resource_id=resource_id,
+            idempotency_key=f"security-change-{uuid.uuid4().hex}",
+            request_payload=request_payload, status=ApprovalStatus.approved,
+            requested_by=client.founder.id, decided_by=client.founder.id,
+        )
+        db.add(approval)
+        db.commit()
+        return approval.id
+    finally:
+        db.close()
+
+
+def _create_identity(client, scopes=None, classes=None, subject_type="worker"):
+    payload = {
         "workspace_id": client.workspace_id, "name": "Research Worker",
-        "subject_type": "worker", "subject_id": "research-worker",
+        "subject_type": subject_type, "subject_id": "research-worker",
         "scopes": scopes or ["sessions:create", "tools:invoke", "tool:research.read"],
         "allowed_data_classes": classes or ["synthetic", "public"], "ttl_days": 14,
-    })
+    }
+    expected = {
+        "operation": "create", "name": payload["name"],
+        "subject_type": payload["subject_type"], "subject_id": payload["subject_id"],
+        "scopes": sorted(payload["scopes"]),
+        "allowed_data_classes": sorted(payload["allowed_data_classes"]),
+        "ttl_days": payload["ttl_days"],
+    }
+    resource_id = machine_identity_provision_resource_id(
+        client.workspace_id, subject_type, payload["subject_id"], payload["name"],
+    )
+    approval_id = _approved_security_change(client, resource_id, expected)
+    response = client.post(
+        f"/v1/orgs/{client.org_id}/machine-identities",
+        params={"approval_id": approval_id}, json=payload,
+    )
     assert response.status_code == 201, response.text
     return response.json()
+
+
+def _revoke_identity(client, identity_id):
+    approval_id = _approved_security_change(
+        client, machine_identity_revocation_resource_id(identity_id),
+        {"operation": "revoke", "machine_identity_id": identity_id},
+    )
+    return client.post(
+        f"/v1/orgs/{client.org_id}/machine-identities/{identity_id}/revoke",
+        params={"approval_id": approval_id},
+    )
+
+
+def test_machine_identity_approval_is_bound_to_exact_scopes_and_data_classes(security_client):
+    payload = {
+        "workspace_id": security_client.workspace_id,
+        "name": "Restricted Worker",
+        "subject_type": "worker",
+        "subject_id": "restricted-worker",
+        "scopes": ["tool:research.read"],
+        "allowed_data_classes": ["synthetic"],
+        "ttl_days": 14,
+    }
+    approved_payload = {
+        "operation": "create", "name": payload["name"],
+        "subject_type": payload["subject_type"], "subject_id": payload["subject_id"],
+        "scopes": ["tool:research.read"],
+        "allowed_data_classes": ["synthetic"], "ttl_days": 14,
+    }
+    resource_id = machine_identity_provision_resource_id(
+        security_client.workspace_id, "worker", "restricted-worker", "Restricted Worker",
+    )
+    approval_id = _approved_security_change(security_client, resource_id, approved_payload)
+    payload["scopes"] = ["tool:research.read", "tool:crm.write"]
+
+    response = security_client.post(
+        f"/v1/orgs/{security_client.org_id}/machine-identities",
+        params={"approval_id": approval_id}, json=payload,
+    )
+
+    assert response.status_code == 403
+    db = security_client.factory()
+    try:
+        assert db.query(MachineIdentity).filter_by(
+            org_id=security_client.org_id, subject_id="restricted-worker",
+        ).count() == 0
+        assert db.get(Approval, approval_id).consumed_at is None
+    finally:
+        db.close()
 
 
 def test_machine_secret_is_returned_once_and_only_hash_is_persisted(security_client):
@@ -104,6 +188,7 @@ def test_machine_token_authentication_and_expiry(security_client):
     try:
         principal = authenticate_machine_token("Bearer " + issued["token"], db)
         assert principal.identity.id == issued["id"]
+        assert db.info["agency_os_rls_context"]["machine_identity_lookup_id"] == issued["id"]
         with pytest.raises(Exception):
             authenticate_machine_token("Bearer " + issued["token"] + "wrong", db)
         identity = db.get(MachineIdentity, issued["id"])
@@ -155,7 +240,7 @@ def test_founder_revocation_cancels_active_sessions(security_client):
     principal = authenticate_machine_token("Bearer " + issued["token"], db)
     session = create_agent_session(db, principal, purpose="Research", data_class="public", ttl_seconds=600)
     db.commit(); db.close()
-    response = security_client.post(f"/v1/orgs/{security_client.org_id}/machine-identities/{issued['id']}/revoke")
+    response = _revoke_identity(security_client, issued["id"])
     assert response.status_code == 200, response.text
     db = security_client.factory()
     try:
@@ -197,6 +282,7 @@ def test_nonfounder_cannot_issue_machine_identity(security_client):
     security_client.set_principal(operator)
     response = security_client.post(
         f"/v1/orgs/{security_client.org_id}/machine-identities",
+        params={"approval_id": "not-approved"},
         json={
             "workspace_id": security_client.workspace_id,
             "name": "Unauthorized Worker",
@@ -212,6 +298,7 @@ def test_nonfounder_cannot_issue_machine_identity(security_client):
 def test_machine_identity_rejects_commercial_data_until_client_policy_exists(security_client):
     response = security_client.post(
         f"/v1/orgs/{security_client.org_id}/machine-identities",
+        params={"approval_id": "not-approved"},
         json={
             "workspace_id": security_client.workspace_id,
             "name": "Commercial Worker",
@@ -241,9 +328,7 @@ def test_machine_session_cannot_outlive_its_identity(security_client):
 
 def test_revoked_machine_credential_cannot_authenticate(security_client):
     issued = _create_identity(security_client)
-    revoked = security_client.post(
-        f"/v1/orgs/{security_client.org_id}/machine-identities/{issued['id']}/revoke"
-    )
+    revoked = _revoke_identity(security_client, issued["id"])
     assert revoked.status_code == 200
     db = security_client.factory()
     try:
@@ -295,10 +380,11 @@ def test_session_purpose_with_secret_is_blocked(security_client):
     assert "blocked by data-protection" in response.json()["detail"]
 
 
-def _issue_tool_session(client):
+def _issue_tool_session(client, subject_type="worker"):
     issued = _create_identity(
         client,
         scopes=["sessions:create", "tools:invoke", "tool:system.health.read"],
+        subject_type=subject_type,
     )
     headers = {"Authorization": "Bearer " + issued["token"]}
     created = client.post(
@@ -393,7 +479,7 @@ def test_tool_gateway_idempotent_replay_and_session_binding(security_client):
 
 
 def test_tool_gateway_rejects_missing_grants_unregistered_tools_and_bad_payloads(security_client):
-    issued = _create_identity(security_client, scopes=["sessions:create"])
+    issued = _create_identity(security_client, scopes=["sessions:create", "tools:invoke", "tool:system.shell.exec"])
     headers = {"Authorization": "Bearer " + issued["token"]}
     created = security_client.post(
         "/v1/machine/sessions",
@@ -1210,3 +1296,337 @@ def test_tool_discovery_hides_tools_that_require_unavailable_approval_adapter(
     assert response.status_code == 200
     assert response.json()["tools"] == []
 
+def test_tool_gateway_enforces_machine_scope_allowlist_default_limit_and_idempotent_replay(
+    security_client, monkeypatch,
+):
+    from fastapi import HTTPException
+    from app.machine_identity import authenticate_machine_token, create_agent_session
+    from app.tool_gateway import invoke_registered_tool
+    import app.tool_gateway as gateway
+
+    monkeypatch.setattr(gateway, "DEFAULT_MAX_TOOL_CALLS_PER_SESSION", 1)
+
+    issued = _create_identity(
+        security_client,
+        scopes=[
+            "sessions:create",
+            "tools:invoke",
+            "tool:system.health.read",
+        ],
+        classes=["public"],
+    )
+    db = security_client.factory()
+    try:
+        principal = authenticate_machine_token(
+            "Bearer " + issued["token"], db
+        )
+        session = create_agent_session(
+            db,
+            principal,
+            purpose="Bounded tool session",
+            data_class="public",
+            ttl_seconds=600,
+        )
+        db.commit()
+
+        first = invoke_registered_tool(
+            db,
+            principal,
+            session_id=session.id,
+            tool_key="system.health.read",
+            payload={},
+            idempotency_key="health-session-call-01",
+        )
+        assert first["status"] == "succeeded"
+
+        replay = invoke_registered_tool(
+            db,
+            principal,
+            session_id=session.id,
+            tool_key="system.health.read",
+            payload={},
+            idempotency_key="health-session-call-01",
+        )
+        assert replay["replayed"] is True
+
+        with pytest.raises(HTTPException) as limited:
+            invoke_registered_tool(
+                db,
+                principal,
+                session_id=session.id,
+                tool_key="system.health.read",
+                payload={},
+                idempotency_key="health-session-call-02",
+            )
+        assert limited.value.status_code == 429
+
+        with pytest.raises(HTTPException) as disallowed:
+            invoke_registered_tool(
+                db,
+                principal,
+                session_id=session.id,
+                tool_key="revenue.lead.research.capture",
+                payload={},
+                idempotency_key="health-session-call-03",
+            )
+        assert disallowed.value.status_code == 403
+    finally:
+        db.close()
+
+
+
+def test_session_credential_is_bound_to_one_active_agent_session_and_hash_only(security_client):
+    from app.session_credentials import issue_session_credential
+    from app.security_models import MachineSessionCredential
+
+    issued = _create_identity(security_client)
+    db = security_client.factory()
+    try:
+        principal = authenticate_machine_token("Bearer " + issued["token"], db)
+        session = create_agent_session(
+            db, principal, purpose="Claude MCP session", data_class="public", ttl_seconds=600
+        )
+        db.commit()
+        credential = issue_session_credential(
+            db, principal, session_id=session.id, ttl_seconds=300
+        )
+        assert credential.token.startswith("aos_ms_")
+        row = db.query(MachineSessionCredential).filter_by(id=credential.credential_id).one()
+        assert credential.token.rsplit(".", 1)[1] not in row.token_hash
+        assert row.session_id == session.id
+        assert row.machine_identity_id == principal.identity.id
+        from app.session_credentials import _utc
+        assert _utc(row.expires_at) <= _utc(session.expires_at)
+    finally:
+        db.close()
+
+
+def test_session_credential_authentication_rejects_wrong_token_and_revoked_session(security_client):
+    from app.session_credentials import issue_session_credential, authenticate_session_credential
+
+    issued = _create_identity(security_client)
+    db = security_client.factory()
+    try:
+        principal = authenticate_machine_token("Bearer " + issued["token"], db)
+        session = create_agent_session(
+            db, principal, purpose="Claude MCP session", data_class="public", ttl_seconds=600
+        )
+        db.commit()
+        credential = issue_session_credential(
+            db, principal, session_id=session.id, ttl_seconds=300
+        )
+        context = authenticate_session_credential(
+            db, "Bearer " + credential.token
+        )
+        assert context.session_id == session.id
+        assert context.machine_identity_id == principal.identity.id
+        from app.session_credentials import load_active_session_context
+        reloaded_principal, reloaded_session = load_active_session_context(db, context)
+        assert reloaded_principal.identity.id == principal.identity.id
+        assert reloaded_session.id == session.id
+        with pytest.raises(Exception):
+            authenticate_session_credential(
+                db, "Bearer " + credential.token[:-1] + "x"
+            )
+        session.status = "cancelled"
+        db.commit()
+        with pytest.raises(Exception):
+            authenticate_session_credential(db, "Bearer " + credential.token)
+    finally:
+        db.close()
+
+
+def test_machine_identity_can_mint_one_short_lived_mcp_credential_for_its_own_session(security_client):
+    issued, session_id, headers = _issue_tool_session(security_client, subject_type="service")
+    response = security_client.post(
+        f"/v1/machine/sessions/{session_id}/mcp-credential",
+        headers=headers,
+        json={"ttl_seconds": 300},
+    )
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["session_id"] == session_id
+    assert payload["token"].startswith("aos_ms_")
+    assert payload["credential_version"] == 1
+    assert "shown once" in payload["warning"]
+
+    from app.session_credentials import authenticate_session_credential
+    from app.security_models import MachineSessionCredential
+    db = security_client.factory()
+    try:
+        context = authenticate_session_credential(
+            db, "Bearer " + payload["token"], requests_per_minute=10
+        )
+        assert context.session_id == session_id
+        assert context.machine_identity_id == issued["id"]
+        credential = db.get(MachineSessionCredential, payload["credential_id"])
+        assert credential is not None
+        assert credential.token_hash != payload["token"]
+        assert len(credential.token_hash) == 64
+    finally:
+        db.close()
+
+
+def test_machine_identity_without_session_creation_scope_cannot_mint_mcp_credential(security_client):
+    issued = _create_identity(
+        security_client, scopes=["tools:invoke", "tool:system.health.read"]
+    )
+    headers = {"Authorization": "Bearer " + issued["token"]}
+    session = security_client.post(
+        "/v1/machine/sessions",
+        headers=headers,
+        json={"purpose": "Read health", "data_class": "public", "ttl_seconds": 300},
+    )
+    assert session.status_code == 403
+
+
+def test_workspace_knowledge_search_returns_only_approved_public_workspace_wide_items(security_client):
+    from app.private_ops_models import KnowledgeItem
+    from app.tool_registry import get_tool, validate_tool_input, validate_tool_output, execute_tool
+
+    db = security_client.factory()
+    try:
+        other_workspace = Workspace(
+            id="security-ws-other", org_id=security_client.org_id, name="Other Workspace"
+        )
+        db.add(other_workspace)
+        db.flush()
+        db.add_all([
+            KnowledgeItem(
+                org_id=security_client.org_id, workspace_id=security_client.workspace_id,
+                key="public.playbook", version=1, title="Public agency playbook",
+                content="Approved public guidance for project delivery.",
+                source_type="policy", source_reference="founder-approved-public-policy",
+                classification="public", status="approved", owner_user_id=security_client.founder.id,
+                created_by=security_client.founder.id, approved_by=security_client.founder.id,
+                approved_at=datetime.now(timezone.utc),
+            ),
+            KnowledgeItem(
+                org_id=security_client.org_id, workspace_id=security_client.workspace_id,
+                key="public.playbook", version=2, title="Updated public agency playbook",
+                content="Latest approved public guidance for project delivery.",
+                source_type="policy", source_reference="founder-approved-public-policy-v2",
+                classification="public", status="approved", owner_user_id=security_client.founder.id,
+                created_by=security_client.founder.id, approved_by=security_client.founder.id,
+                approved_at=datetime.now(timezone.utc),
+            ),
+            KnowledgeItem(
+                org_id=security_client.org_id, workspace_id=security_client.workspace_id,
+                key="internal.playbook", version=1, title="Internal agency playbook",
+                content="Internal-only delivery notes.", source_type="policy",
+                source_reference="internal-policy", classification="internal", status="approved",
+                owner_user_id=security_client.founder.id, created_by=security_client.founder.id,
+                approved_by=security_client.founder.id, approved_at=datetime.now(timezone.utc),
+            ),
+            KnowledgeItem(
+                org_id=security_client.org_id, workspace_id=other_workspace.id,
+                key="public.playbook", version=1, title="Other workspace playbook",
+                content="Must never cross workspace boundaries.", source_type="policy",
+                source_reference="other-workspace-policy", classification="public", status="approved",
+                owner_user_id=security_client.founder.id, created_by=security_client.founder.id,
+                approved_by=security_client.founder.id, approved_at=datetime.now(timezone.utc),
+            ),
+            KnowledgeItem(
+                org_id=security_client.org_id, workspace_id=security_client.workspace_id,
+                key="draft.playbook", version=1, title="Draft public playbook",
+                content="Not approved and must not be exposed.", source_type="policy",
+                source_reference="draft-policy", classification="public", status="draft",
+                owner_user_id=security_client.founder.id, created_by=security_client.founder.id,
+            ),
+        ])
+        db.commit()
+        spec = get_tool("workspace.knowledge.search")
+        assert spec is not None
+        identity = MachineIdentity(
+            org_id=security_client.org_id, workspace_id=security_client.workspace_id,
+            name="Cowork Read Context", subject_type="service", subject_id="cowork",
+            token_hash="0" * 64, token_prefix="test", scopes=[],
+            allowed_data_classes=["public"],
+            expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+            created_by_user_id=security_client.founder.id,
+        )
+        result = execute_tool(
+            db, spec, validate_tool_input(spec, {"query": "playbook", "limit": 10}),
+            identity=identity, idempotency_key="knowledge-search-0001",
+        )
+        validated = validate_tool_output(spec, result)
+        assert [item["key"] for item in validated["items"]] == ["public.playbook"]
+        assert validated["items"][0]["version"] == 2
+        assert validated["items"][0]["title"] == "Updated public agency playbook"
+    finally:
+        db.close()
+
+
+def test_workspace_knowledge_search_requires_a_query_or_exact_key(security_client):
+    from app.tool_registry import get_tool, validate_tool_input
+    with pytest.raises(Exception):
+        validate_tool_input(get_tool("workspace.knowledge.search"), {"limit": 10})
+
+
+def test_machine_identity_cannot_mint_mcp_credential_for_another_identity_session(security_client):
+    _first_identity, _first_session, _first_headers = _issue_tool_session(security_client, subject_type="service")
+    second_identity, second_session, second_headers = _issue_tool_session(security_client, subject_type="service")
+    response = security_client.post(
+        f"/v1/machine/sessions/{second_session}/mcp-credential",
+        headers=_first_headers,
+        json={"ttl_seconds": 300},
+    )
+    assert response.status_code == 403
+
+
+def test_machine_identity_can_revoke_its_session_and_all_session_credentials(security_client):
+    _identity, session_id, headers = _issue_tool_session(security_client, subject_type="service")
+    issued = security_client.post(
+        f"/v1/machine/sessions/{session_id}/mcp-credential",
+        headers=headers, json={"ttl_seconds": 300},
+    )
+    assert issued.status_code == 201, issued.text
+
+    revoked = security_client.post(
+        f"/v1/machine/sessions/{session_id}/revoke", headers=headers
+    )
+    assert revoked.status_code == 200, revoked.text
+    assert revoked.json()["revoked"] is True
+    assert revoked.json()["credentials_revoked"] == 1
+
+    from app.session_credentials import authenticate_session_credential
+    db = security_client.factory()
+    try:
+        with pytest.raises(Exception):
+            authenticate_session_credential(db, "Bearer " + issued.json()["token"])
+    finally:
+        db.close()
+
+
+def test_machine_identity_cannot_revoke_another_identity_session(security_client):
+    _first_identity, _first_session, first_headers = _issue_tool_session(security_client, subject_type="service")
+    _second_identity, second_session, _second_headers = _issue_tool_session(security_client, subject_type="service")
+    response = security_client.post(
+        f"/v1/machine/sessions/{second_session}/revoke", headers=first_headers
+    )
+    assert response.status_code == 404
+
+
+def test_service_machine_bearer_is_bound_to_its_active_mcp_session_path(security_client):
+    from app.mcp_server import authenticate_machine_session, load_mcp_session_context
+    issued, session_id, headers = _issue_tool_session(
+        security_client, subject_type="service"
+    )
+    db = security_client.factory()
+    try:
+        context = authenticate_machine_session(
+            db, headers["Authorization"], session_id
+        )
+        assert context.machine_identity_id == issued["id"]
+        assert context.session_id == session_id
+        loaded_principal, loaded_session = load_mcp_session_context(db, context)
+        assert db.info["agency_os_rls_context"]["machine_identity_lookup_id"] == issued["id"]
+        assert loaded_principal.identity.id == issued["id"]
+        assert loaded_session.id == session_id
+
+        with pytest.raises(Exception):
+            authenticate_machine_session(
+                db, headers["Authorization"], "00000000-0000-0000-0000-000000000000"
+            )
+    finally:
+        db.close()

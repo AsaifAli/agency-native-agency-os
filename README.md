@@ -45,7 +45,7 @@ The former Command Center and Evaluation Harness repositories are **not separate
 - Workers execute through OS authorization and persisted execution records.
 - Runtime/provider adapters cannot bypass OS policy or write business state independently.
 - Workforce activation and capability enablement are founder-only, opt-in operations. Capabilities default disabled.
-- Tool grants remain disabled until the OS MCP gateway and scoped tool authorization are implemented.
+- Optional Streamable HTTP MCP integration for founder-provisioned Code/Cowork/service identities is disabled by default (`AGENCY_MCP_ENABLED`); see [Agent Integration Contract](docs/AGENT_INTEGRATION_CONTRACT.md). Managed Agents provider MCP remains a separate Vault-backed integration.
 - The Chief of Staff can prepare a bounded Claude plan draft through a dedicated tool-free capability; drafts require explicit founder review and assignment before any tasks are materialized. This integration is merged to main via PR #11 (`9674c40f08228b032ae79f8e9df590609d8463df`).
 - Claude plan drafting is a proposal workflow, not autonomous execution. Managed Agents remains disabled by default; no live provider configuration or client-data eligibility is implied.
 - Managed Agents is beta and is not eligible for ZDR or HIPAA BAA. The current adapter is opt-in and synthetic-first; live provider setup and production eligibility are not claimed.
@@ -86,10 +86,14 @@ Never commit `.env`. Use separate dev, staging and production configuration. Rev
 ## Key operating documents
 
 - `docs/AGENCY_PHILOSOPHY_RAAS.md` — Results as a Service philosophy and outcome-led delivery standard.
+- `docs/AGENCY_LEARNING_AND_MEMORY_MODEL.md` — scoped operational learning, memory boundaries and controlled skill evolution.
+- `docs/CLAUDE_CODE_AND_COWORK_OPERATING_MODEL.md` — Claude Code engineering, Cowork knowledge-work and Agency OS authority boundaries.
 - `docs/FINAL_SCOPE_AND_ACCEPTANCE.md` — frozen product boundary and acceptance criteria.
 - `docs/AGENCY_ORGANIZATION_WORKFORCE_BLUEPRINT.md` — departments, teams, positions and reporting structure.
 - `docs/WORKFORCE_AUTONOMY_AND_FOUNDER_AUTHORITY.md` and `docs/FOUNDER_AUTONOMY_MODEL.md` — founder authority and governed autonomy.
 - `docs/INTEGRATION_MAP.md` — migration decisions and native module boundaries.
+- `docs/PRIVATE_AI_OPERATING_MODEL.md` — hosted-only private AI workflows, governed knowledge and OS/Claude responsibility split.
+- `docs/PRIVATE_AI_OPERATING_MODEL.md` — approved implementation direction for the knowledge layer, lead response, proposal preparation, receivables and hosted-provider governance; delivery is phased and local AI is out of scope.
 - `docs/POSTGRES_RLS_OPERATIONS.md` — API/worker/migrator roles, tenant RLS, live verification and existing-volume setup.
 - `docs/CLAUDE_MANAGED_AGENTS_ADAPTER.md` — runtime adapter behavior and limitations.
 - `docs/SKILLS_AND_SKILL_GOVERNANCE.md` — curated, provenance-pinned Agent Skills library, admission policy and runtime boundary.
@@ -116,6 +120,7 @@ This repository is a substantial development foundation, **not a production-read
 
 ## Security and identity
 
+- [Execution sandbox design and acceptance gates](docs/EXECUTION_SANDBOX_DESIGN.md) — current boundary, target isolation architecture and release evidence.
 - [20-point pre-deploy security audit](docs/PRE_DEPLOY_SECURITY_AUDIT_20_POINT.md)
 - [Authentik OIDC setup and configuration](docs/AUTHENTIK_SETUP.md)
 - [External setup checklist](docs/EXTERNAL_SETUP_CHECKLIST.md)

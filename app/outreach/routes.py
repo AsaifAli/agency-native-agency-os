@@ -178,6 +178,7 @@ def create_sender(
 @router.patch("/senders/{sender_id}/status", response_model=SenderOut)
 def update_sender_status(
     org_id: str, sender_id: str, body: SenderStatusUpdate,
+    approval_id: str | None = Query(default=None, min_length=1),
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
     item = db.query(OutboundSender).filter_by(id=sender_id, org_id=org_id).with_for_update().first()
@@ -187,6 +188,19 @@ def update_sender_status(
     require_founder_authority(db, org_id, p.user.id)
     if item.status == body.status:
         return item
+    if body.status == "active":
+        if not approval_id:
+            raise HTTPException(403, "Founder approval is required to activate an outbound sender")
+        require_approved_action(
+            db, approval_id=approval_id, org_id=org_id,
+            workspace_id=item.workspace_id,
+            action_type="external_communication.sensitive", resource_id=item.id,
+            actor_user_id=p.user.id,
+            expected_request_payload={
+                "operation": "activate_outbound_sender", "sender_id": item.id,
+                "max_per_hour": item.max_per_hour, "max_per_day": item.max_per_day,
+            },
+        )
     item.status = body.status
     if body.status == "active":
         item.approved_by = p.user.id
@@ -274,7 +288,7 @@ def list_blocks(
 
 @router.post("/blocks/{block_id}/release", response_model=BlockOut)
 def release_block(
-    org_id: str, block_id: str, body: BlockRelease,
+    org_id: str, block_id: str, body: BlockRelease, approval_id: str | None = Query(default=None, min_length=1),
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
     item = db.query(CommunicationBlock).filter_by(id=block_id, org_id=org_id).with_for_update().first()
@@ -294,6 +308,22 @@ def release_block(
         raise HTTPException(403, "Opt-out or bounce block requires newer founder-reviewed channel eligibility evidence")
     if latest is None or latest.status not in {"granted", "legitimate_interest_reviewed"}:
         raise HTTPException(403, "A current eligible channel-consent record is required before release")
+    if not approval_id:
+        raise HTTPException(403, "Founder approval is required to release a communication block")
+    require_approved_action(
+        db, approval_id=approval_id, org_id=org_id,
+        workspace_id=item.workspace_id,
+        action_type="external_communication.sensitive", resource_id=item.id,
+        actor_user_id=p.user.id,
+        expected_request_payload={
+            "operation": "release_communication_block",
+            "block_id": item.id, "contact_id": item.contact_id,
+            "channel": item.channel, "reason": item.reason,
+            "consent_id": latest.id, "consent_status": latest.status,
+            "consent_recorded_at": latest.recorded_at.isoformat(),
+            "note": body.note.strip(),
+        },
+    )
     item.status = "released"
     item.released_by = p.user.id
     item.released_at = datetime.now(timezone.utc)

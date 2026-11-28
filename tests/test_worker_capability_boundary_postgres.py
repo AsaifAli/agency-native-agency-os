@@ -91,12 +91,11 @@ def test_forged_workspace_gucs_do_not_authorize_worker_reads():
             )
             db.rollback()
     finally:
+        # Keep fixture principals/workspaces: append-only audit rows may reference them.
+        # This CI database is disposable and each fixture uses a unique suffix.
         with Admin() as db:
             db.execute(text("DELETE FROM public.tasks WHERE org_id = :org"), {"org": org.id})
             db.execute(text("DELETE FROM public.agents WHERE org_id = :org"), {"org": org.id})
-            db.execute(text("DELETE FROM public.workspaces WHERE org_id = :org"), {"org": org.id})
-            db.execute(text("DELETE FROM public.organizations WHERE id = :org"), {"org": org.id})
-            db.execute(text("DELETE FROM public.users WHERE id = :user"), {"user": user.id})
             db.commit()
         worker_engine.dispose()
         admin_engine.dispose()
@@ -422,7 +421,6 @@ def test_worker_claim_rpc_issues_a_live_workspace_bound_capability():
                 db.execute(text("SELECT id FROM public.tasks LIMIT 1")).all()
     finally:
         with Admin() as db:
-            db.execute(text("DELETE FROM public.audit_events WHERE org_id = :org"), {"org": org.id})
             db.execute(text("""
                 DELETE FROM public.execution_attempts
                 WHERE execution_id IN (
@@ -433,9 +431,6 @@ def test_worker_claim_rpc_issues_a_live_workspace_bound_capability():
             db.execute(text("DELETE FROM public.machine_identities WHERE org_id = :org"), {"org": org.id})
             db.execute(text("DELETE FROM public.tasks WHERE org_id = :org"), {"org": org.id})
             db.execute(text("DELETE FROM public.agents WHERE org_id = :org"), {"org": org.id})
-            db.execute(text("DELETE FROM public.workspaces WHERE org_id = :org"), {"org": org.id})
-            db.execute(text("DELETE FROM public.organizations WHERE id = :org"), {"org": org.id})
-            db.execute(text("DELETE FROM public.users WHERE id = :user"), {"user": user.id})
             db.commit()
         worker_engine.dispose()
         admin_engine.dispose()
@@ -506,7 +501,6 @@ def test_worker_processor_completes_execution_end_to_end_with_capability(monkeyp
             assert capability_state is not None, "Terminal execution must revoke its capability"
     finally:
         with Admin() as db:
-            db.execute(text("DELETE FROM public.audit_events WHERE org_id = :org"), {"org": org.id})
             db.execute(text("""
                 DELETE FROM public.execution_attempts
                 WHERE execution_id IN (
@@ -516,9 +510,118 @@ def test_worker_processor_completes_execution_end_to_end_with_capability(monkeyp
             db.execute(text("DELETE FROM public.executions WHERE org_id = :org"), {"org": org.id})
             db.execute(text("DELETE FROM public.tasks WHERE org_id = :org"), {"org": org.id})
             db.execute(text("DELETE FROM public.agents WHERE org_id = :org"), {"org": org.id})
-            db.execute(text("DELETE FROM public.workspaces WHERE org_id = :org"), {"org": org.id})
-            db.execute(text("DELETE FROM public.organizations WHERE id = :org"), {"org": org.id})
-            db.execute(text("DELETE FROM public.users WHERE id = :user"), {"user": user.id})
             db.commit()
         worker_engine.dispose()
         admin_engine.dispose()
+
+
+def test_worker_public_table_grants_are_least_privilege():
+    """Worker role has only the table operations required by its runtime paths."""
+    expected_select = {
+        "agent_sessions", "agents", "delegations", "execution_attempts",
+        "executions", "lead_research_drafts", "machine_identities",
+        "orchestration_plan_drafts", "outbox_events", "tasks",
+        "tool_invocations", "workforce_capabilities", "workforce_members",
+        "workspaces",
+    }
+    expected_insert = {
+        "audit_events", "executions",
+        "lead_research_drafts", "machine_session_credentials", "tool_invocations",
+    }
+    expected_update = {
+        "agent_sessions", "delegations", "execution_attempts",
+        "executions", "orchestration_plan_drafts", "outbox_events",
+        "tasks", "tool_invocations",
+    }
+
+    worker_engine = create_engine(WORKER_URL, pool_pre_ping=True)
+    try:
+        with worker_engine.connect() as connection:
+            rows = connection.execute(text("""
+                SELECT
+                    c.relname,
+                    has_table_privilege(current_user, c.oid, 'SELECT') AS can_select,
+                    has_table_privilege(current_user, c.oid, 'INSERT') AS can_insert,
+                    has_table_privilege(current_user, c.oid, 'UPDATE') AS can_update,
+                    has_table_privilege(current_user, c.oid, 'DELETE') AS can_delete
+                FROM pg_class AS c
+                JOIN pg_namespace AS n ON n.oid = c.relnamespace
+                WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+            """)).mappings().all()
+
+            actual_select = {row["relname"] for row in rows if row["can_select"]}
+            actual_insert = {row["relname"] for row in rows if row["can_insert"]}
+            actual_update = {row["relname"] for row in rows if row["can_update"]}
+            actual_delete = {row["relname"] for row in rows if row["can_delete"]}
+
+            assert actual_select == expected_select
+            assert actual_insert == expected_insert
+            assert actual_update == expected_update
+            assert actual_delete == set()
+
+            # Worker jobs use application-generated identifiers; they do not
+            # need sequence access. Keep both current and future sequence
+            # privileges outside the worker's capability boundary.
+            sequence_rows = connection.execute(text("""
+                SELECT
+                    c.relname,
+                    has_sequence_privilege(current_user, c.oid, 'USAGE') AS can_use,
+                    has_sequence_privilege(current_user, c.oid, 'SELECT') AS can_select,
+                    has_sequence_privilege(current_user, c.oid, 'UPDATE') AS can_update
+                FROM pg_class AS c
+                JOIN pg_namespace AS n ON n.oid = c.relnamespace
+                WHERE n.nspname = 'public' AND c.relkind = 'S'
+            """)).mappings().all()
+            assert all(
+                not row["can_use"] and not row["can_select"] and not row["can_update"]
+                for row in sequence_rows
+            )
+
+            assert connection.execute(text("""
+                SELECT has_column_privilege(
+                    current_user, 'public.machine_identities',
+                    'last_used_at', 'UPDATE'
+                )
+            """)).scalar_one() is True
+            assert connection.execute(text("""
+                SELECT has_column_privilege(
+                    current_user, 'public.machine_identities',
+                    'revoked_at', 'UPDATE'
+                )
+            """)).scalar_one() is False
+
+            assert connection.execute(text("""
+                SELECT
+                    has_column_privilege(
+                        current_user, 'public.workforce_capabilities',
+                        'created_at', 'UPDATE'
+                    ),
+                    has_column_privilege(
+                        current_user, 'public.workforce_capabilities',
+                        'enabled', 'UPDATE'
+                    ),
+                    has_column_privilege(
+                        current_user, 'public.workforce_members',
+                        'updated_at', 'UPDATE'
+                    ),
+                    has_column_privilege(
+                        current_user, 'public.workforce_members',
+                        'status', 'UPDATE'
+                    )
+            """)).one() == (True, False, True, False)
+    finally:
+        worker_engine.dispose()
+
+
+def test_worker_runtime_role_cannot_create_objects_in_public_schema():
+    engine = create_engine(WORKER_URL, pool_pre_ping=True)
+    try:
+        with engine.connect() as connection:
+            can_create, can_use = connection.execute(text(
+                "SELECT has_schema_privilege(current_user, 'public', 'CREATE'), "
+                "has_schema_privilege(current_user, 'public', 'USAGE')"
+            )).one()
+        assert can_create is False
+        assert can_use is True
+    finally:
+        engine.dispose()

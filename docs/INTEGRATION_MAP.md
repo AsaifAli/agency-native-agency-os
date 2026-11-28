@@ -17,6 +17,10 @@ Their useful capabilities are represented by native OS modules:
 | Audit and event delivery | `app/audit.py`, `app/outbox_service.py` | OS-owned audit and transactional outbox |
 | Operator interface | `frontend/` | Next.js Founder Console; dashboards are read models |
 
+## Private AI business operations layer
+
+The first tranche adds workspace-scoped, versioned knowledge records and source-validated business drafts for front-desk lead response, meeting-to-proposal preparation and receivables follow-up. The OS owns the records, provenance, approvals, audit and workspace authorization; Claude remains an optional hosted reasoning/runtime adapter. The UI is a Founder Console page, and read-only receivables ageing and founder count snapshots do not perform external actions. Binary upload/index lifecycle, hosted model generation, transcript ingestion, payment matching and reminder dispatch remain out of scope until separately secured and tested. Local AI and local inference are explicitly excluded. Worker access to these tables is denied until a dedicated execution-capability path exists.
+
 ## Command Center migration
 
 The standalone Command Center API, scheduler, demo storage, separate auth, independent worker configuration and legacy deployment files were removed. The OS retains its own workforce registry, task/execution APIs, durable workers, runtime adapters, approval policy, audit and Founder Console.
@@ -44,6 +48,12 @@ RAAS does not imply contingent/performance-based pricing. Pricing, attribution, 
 
 Native Python workers and the PostgreSQL transactional outbox are the initial automation architecture. No n8n, Activepieces, Temporal or second workflow engine is required. External calls run outside database transactions; consumers must be idempotent; delivery is at-least-once with bounded retries, dead letters and reconciliation.
 
+## Private AI and Business Operations layer (planned)
+
+The selective design from the ReStructure Brief's "The Private AI Operating System" is captured in [PRIVATE_AI_OPERATING_MODEL.md](PRIVATE_AI_OPERATING_MODEL.md). It proposes a workspace-scoped, versioned knowledge layer; grounded lead-response drafts; meeting-to-proposal preparation; receivables/reminder and payment-match proposals; a source-backed founder brief; and governed hosted-provider routing. Local AI runtimes and local inference are explicitly out of scope.
+
+These are planned capabilities, not implemented features. They must reuse the existing CRM, proposal, invoice, payment-receipt, approval, execution, audit and outbox foundations. The OS remains the only business control plane. Do not add a parallel Hermes/CRM/accounting/workflow stack or claim local-only processing without end-to-end data-flow and egress verification. File/RAG ingestion, auto-send, meeting recording and bank matching remain gated by the security and lifecycle prerequisites in the design document. Local AI runtimes and local inference are explicitly out of scope.
+
 ## Other systems
 
 - Public agency website: separate application; signed, idempotent server-to-server lead intake is implemented in both repositories and merged to main (website PR #30; OS endpoint already merged). It remains disabled until external configuration and end-to-end validation.
@@ -55,7 +65,7 @@ Native Python workers and the PostgreSQL transactional outbox are the initial au
 
 1. OS owns users, organizations, clients, workspaces, workforce members, tasks, executions, approvals, budgets, artifacts and audit.
 2. Workforce bootstrap does not activate agents. Founder-only capability enablement and member activation are opt-in and policy-checked.
-3. Tool grants remain disabled until a governed OS MCP gateway exists.
+3. An opt-in, session-authenticated MCP transport now delegates to the OS Tool Gateway; production enablement remains blocked pending CI, staging, cross-workspace and provider/Vault verification. See [CLAUDE_MANAGED_MCP_GATEWAY.md](CLAUDE_MANAGED_MCP_GATEWAY.md).
 4. Unknown actions default to manual review; protected actions require founder approval.
 5. Runtime eligibility, data classification, tenant scope and authorization are enforced by backend code.
 6. Managed Agents remains opt-in, beta and synthetic-first; no ZDR/BAA eligibility or production readiness is implied.

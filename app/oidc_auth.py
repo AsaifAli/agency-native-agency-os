@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from authlib.integrations.starlette_client import OAuth
 
 from app.config import settings
+from app.db import set_rls_context
 from app.models import Membership, User
 
 _EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
@@ -70,14 +71,18 @@ def link_provisioned_user(db: Session, issuer: str, subject: str, email: str) ->
     if user is not None:
         if not user.active or user.email.lower() != email:
             raise HTTPException(status_code=403, detail="This identity is inactive or no longer matches its provisioned account")
-        return user
+    else:
+        user = db.query(User).filter_by(email=email).with_for_update().first()
+        if user is None or not user.active or user.oidc_subject or user.oidc_issuer:
+            raise HTTPException(status_code=403, detail="This identity is not provisioned for Agency OS")
+        user.oidc_issuer = issuer
+        user.oidc_subject = subject
+        db.flush()
 
-    user = db.query(User).filter_by(email=email).with_for_update().first()
-    if user is None or not user.active or user.oidc_subject or user.oidc_issuer:
-        raise HTTPException(status_code=403, detail="This identity is not provisioned for Agency OS")
+    # The OIDC assertion has already been verified by the callback. Establish
+    # the matched user's transaction-local identity before checking membership;
+    # the PostgreSQL membership RLS policy intentionally hides rows otherwise.
+    set_rls_context(db, user_id=user.id)
     if not db.query(Membership.id).filter_by(user_id=user.id).first():
         raise HTTPException(status_code=403, detail="This identity has no active organization membership")
-    user.oidc_issuer = issuer
-    user.oidc_subject = subject
-    db.flush()
     return user

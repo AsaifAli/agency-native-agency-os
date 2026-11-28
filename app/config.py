@@ -73,6 +73,28 @@ class Settings(BaseSettings):
     claude_managed_poll_interval_seconds: float = Field(default=2.0, ge=0.2, le=30)
     anthropic_request_timeout_seconds: float = Field(default=20.0, ge=1, le=120)
 
+    # Generic Agency MCP transport for founder-provisioned Code/Cowork/service
+    # identities. It does not require an Anthropic Vault.
+    agency_mcp_enabled: bool = False
+    agency_mcp_public_base_url: str = ""
+    agency_mcp_enabled_tool_keys: str = ""
+    agency_mcp_requests_per_minute: int = Field(default=120, ge=1, le=1000)
+    agency_mcp_max_concurrent_requests: int = Field(default=8, ge=1, le=64)
+    agency_mcp_max_request_body_bytes: int = Field(default=1048576, ge=1024, le=4194304)
+
+    # Provider-facing Claude Managed Agents MCP remains separately opt-in and
+    # requires its dedicated Anthropic Vault configuration.
+    claude_managed_mcp_enabled: bool = False
+    claude_managed_mcp_public_base_url: str = ""
+    claude_managed_mcp_vault_id: str = ""
+    claude_managed_mcp_enabled_tool_keys: str = ""
+    claude_managed_mcp_requests_per_minute: int = Field(default=120, ge=1, le=1000)
+    # Anthropic currently limits each Vault to 20 credentials. Keep headroom
+    # for pending/manual-reconciliation credentials and serialize reservations in PostgreSQL.
+    claude_managed_mcp_max_active_credentials: int = Field(default=16, ge=1, le=20)
+    claude_managed_mcp_max_concurrent_requests: int = Field(default=8, ge=1, le=64)
+    claude_managed_mcp_max_request_body_bytes: int = Field(default=1048576, ge=1024, le=4194304)
+
     # Optional signed server-to-server intake from the public agency website.
     # Disabled until a dedicated secret and fixed org/workspace mapping are configured.
     website_lead_intake_enabled: bool = False
@@ -89,6 +111,55 @@ class Settings(BaseSettings):
                 "OUTBOX_MAX_RETRY_SECONDS must be greater than or equal "
                 "to OUTBOX_BASE_RETRY_SECONDS"
             )
+        if self.agency_mcp_enabled:
+            agency_url = urlparse(self.agency_mcp_public_base_url)
+            if (
+                agency_url.scheme != "https" or not agency_url.hostname
+                or agency_url.username or agency_url.password or agency_url.query or agency_url.fragment
+                or agency_url.path not in ("", "/") or agency_url.port not in (None, 443)
+            ):
+                raise ValueError("AGENCY_MCP_PUBLIC_BASE_URL must be a public HTTPS origin")
+            agency_host = (agency_url.hostname or "").lower().rstrip(".")
+            if agency_host in {"localhost", "localhost.localdomain"} or agency_host.endswith((".localhost", ".local", ".internal", ".test")):
+                raise ValueError("Agency MCP public host cannot be local or internal")
+            try:
+                agency_address = ipaddress.ip_address(agency_host)
+            except ValueError:
+                agency_address = None
+            if agency_address is not None and not agency_address.is_global:
+                raise ValueError("Agency MCP public host cannot be a private or reserved IP")
+            if not [key.strip() for key in self.agency_mcp_enabled_tool_keys.split(",") if key.strip()]:
+                raise ValueError("AGENCY_MCP_ENABLED_TOOL_KEYS must contain a reviewed tool allowlist")
+        if self.claude_managed_mcp_enabled:
+            mcp_url = urlparse(self.claude_managed_mcp_public_base_url)
+            if not self.claude_managed_agents_enabled:
+                raise ValueError("CLAUDE_MANAGED_AGENTS_ENABLED must be true when Claude MCP is enabled")
+            if (
+                mcp_url.scheme != "https" or not mcp_url.hostname
+                or mcp_url.username or mcp_url.password or mcp_url.query or mcp_url.fragment
+                or mcp_url.path not in ("", "/") or mcp_url.port not in (None, 443)
+            ):
+                raise ValueError("CLAUDE_MANAGED_MCP_PUBLIC_BASE_URL must be an HTTPS origin")
+            host = (mcp_url.hostname or "").lower().rstrip(".")
+            if host in {"localhost", "localhost.localdomain"} or host.endswith((".localhost", ".local", ".internal", ".test")):
+                raise ValueError("Claude MCP public host cannot be local or internal")
+            try:
+                address = ipaddress.ip_address(host)
+            except ValueError:
+                address = None
+            if address is not None and not address.is_global:
+                raise ValueError("Claude MCP public host cannot be a private or reserved IP")
+            if not self.claude_managed_mcp_vault_id.startswith("vlt_"):
+                raise ValueError("CLAUDE_MANAGED_MCP_VAULT_ID must identify the dedicated Anthropic Vault")
+            if not [key.strip() for key in self.claude_managed_mcp_enabled_tool_keys.split(",") if key.strip()]:
+                raise ValueError("CLAUDE_MANAGED_MCP_ENABLED_TOOL_KEYS must contain a reviewed tool allowlist")
+        if self.agency_mcp_enabled and self.claude_managed_mcp_enabled:
+            if self.agency_mcp_public_base_url.rstrip("/") != self.claude_managed_mcp_public_base_url.rstrip("/"):
+                raise ValueError("Agency MCP and Managed Agents MCP must share one public base URL when enabled together")
+            agency_keys = {key.strip() for key in self.agency_mcp_enabled_tool_keys.split(",") if key.strip()}
+            claude_keys = {key.strip() for key in self.claude_managed_mcp_enabled_tool_keys.split(",") if key.strip()}
+            if agency_keys != claude_keys:
+                raise ValueError("Agency MCP and Managed Agents MCP must share one tool allowlist when enabled together")
         if self.app_env.lower() == "production" and self.process_role != "migration":
             errors = []
             if self.dev_auth_enabled:
@@ -159,6 +230,30 @@ class Settings(BaseSettings):
                 provider_url = urlparse(self.anthropic_api_base_url)
                 if provider_url.scheme != "https" or provider_url.hostname != "api.anthropic.com" or provider_url.username or provider_url.password or provider_url.port not in (None, 443):
                     errors.append("ANTHROPIC_API_BASE_URL must use the official HTTPS api.anthropic.com endpoint in production")
+            if self.agency_mcp_enabled:
+                agency_url = urlparse(self.agency_mcp_public_base_url)
+                if (
+                    agency_url.scheme != "https" or not agency_url.hostname
+                    or agency_url.username or agency_url.password or agency_url.query or agency_url.fragment
+                    or agency_url.path not in ("", "/") or agency_url.port not in (None, 443)
+                ):
+                    errors.append("AGENCY_MCP_PUBLIC_BASE_URL must be an HTTPS origin without credentials, path, query or non-standard port")
+                if not [key.strip() for key in self.agency_mcp_enabled_tool_keys.split(",") if key.strip()]:
+                    errors.append("AGENCY_MCP_ENABLED_TOOL_KEYS must contain an explicit tool allowlist")
+            if self.claude_managed_mcp_enabled:
+                mcp_url = urlparse(self.claude_managed_mcp_public_base_url)
+                if not self.claude_managed_agents_enabled:
+                    errors.append("CLAUDE_MANAGED_AGENTS_ENABLED must be true when Claude Managed Agents MCP is enabled")
+                if (
+                    mcp_url.scheme != "https" or not mcp_url.hostname
+                    or mcp_url.username or mcp_url.password or mcp_url.query or mcp_url.fragment
+                    or mcp_url.path not in ("", "/") or mcp_url.port not in (None, 443)
+                ):
+                    errors.append("CLAUDE_MANAGED_MCP_PUBLIC_BASE_URL must be an HTTPS origin without credentials, path, query or non-standard port")
+                if not self.claude_managed_mcp_vault_id.startswith("vlt_"):
+                    errors.append("CLAUDE_MANAGED_MCP_VAULT_ID must identify the dedicated Anthropic Vault")
+                if not [key.strip() for key in self.claude_managed_mcp_enabled_tool_keys.split(",") if key.strip()]:
+                    errors.append("CLAUDE_MANAGED_MCP_ENABLED_TOOL_KEYS must contain an explicit read-only or pending-draft tool allowlist")
             if errors:
                 raise ValueError("; ".join(errors))
         return self

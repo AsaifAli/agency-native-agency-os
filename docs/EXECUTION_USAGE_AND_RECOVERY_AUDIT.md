@@ -1,0 +1,66 @@
+# Execution Usage and Recovery Audit
+
+Date: 2026-11-28
+
+## Scope
+
+Source audit of execution attempts, worker leases, Managed Agents session recovery, provider usage persistence, and retry aggregation. This is an audit/design note; it does not change runtime behavior or enable new provider actions.
+
+## Verified implementation
+
+- Execution creation is idempotent per organization and idempotency key. The database uniqueness constraint is the final concurrency guard.
+- PostgreSQL worker claims create a durable attempt and a short-lived, hash-bound worker capability in the database-controlled claim path. Provider work runs outside the database transaction.
+- Worker heartbeats renew the attempt lease and the PostgreSQL worker capability. Failure to confirm renewal is surfaced rather than silently treated as healthy.
+- Expired claimed/running attempts are marked `abandoned`; the execution is moved to retry wait or failed when the attempt limit is exhausted. Recovery is bounded and records audit events.
+- Managed Agents persists the provider session ID before continuing. Later attempts receive the most recent persisted external run ID and resume that session. Ambiguous create/persist outcomes are sent to manual review rather than blindly creating another provider session.
+- The adapter reads usage from the provider session response (or the latest `session.usage` event), normalizes bounded numeric fields, and persists usage with the attempt result when a terminal result or review-required outcome is returned.
+- `fail_execution` aggregates usage present on persisted attempt results. Successful completion also aggregates usage across persisted attempts. The current unit test explicitly models each attempt's usage as an additive increment.
+- The Managed Agents adapter sends a per-session provider budget in USD. This is not a workspace-wide cumulative spend limit.
+
+## Confirmed accounting defect and correction
+
+Anthropic's current Managed Agents documentation explicitly defines the session object's `usage` and the `session.usage` event as **cumulative usage across all turns**. It also states that the session-level figure is authoritative. See:
+
+- https://platform.claude.com/docs/en/managed-agents/session-observability
+- https://platform.claude.com/docs/en/api/typescript/beta/sessions
+
+The previous OS aggregation summed every persisted attempt usage object. Because retries resume the same provider session, this double-counted earlier turns. The implementation now groups Managed Agents attempt observations by persisted `external_run_id` and uses the latest attempt's cumulative snapshot for each session. Distinct provider sessions are added together. Other runtimes retain additive per-attempt aggregation until their usage contract is documented.
+
+Regression coverage now proves both behaviors: later cumulative snapshots replace earlier snapshots for the same session, and separate Managed Agents sessions are additive.
+
+Remaining accounting work:
+
+- Persist provider observation identity/timestamp and reconcile session snapshots idempotently if a background reconciliation job is added.
+- Reconcile ambiguous/abandoned sessions by fetching the authoritative session object after idle; do not infer cost deltas from cumulative snapshots.
+- If a latest attempt has no usage because the worker died before persisting it, the last known snapshot remains a lower bound until provider reconciliation. Missing usage must never be treated as zero.
+
+## Recovery accounting gap
+
+A worker can die after provider work has incurred cost but before the adapter returns and persists usage. Lease recovery currently records an abandoned attempt and retries/resumes the provider session when a durable session ID exists, but it cannot recover usage merely from the abandoned attempt row. This leaves a temporary or permanent gap in OS-side usage reporting until provider-session reconciliation is implemented. The provider-side session budget still constrains that individual session, but it does not solve workspace cumulative spend accounting.
+
+Before a workspace spend ledger is enforced, add a reconciliation state for ambiguous provider outcomes. Keep amounts reserved/unknown until a provider session snapshot or an authorized manual reconciliation resolves them. Do not treat missing usage as zero and do not release a reservation merely because a worker lease expired.
+
+## Existing safety boundaries to preserve
+
+- Keep provider calls outside database transactions.
+- Keep execution/attempt state and audit owned by Agency OS; provider session IDs are correlation handles, not authorization credentials.
+- Preserve single-session resume behavior and manual review on ambiguous provider create/persist outcomes.
+- Do not introduce a second Claude runtime or custom sandbox solely to solve usage accounting.
+- Do not compare `WorkforceCapability.budget_minor` (currently INR by default and not enforced) with provider USD usage. Currency and period policy must be explicit.
+- Do not invent a workspace spend limit or lifetime/monthly period. Founder policy is still required before enforcement.
+
+## Next engineering sequence
+
+1. Verify the current provider usage semantics from authoritative Managed Agents documentation or a controlled synthetic session test.
+2. Add a versioned provider-usage observation model keyed idempotently by provider + session + provider observation/event identity; keep raw provider payloads out of logs and retain only allowlisted normalized fields.
+3. Reconcile ambiguous/abandoned sessions before retrying or finalizing spend; bound pages, duration, and provider calls, and route unresolved outcomes to manual review.
+4. Only then implement atomic USD-cent workspace reservations/settlement with the founder-selected period/limit policy, concurrency tests, idempotency tests, and unknown-outcome handling.
+
+## Status
+
+- Execution lease claim/heartbeat/recovery: implemented; covered by existing tests and CI.
+- Provider session ID persistence/resume safeguards: implemented in the adapter; external provider behavior remains dependent on current Anthropic contract and account configuration.
+- Per-session provider budget: implemented in the adapter; not a workspace cumulative limit.
+- Managed Agents usage aggregation: implemented with latest cumulative snapshot per provider session; regression tests cover resumed and distinct sessions.
+- Recovery-time provider usage reconciliation: planned, not implemented; an abandoned attempt can have unobserved usage until its provider session is fetched.
+- Workspace cumulative spend ledger and ambiguous-outcome reconciliation: planned, not implemented.

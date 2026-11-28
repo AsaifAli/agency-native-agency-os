@@ -12,6 +12,7 @@ class ExecutionRequest:
     task_id: str
     agent_id: str
     data_class: DataClass
+    execution_id: str | None = None
     client_authorized: bool = False
     agent_name: str = ""
     agent_department: str = ""
@@ -24,6 +25,11 @@ class ExecutionRequest:
     persist_resume_event: Callable[[str, str], None] | None = None
     persist_control_event: Callable[[str, str], None] | None = None
     execute_custom_tool: Callable[[str, dict, str], dict] | None = None
+    prepare_mcp_session: Callable[[], dict] | None = None
+    get_mcp_provider_credential: Callable[[], dict | None] | None = None
+    persist_mcp_provider_credential: Callable[[str, str, str], None] | None = None
+    revoke_mcp_session_credential: Callable[[str, str], None] | None = None
+    mark_mcp_provider_credential_archived: Callable[[str, str], None] | None = None
     control_check: Callable[[], str | None] | None = None
     request_metadata: dict = field(default_factory=dict)
 
@@ -34,6 +40,7 @@ class ExecutionResult:
     external_run_id: str | None
     status: str
     detail: str = ""
+    usage: dict | None = None
 
 
 class RuntimeExecutionError(Exception):
@@ -50,6 +57,10 @@ class RuntimeTransientError(RuntimeExecutionError):
 
 class RuntimeManualReviewRequired(RuntimeExecutionError):
     """The provider paused for a tool approval or other human decision."""
+
+    def __init__(self, message: str, *, usage: dict | None = None):
+        super().__init__(message)
+        self.usage = usage
 
 
 class RuntimeCancelled(RuntimeExecutionError):

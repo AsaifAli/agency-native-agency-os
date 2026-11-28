@@ -7,13 +7,15 @@ from sqlalchemy.pool import StaticPool
 
 from app.auth import Principal, get_principal
 from app.db import Base, get_db, set_rls_context
-from app.models import Membership, Organization, Role, User, Workspace, FounderAuthority, WorkspaceGrant
+from app.models import Approval, ApprovalStatus, Membership, Organization, Role, User, Workspace, FounderAuthority, WorkspaceGrant, Agent
+from app.action_policy import workforce_capability_resource_id, workforce_member_activation_resource_id
 from app.workforce_routes import router
 from app.workforce_service import initialize_workforce
 import app.domain_models  # noqa: F401 — register Revenue/Delivery tables before metadata.create_all
 import app.workforce_models  # noqa: F401
 import app.operations_models  # noqa: F401
 import app.telephony.models  # noqa: F401
+import uuid
 
 
 @pytest.fixture()
@@ -55,6 +57,108 @@ def app_client():
     client.identity=identity
     client.set_principal = lambda selected_user: identity.update(principal=selected_user)
     client.factory=factory
+    raw_request = client.request
+
+    def _create_test_approval(resource_id, payload):
+        approval_db = factory()
+        try:
+            approval = Approval(
+                org_id=org.id, workspace_id=workspace.id,
+                action_type="security.permission.change", resource_id=resource_id,
+                idempotency_key=f"workforce-approval-{uuid.uuid4().hex}",
+                request_payload=payload, status=ApprovalStatus.approved,
+                requested_by=founder.id, decided_by=founder.id,
+            )
+            approval_db.add(approval)
+            approval_db.commit()
+            return approval.id
+        finally:
+            approval_db.close()
+
+    def _approval_for_workforce_request(method, url, kwargs):
+        if method.upper() != "POST" or identity["principal"].id != founder.id:
+            return
+        path = str(url).split("?", 1)[0]
+        parts = path.split("/")
+        params = dict(kwargs.get("params") or {})
+        workspace_id = params.get("workspace_id")
+        if not workspace_id or params.get("approval_id"):
+            return
+        if path.endswith("/capabilities"):
+            member_id = parts[-2]
+            body = kwargs.get("json") or {}
+            payload = {
+                "operation": "configure", "member_id": member_id,
+                "capability_key": body.get("capability_key"), "scope": body.get("scope", "workspace"),
+                "allowed_data_classes": sorted(body.get("allowed_data_classes") or ["synthetic"]),
+                "allowed_actions": sorted(body.get("allowed_actions") or []),
+                "tool_allowlist": sorted(body.get("tool_allowlist") or []),
+                "budget_minor": body.get("budget_minor", 0), "currency": body.get("currency", "INR"),
+            }
+            resource_id = workforce_capability_resource_id(
+                workspace_id, member_id, payload["capability_key"], "configure",
+            )
+        elif path.endswith("/enable"):
+            member_id, capability_id = parts[-4], parts[-2]
+            approval_db = factory()
+            try:
+                from app.workforce_models import WorkforceCapability, WorkforceMember
+                member = approval_db.query(WorkforceMember).filter_by(id=member_id).one()
+                capability = approval_db.query(WorkforceCapability).filter_by(id=capability_id).one()
+                payload = {
+                    "operation": "enable", "member_id": member.id,
+                    "capability_id": capability.id, "capability_key": capability.capability_key,
+                    "scope": capability.scope,
+                    "allowed_data_classes": sorted(capability.allowed_data_classes or []),
+                    "allowed_actions": sorted(capability.allowed_actions or []),
+                    "tool_allowlist": sorted(capability.tool_allowlist or []),
+                    "budget_minor": capability.budget_minor, "currency": capability.currency,
+                }
+                resource_id = workforce_capability_resource_id(
+                    workspace_id, member.id, capability.capability_key, "enable",
+                )
+            finally:
+                approval_db.close()
+        elif path.endswith("/activate"):
+            member_id = parts[-2]
+            approval_db = factory()
+            try:
+                from app.workforce_models import WorkforceCapability, WorkforceMember
+                member = approval_db.query(WorkforceMember).filter_by(id=member_id).one()
+                agent = approval_db.query(Agent).filter_by(id=member.agent_id).one()
+                grants = approval_db.query(WorkforceCapability).filter_by(
+                    org_id=org.id, workspace_id=workspace_id, member_id=member.id, enabled=True,
+                ).all()
+                eligible = [g for g in grants if agent.data_class.value in (g.allowed_data_classes or [])
+                            and bool(set(g.allowed_actions or []) & {"task.execute", "research.execute", "report.generate"})
+                            and not (g.tool_allowlist or [])]
+                payload = {
+                    "operation": "activate_member", "member_id": member.id,
+                    "agent_id": agent.id, "runtime": agent.runtime,
+                    "data_class": agent.data_class.value,
+                    "capabilities": [
+                        {"id": g.id, "capability_key": g.capability_key, "scope": g.scope,
+                         "allowed_data_classes": sorted(g.allowed_data_classes or []),
+                         "allowed_actions": sorted(g.allowed_actions or []),
+                         "tool_allowlist": sorted(g.tool_allowlist or []),
+                         "budget_minor": g.budget_minor, "currency": g.currency}
+                        for g in sorted(eligible, key=lambda item: item.id)
+                    ],
+                }
+                resource_id = workforce_member_activation_resource_id(workspace_id, member.id)
+            finally:
+                approval_db.close()
+        else:
+            return
+        params["approval_id"] = _create_test_approval(resource_id, payload)
+        kwargs["params"] = params
+
+    def approved_request(method, url, **kwargs):
+        _approval_for_workforce_request(method, url, kwargs)
+        return raw_request(method, url, **kwargs)
+
+    client.request = approved_request
+    client.raw_request = raw_request
     yield client
     db.close(); Base.metadata.drop_all(engine); engine.dispose()
 
@@ -977,7 +1081,7 @@ def test_skill_catalog_api_is_authenticated_and_tool_free(app_client):
     response = app_client.get(f"/v1/orgs/{identity['org'].id}/skills")
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert len(payload["skills"]) == 22
+    assert len(payload["skills"]) == 24
     assert all(skill["enabled"] is False for skill in payload["skills"])
     assert all(skill["allowed_tools"] == [] for skill in payload["skills"])
 
@@ -1137,3 +1241,43 @@ def test_operator_can_read_catalog_but_cannot_change_founder_authority(app_clien
     assert response.status_code == 200
     # The catalogue exposes no activation or grant mutation endpoint.
     assert not any("/specialists/activate" in path for path in app_client.app.openapi()["paths"])
+
+
+def test_workforce_capability_configuration_rejects_missing_approval(app_client):
+    i = app_client.identity
+    app_client.post(
+        f"/v1/orgs/{i['org'].id}/workforce/bootstrap",
+        params={"workspace_id": i["workspace"].id},
+    )
+    listing = app_client.get(
+        f"/v1/orgs/{i['org'].id}/workforce",
+        params={"workspace_id": i["workspace"].id},
+    ).json()
+    specialist = next(
+        item for item in listing["members"]
+        if item["department_key"] == "ai_engineering_development"
+    )
+    response = app_client.raw_request(
+        "POST",
+        f"/v1/orgs/{i['org'].id}/workforce/{specialist['id']}/capabilities",
+        params={"workspace_id": i["workspace"].id},
+        json={
+            "capability_key": "research.unapproved",
+            "scope": "workspace",
+            "allowed_data_classes": ["synthetic"],
+            "allowed_actions": ["research.execute"],
+            "tool_allowlist": [],
+            "budget_minor": 0,
+            "currency": "INR",
+        },
+    )
+    assert response.status_code == 422
+    db = app_client.factory()
+    try:
+        from app.workforce_models import WorkforceCapability
+        assert db.query(WorkforceCapability).filter_by(
+            org_id=i["org"].id, workspace_id=i["workspace"].id,
+            member_id=specialist["id"], capability_key="research.unapproved",
+        ).count() == 0
+    finally:
+        db.close()

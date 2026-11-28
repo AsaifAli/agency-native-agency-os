@@ -213,9 +213,11 @@ A checkbox is complete only when code/infrastructure, tests, operational evidenc
 - [ ] Run end-to-end browser tests for critical founder journeys. Frontend lint (0 errors; 7 pre-existing React Hook dependency warnings), TypeScript validation and Next.js production build passed before the final Founder Console UI reconciliation. A fresh run against current `main` checkpoint `9e42fbe49d0c9bff2553d0c8b2b77412e889fc0d` and browser-level critical-flow tests remain pending.
 
 ### 17. Learning and operational improvement
-- [ ] Capture incidents, corrections, successful playbooks and postmortems as reviewed knowledge.
-- [ ] Separate verified facts from agent-generated hypotheses and preserve source/evidence.
-- [ ] Add approval-controlled promotion of lessons into skills, prompts, policies and workflows.
+- [x] Capture evidence-backed workspace learning candidates through an audited, idempotent API; source execution/evaluation lineage is verified and sensitive source classes are blocked.
+- [x] Separate candidate evidence and confidence from reusable knowledge; promotion requires founder authority and remains in the same workspace.
+- [ ] Automatic extraction from completed executions; currently candidates are explicitly submitted.
+- [ ] Retrieve/inject approved knowledge into runtime sessions with tenant authorization at retrieval time.
+- [ ] Add approval-controlled promotion of lessons into versioned skills, prompts, policies and workflows.
 - [ ] Track recurring failure patterns and regression tests to prevent recurrence.
 - [ ] Review agent permissions, budgets, workflow performance and data access periodically.
 
@@ -285,7 +287,9 @@ A checkbox is complete only when code/infrastructure, tests, operational evidenc
 - [ ] Complete Revenue provenance/deduplication/merge review, attribution and client-safe proposal delivery.
 - [ ] Complete Delivery requirement-to-test traceability, independent QA/rework, release approval, handover, support/SLA and renewal workflows.
 - [ ] Add trusted Evaluation Harness runner attestation, immutable test/commit/environment manifests and a release-blocking decision path; caller-supplied evidence is not proof.
-- [ ] Add provider routing/resilience, per-execution cost/usage accounting, enforceable budgets and founder emergency controls.
+- [x] Persist normalized Managed Agents token/runtime/list-cost usage in execution results and expose only the usage summary through the workspace-scoped execution history API.
+- [ ] Add cumulative provider/agent budget reservation, settlement and release; the current Managed Agents cap is per session, not an aggregate cap across concurrent executions.
+- [ ] Add provider routing/resilience and founder emergency spend controls.
 - [ ] Add operational metrics, alert routing, dashboards, SBOM/scans, incident runbooks and periodic access review.
 - [ ] Complete encrypted backup/object-artifact backup and isolated restore drill; measure and document RPO/RTO.
 - [ ] Complete staging synthetic end-to-end acceptance, external provider/webhook/storage configuration and explicit founder production go/no-go.

@@ -154,7 +154,6 @@ def build_machine_tool_executor(
                             session.id,
                             identity.workspace_id,
                             {
-                                "machine_identity_id": identity.id,
                                 "reason_code": "EXECUTION_DATA_CLASS_CHANGED",
                             },
                         )
@@ -172,7 +171,6 @@ def build_machine_tool_executor(
                             session.id,
                             identity.workspace_id,
                             {
-                                "machine_identity_id": identity.id,
                                 "reason_code": "SESSION_TTL_EXPIRED",
                             },
                         )
@@ -208,3 +206,312 @@ def build_machine_tool_executor(
             return result["result"]
 
     return execute
+
+
+
+def build_machine_mcp_session_preparer(
+    *,
+    session_factory: Callable[[], Session],
+    request,
+    execution_id: str,
+    attempt_id: str,
+    worker_id: str,
+    session_ttl_seconds: int = 900,
+    provider_vault_id: str,
+    max_active_vault_credentials: int = 16,
+):
+    """Prepare one execution-bound AgentSession and one-time MCP bearer token.
+
+    This is called only before creating a new provider session. The raw token is
+    returned once to the provider adapter and is never written to OS storage.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    from app.integrations.runtime import RuntimeManualReviewRequired, RuntimeTransientError
+    from app.session_credentials import MCPVaultCapacityError, issue_session_credential
+
+    ttl_seconds = max(60, min(int(session_ttl_seconds), 3600))
+
+    def prepare() -> dict:
+        with session_factory() as db:
+            now = datetime.now(timezone.utc)
+            execution = (
+                db.query(Execution)
+                .filter_by(id=execution_id, org_id=request.org_id, workspace_id=request.workspace_id)
+                .with_for_update()
+                .first()
+            )
+            if (
+                execution is None
+                or execution.status != ExecutionStatus.running
+                or execution.agent_id != request.agent_id
+                or execution.data_class != request.data_class
+            ):
+                raise RuntimeManualReviewRequired("The execution is not active for MCP session preparation.")
+
+            attempt = (
+                db.query(ExecutionAttempt)
+                .filter_by(id=attempt_id, execution_id=execution_id)
+                .with_for_update()
+                .first()
+            )
+            if (
+                attempt is None
+                or attempt.status != ExecutionAttemptStatus.running
+                or attempt.worker_id != worker_id
+                or attempt.lease_expires_at is None
+                or _as_utc(attempt.lease_expires_at) <= now
+                or attempt.runtime != execution.runtime
+            ):
+                raise RuntimeManualReviewRequired("The execution lease is no longer valid for MCP session preparation.")
+
+            session_identity_id = None
+            if execution.machine_session_id:
+                session_identity_id = (
+                    db.query(AgentSession.machine_identity_id)
+                    .filter_by(
+                        id=execution.machine_session_id,
+                        org_id=request.org_id,
+                        workspace_id=request.workspace_id,
+                    )
+                    .scalar()
+                )
+                if session_identity_id is None:
+                    raise RuntimeManualReviewRequired("The execution's machine session reference is invalid.")
+
+            identity_query = db.query(MachineIdentity).filter_by(
+                org_id=request.org_id,
+                workspace_id=request.workspace_id,
+                subject_type="agent",
+                subject_id=request.agent_id,
+                revoked_at=None,
+            )
+            if session_identity_id is not None:
+                identity_query = identity_query.filter(MachineIdentity.id == session_identity_id)
+            else:
+                identity_query = identity_query.order_by(
+                    MachineIdentity.created_at.desc(), MachineIdentity.id.desc()
+                )
+            identity = identity_query.with_for_update().first()
+            if (
+                identity is None
+                or _as_utc(identity.expires_at) <= now
+                or "tools:invoke" not in (identity.scopes or [])
+                or "sessions:create" not in (identity.scopes or [])
+            ):
+                raise RuntimeManualReviewRequired("The agent has no active OS machine identity for MCP access.")
+
+            principal = MachinePrincipal(identity=identity)
+            session = None
+            if execution.machine_session_id:
+                session = (
+                    db.query(AgentSession)
+                    .filter_by(
+                        id=execution.machine_session_id,
+                        org_id=request.org_id,
+                        workspace_id=request.workspace_id,
+                        machine_identity_id=identity.id,
+                    )
+                    .with_for_update()
+                    .first()
+                )
+                if session is None:
+                    raise RuntimeManualReviewRequired("The execution's machine session cannot be loaded.")
+                if (
+                    session.status != "active"
+                    or _as_utc(session.expires_at) <= now
+                    or session.data_class != request.data_class.value
+                ):
+                    raise RuntimeManualReviewRequired(
+                        "The execution's previous MCP session is inactive; reconcile it before creating another."
+                    )
+            else:
+                session = create_agent_session(
+                    db,
+                    principal,
+                    purpose=f"Claude Managed Agents MCP: {request.task_title or request.task_id}"[:240],
+                    data_class=request.data_class.value,
+                    ttl_seconds=ttl_seconds,
+                )
+                execution.machine_session_id = session.id
+                db.flush()
+
+            try:
+                issued = issue_session_credential(
+                    db,
+                    principal,
+                    session_id=session.id,
+                    ttl_seconds=ttl_seconds,
+                    now=now,
+                    provider_vault_id=provider_vault_id,
+                    max_active_vault_credentials=max_active_vault_credentials,
+                )
+                db.commit()
+            except MCPVaultCapacityError as exc:
+                db.rollback()
+                raise RuntimeTransientError(
+                    "Claude Managed Agents MCP is waiting for an available Vault credential slot."
+                ) from exc
+            except IntegrityError as exc:
+                db.rollback()
+                raise RuntimeManualReviewRequired(
+                    "An MCP credential already exists for this OS session. Provider reconciliation is required."
+                ) from exc
+
+            return {
+                "session_id": session.id,
+                "credential_id": issued.credential_id,
+                "token": issued.token,
+                "expires_at": issued.expires_at.isoformat(),
+            }
+
+    return prepare
+
+
+def build_machine_mcp_session_preparer(
+    *,
+    session_factory: Callable[[], Session],
+    request,
+    execution_id: str,
+    attempt_id: str,
+    worker_id: str,
+    session_ttl_seconds: int = 900,
+):
+    """Prepare one execution-bound AgentSession and one-time MCP bearer token.
+
+    This is called only before creating a new provider session. The raw token is
+    returned once to the provider adapter and is never written to OS storage.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    from app.integrations.runtime import RuntimeManualReviewRequired
+    from app.session_credentials import issue_session_credential
+
+    ttl_seconds = max(60, min(int(session_ttl_seconds), 3600))
+
+    def prepare() -> dict:
+        with session_factory() as db:
+            now = datetime.now(timezone.utc)
+            execution = (
+                db.query(Execution)
+                .filter_by(id=execution_id, org_id=request.org_id, workspace_id=request.workspace_id)
+                .with_for_update()
+                .first()
+            )
+            if (
+                execution is None
+                or execution.status != ExecutionStatus.running
+                or execution.agent_id != request.agent_id
+                or execution.data_class != request.data_class
+            ):
+                raise RuntimeManualReviewRequired("The execution is not active for MCP session preparation.")
+
+            attempt = (
+                db.query(ExecutionAttempt)
+                .filter_by(id=attempt_id, execution_id=execution_id)
+                .with_for_update()
+                .first()
+            )
+            if (
+                attempt is None
+                or attempt.status != ExecutionAttemptStatus.running
+                or attempt.worker_id != worker_id
+                or attempt.lease_expires_at is None
+                or _as_utc(attempt.lease_expires_at) <= now
+                or attempt.runtime != execution.runtime
+            ):
+                raise RuntimeManualReviewRequired("The execution lease is no longer valid for MCP session preparation.")
+
+            session_identity_id = None
+            if execution.machine_session_id:
+                session_identity_id = (
+                    db.query(AgentSession.machine_identity_id)
+                    .filter_by(
+                        id=execution.machine_session_id,
+                        org_id=request.org_id,
+                        workspace_id=request.workspace_id,
+                    )
+                    .scalar()
+                )
+                if session_identity_id is None:
+                    raise RuntimeManualReviewRequired("The execution's machine session reference is invalid.")
+
+            identity_query = db.query(MachineIdentity).filter_by(
+                org_id=request.org_id,
+                workspace_id=request.workspace_id,
+                subject_type="agent",
+                subject_id=request.agent_id,
+                revoked_at=None,
+            )
+            if session_identity_id is not None:
+                identity_query = identity_query.filter(MachineIdentity.id == session_identity_id)
+            else:
+                identity_query = identity_query.order_by(
+                    MachineIdentity.created_at.desc(), MachineIdentity.id.desc()
+                )
+            identity = identity_query.with_for_update().first()
+            if (
+                identity is None
+                or _as_utc(identity.expires_at) <= now
+                or "tools:invoke" not in (identity.scopes or [])
+            ):
+                raise RuntimeManualReviewRequired("The agent has no active OS machine identity for MCP access.")
+
+            principal = MachinePrincipal(identity=identity)
+            session = None
+            if execution.machine_session_id:
+                session = (
+                    db.query(AgentSession)
+                    .filter_by(
+                        id=execution.machine_session_id,
+                        org_id=request.org_id,
+                        workspace_id=request.workspace_id,
+                        machine_identity_id=identity.id,
+                    )
+                    .with_for_update()
+                    .first()
+                )
+                if session is None:
+                    raise RuntimeManualReviewRequired("The execution's machine session cannot be loaded.")
+                if (
+                    session.status != "active"
+                    or _as_utc(session.expires_at) <= now
+                    or session.data_class != request.data_class.value
+                ):
+                    raise RuntimeManualReviewRequired(
+                        "The execution's previous MCP session is inactive; reconcile it before creating another."
+                    )
+            else:
+                session = create_agent_session(
+                    db,
+                    principal,
+                    purpose=f"Claude Managed Agents MCP: {request.task_title or request.task_id}"[:240],
+                    data_class=request.data_class.value,
+                    ttl_seconds=ttl_seconds,
+                )
+                execution.machine_session_id = session.id
+                db.flush()
+
+            try:
+                issued = issue_session_credential(
+                    db,
+                    principal,
+                    session_id=session.id,
+                    ttl_seconds=ttl_seconds,
+                    now=now,
+                )
+                db.commit()
+            except IntegrityError as exc:
+                db.rollback()
+                raise RuntimeManualReviewRequired(
+                    "An MCP credential already exists for this OS session. Provider reconciliation is required."
+                ) from exc
+
+            return {
+                "session_id": session.id,
+                "credential_id": issued.credential_id,
+                "token": issued.token,
+                "expires_at": issued.expires_at.isoformat(),
+            }
+
+    return prepare

@@ -73,6 +73,7 @@ The `workspaces` table needs command-specific policies:
 - SELECT: only workspaces for which the human has an active grant (plus the existing exact machine workspace path).
 - INSERT: organization member with the required workspace-creation role; the application must create the creator grant in the same transaction. Prefer a narrow database function if needed to make the invariant impossible to bypass.
 - UPDATE/DELETE: explicit policy aligned to the intended founder/admin lifecycle; do not silently infer this from SELECT access.
+- Workspace grant creation and revocation require both explicit Founder Authority and a matching, single-use `security.permission.change` approval. The approval resource ID is the stable UUIDv5 returned by `app.action_policy.workspace_access_resource_id(workspace_id, user_id, operation)` (with `operation` set to `grant` or `revoke`); approval consumption, grant mutation, and audit commit in one database transaction. A no-op revoke rolls back approval consumption.
 
 The `workspace_grants` table needs its own restrictive policies. A user may read their own grants; grant administration must require explicit founder authority in the API and must not be made possible by a broad organization-member policy. Evaluate a narrow SECURITY DEFINER write function if direct table grants would undermine the boundary.
 
@@ -137,3 +138,7 @@ Route families found during the initial audit include core workspace/bootstrap a
 - Do not grant workspace access based only on organization role.
 - Do not apply migrations to the separate website Supabase database.
 - Do not claim production isolation from unit tests or policy-presence checks alone.
+
+- Machine identity provisioning and revocation also require a matching, single-use `security.permission.change` approval. Provisioning approvals bind the exact identity name, subject, scopes, allowed data classes and TTL; revocation approvals bind the exact identity ID. The approval is consumed in the same transaction as the identity mutation and audit event.
+- Workforce capability configuration, capability enablement, and workforce-member activation require matching single-use `security.permission.change` approvals. The approved payload is an exact snapshot of the proposed scope/actions/tools/data classes/budget (and, for activation, the linked agent plus enabled capability set). Pausing a member remains immediately available to founders as a restrictive containment action.
+- Outbound sender activation and communication-block release require single-use `external_communication.sensitive` approvals. Sender activation binds the sender identity and rate limits; block release binds the block, contact/channel/reason, latest eligible consent record and founder rationale. Pausing a sender and recording/maintaining suppression remain restrictive actions and do not require approval.

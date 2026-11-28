@@ -7,7 +7,9 @@ Entry point for every human, AI agent, supervisor, sub-agent, worker and externa
 2. [docs/WORKFORCE_AUTONOMY_AND_FOUNDER_AUTHORITY.md](docs/WORKFORCE_AUTONOMY_AND_FOUNDER_AUTHORITY.md) — authority and autonomy boundaries.
 3. [docs/AGENCY_ORGANIZATION_WORKFORCE_BLUEPRINT.md](docs/AGENCY_ORGANIZATION_WORKFORCE_BLUEPRINT.md) — departments, teams and reporting lines.
 4. [docs/SKILLS_AND_SKILL_GOVERNANCE.md](docs/SKILLS_AND_SKILL_GOVERNANCE.md) — skill admission and runtime boundary.
-5. [SKILLS.md](SKILLS.md) — skill library index.
+5. [docs/AGENCY_LEARNING_AND_MEMORY_MODEL.md](docs/AGENCY_LEARNING_AND_MEMORY_MODEL.md) — scoped learning, memory and controlled skill evolution.
+6. [docs/CLAUDE_CODE_AND_COWORK_OPERATING_MODEL.md](docs/CLAUDE_CODE_AND_COWORK_OPERATING_MODEL.md) — Code/Cowork/OS responsibilities and safe handoffs.
+7. [SKILLS.md](SKILLS.md) — skill library index.
 
 ## Organizational model
 The founder is at the top, followed by the Chief of Staff, department supervisors, specialist agents/sub-agents and human contributors. These are distinct workforce members with explicit reporting lines, status, autonomy and capabilities.

@@ -44,6 +44,38 @@ def _sanitize_error_message(value: str) -> str:
 
 
 
+def _validate_provider_usage(value: dict | None) -> dict | None:
+    """Accept only the normalized numeric usage contract emitted by the runtime adapter."""
+    if value is None:
+        return None
+    allowed = {
+        "input_tokens", "output_tokens", "cache_read_input_tokens",
+        "cache_creation_input_tokens", "list_cost_minor", "currency",
+        "active_seconds", "server_tool_use",
+    }
+    if not isinstance(value, dict) or set(value) - allowed:
+        raise ValueError("provider_usage must match the normalized usage contract")
+    for key in ("input_tokens", "output_tokens", "cache_read_input_tokens",
+                "cache_creation_input_tokens", "list_cost_minor"):
+        item = value.get(key)
+        if item is not None and (isinstance(item, bool) or not isinstance(item, int) or not 0 <= item <= 10**12):
+            raise ValueError("provider_usage contains an invalid counter")
+    if ("list_cost_minor" in value) != (value.get("currency") == "USD"):
+        raise ValueError("provider_usage list cost must be denominated in USD")
+    if "currency" in value and value["currency"] != "USD":
+        raise ValueError("provider_usage currency is unsupported")
+    active = value.get("active_seconds")
+    if active is not None and (isinstance(active, bool) or not isinstance(active, (int, float)) or not 0 <= active <= 31_536_000):
+        raise ValueError("provider_usage contains invalid active time")
+    tools = value.get("server_tool_use")
+    if tools is not None and (
+        not isinstance(tools, dict) or set(tools) - {"web_search_requests", "web_fetch_requests"}
+        or any(isinstance(item, bool) or not isinstance(item, int) or not 0 <= item <= 10**9 for item in tools.values())
+    ):
+        raise ValueError("provider_usage contains invalid server-tool counts")
+    return dict(value)
+
+
 def _sync_plan_draft_execution(
     db: Session,
     execution: Execution,
@@ -575,6 +607,63 @@ def heartbeat_execution(
     return execution, attempt
 
 
+def _aggregate_provider_usage(db: Session, execution_id: str) -> dict | None:
+    """Aggregate attempt deltas and one latest cumulative snapshot per Managed Agents session.
+
+    Managed Agents usage is session-cumulative. A resumed execution can therefore
+    persist the same session's cumulative snapshot on multiple attempts; summing
+    those snapshots would double-count prior turns. Distinct provider sessions
+    remain additive. Other runtimes retain the existing per-attempt additive
+    contract until their usage semantics are explicitly defined.
+    """
+    rows = (
+        db.query(ExecutionAttempt)
+        .filter_by(execution_id=execution_id)
+        .order_by(ExecutionAttempt.attempt_number.asc(), ExecutionAttempt.id.asc())
+        .all()
+    )
+    additive_usage_rows = []
+    managed_session_snapshots: dict[str, tuple[int, dict]] = {}
+    for attempt in rows:
+        result = attempt.result
+        usage = result.get("usage") if isinstance(result, dict) else None
+        if usage is None:
+            continue
+        normalized = _validate_provider_usage(usage)
+        if attempt.runtime == "claude_managed_agents" and attempt.external_run_id:
+            current = managed_session_snapshots.get(attempt.external_run_id)
+            if current is None or attempt.attempt_number >= current[0]:
+                managed_session_snapshots[attempt.external_run_id] = (
+                    attempt.attempt_number, normalized,
+                )
+        else:
+            additive_usage_rows.append(normalized)
+
+    usage_rows = additive_usage_rows + [
+        snapshot for _, snapshot in managed_session_snapshots.values()
+    ]
+    if not usage_rows:
+        return None
+    totals: dict = {}
+    for key in ("input_tokens", "output_tokens", "cache_read_input_tokens",
+                "cache_creation_input_tokens", "list_cost_minor"):
+        values = [item[key] for item in usage_rows if key in item]
+        if values:
+            totals[key] = sum(values)
+    active_values = [item["active_seconds"] for item in usage_rows if "active_seconds" in item]
+    if active_values:
+        totals["active_seconds"] = sum(active_values)
+    tool_rows = [item["server_tool_use"] for item in usage_rows if "server_tool_use" in item]
+    if tool_rows:
+        totals["server_tool_use"] = {
+            key: sum(row.get(key, 0) for row in tool_rows)
+            for key in ("web_search_requests", "web_fetch_requests")
+        }
+    if "list_cost_minor" in totals:
+        totals["currency"] = "USD"
+    return totals or None
+
+
 def complete_execution(
     db: Session,
     *,
@@ -618,6 +707,11 @@ def complete_execution(
     attempt.heartbeat_at = now
     attempt.error_code = None
     attempt.error_message = None
+    db.flush()
+    aggregated_usage = _aggregate_provider_usage(db, execution.id)
+    if aggregated_usage is not None:
+        execution.result = dict(result)
+        execution.result["usage"] = aggregated_usage
     _sync_task_delegation(db, execution, "succeeded")
     _sync_plan_draft_execution(db, execution, "succeeded")
 
@@ -650,6 +744,7 @@ def fail_execution(
     error_code: str,
     error_message: str,
     retryable: bool = True,
+    provider_usage: dict | None = None,
     base_delay_seconds: int = 30,
     max_delay_seconds: int = 3600,
 ) -> tuple[Execution, ExecutionAttempt]:
@@ -670,6 +765,7 @@ def fail_execution(
 
     if not isinstance(retryable, bool):
         raise ValueError("retryable must be a boolean")
+    provider_usage = _validate_provider_usage(provider_usage)
     if (
         not isinstance(error_code, str)
         or not error_code.strip()
@@ -704,6 +800,10 @@ def fail_execution(
 
     execution.error_code = error_code
     execution.error_message = error_message
+    if provider_usage is not None:
+        usage_result = {"usage": provider_usage}
+        execution.result = usage_result
+        attempt.result = usage_result
 
     attempt.status = ExecutionAttemptStatus.failed
     attempt.finished_at = now
@@ -711,6 +811,10 @@ def fail_execution(
     attempt.heartbeat_at = now
     attempt.error_code = error_code
     attempt.error_message = error_message
+    db.flush()
+    aggregated_usage = _aggregate_provider_usage(db, execution.id)
+    if aggregated_usage is not None:
+        execution.result = {"usage": aggregated_usage}
 
     retry_scheduled = (
         retryable and execution.attempt_count < execution.max_attempts

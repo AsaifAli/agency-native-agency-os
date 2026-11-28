@@ -4,7 +4,7 @@
 
 The OS ships a curated, version-pinned library of reusable agent instructions in the open Agent Skills directory format. Skills are operating procedures and specialist knowledge; they are not identities, permissions, tools, workflows, or runtime sessions.
 
-The curated set contains 18 cross-functional skills for planning, engineering, Revenue, Delivery, finance, communication, governance and quality. It adapts useful patterns from Superpowers, Matt Pocock's skills, Everything Claude Code (ECC), Karpathy Guidelines, Ponytail, Anthropic's Agent Skills, and CodeRabbit's skills. The Claude Skills Hub is treated as a discovery index only. See skills/catalog.json for exact source revisions, licenses, intended use, and role recommendations.
+The curated set contains 24 cross-functional skills for planning, engineering, Revenue, Delivery, finance, communication, governance and quality. It adapts useful patterns from Superpowers, Matt Pocock's skills, Everything Claude Code (ECC), Karpathy Guidelines, Ponytail, Anthropic's Agent Skills, and CodeRabbit's skills. The Claude Skills Hub is treated as a discovery index only. See skills/catalog.json for exact source revisions, licenses, intended use, and role recommendations.
 
 ## What is included
 
@@ -14,6 +14,7 @@ The curated set contains 18 cross-functional skills for planning, engineering, R
 - Governance and runtime: secure-skill-admission, risk-and-policy-review and claude-runtime-engineering.
 - Revenue and client work: market-research-briefing, client-discovery-requirements, proposal-sow-drafting, client-communication-drafting, marketing-content-planning and finance-operations-analysis.
 - Delivery: project-delivery-coordination.
+- Learning and knowledge work: operational-learning-capture and agency-learning-loop define scoped evidence capture and controlled improvement; cowork-hybrid-operations defines the safe Cowork handoff surface.
 
 These are curated adaptations written for this repository, not wholesale mirrors of upstream skill repositories. Source revisions are pinned in the catalog. Review upstream licenses and notices again before importing any original scripts, hooks, assets, or verbatim skill content.
 
@@ -21,7 +22,7 @@ The 16 department charters and leadership/specialist profiles link to role-relev
 
 ## Runtime boundary
 
-The catalog is currently read-only and exposes skill metadata and instructions through authenticated organization-scoped GET endpoints. It does not assign skills to workforce members, create provider-side Claude skills, grant tools, start sessions, or enable autonomous execution.
+The catalog is currently read-only and exposes skill metadata and instructions through authenticated organization-scoped GET endpoints. The learning and Cowork skills are guidance only; they do not implement persistent memory, auto-assignment, provider-side skills, Cowork connectors or cross-product synchronization. It does not assign skills to workforce members, create provider-side Claude skills, grant tools, start sessions, or enable autonomous execution.
 
 Every entry is disabled by default, has an empty tool allowlist, and is limited to public/synthetic data until a founder-authorized assignment and runtime-specific policy path exists. A skill can recommend a tool but cannot authorize it. Backend authorization, Data Protection Gateway, Tenant Security Manager, approval checks, and audit remain authoritative.
 

@@ -10,6 +10,12 @@ on:
 permissions:
   contents: read
 
+# Push and pull_request events for the same head branch share one CI slot.
+# New commits cancel stale runs instead of letting obsolete suites pile up.
+concurrency:
+  group: agency-os-ci-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   backend:
     runs-on: ubuntu-latest
@@ -34,6 +40,10 @@ jobs:
       JWT_SECRET: ci-only-secret-not-used-outside-this-job-0123456789
       DATABASE_URL: sqlite:///./ci_agency_os.db
       AGENCY_OS_TEST_DATABASE_URL: postgresql+psycopg://agency_os:agency_os_test_password@localhost:5432/agency_os_worker_test
+      AGENCY_OS_TEST_RLS_ADMIN_DATABASE_URL: postgresql+psycopg://agency_os_migrator:local-only-test-migrator-password@localhost:5432/agency_os_worker_test
+      AGENCY_OS_TEST_RLS_DATABASE_URL: postgresql+psycopg://agency_os_test_app:local-only-test-app-password@localhost:5432/agency_os_worker_test
+      AGENCY_OS_TEST_MIGRATOR_DATABASE_URL: postgresql+psycopg://agency_os_migrator:local-only-test-migrator-password@localhost:5432/agency_os_worker_test
+      AGENCY_OS_TEST_RLS_WORKER_DATABASE_URL: postgresql+psycopg://agency_os_worker:local-only-test-worker-password@localhost:5432/agency_os_worker_test
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,12 +54,31 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
       - name: Install backend dependencies
-        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+        run: python -m pip install --upgrade pip && pip install -r requirements-dev.txt
+      - name: Build and verify hardened API/worker runtime image
+        env:
+          POSTGRES_PASSWORD: ci-bootstrap-password
+          POSTGRES_MIGRATOR_PASSWORD: ci-migrator-password
+          POSTGRES_APP_PASSWORD: ci-api-password
+          POSTGRES_WORKER_PASSWORD: ci-worker-password
+        run: |
+          cp .env.runtime.example .env.runtime
+          docker compose config --quiet
+          docker build --tag agency-os-runtime:ci .
+          docker run --rm --read-only --cap-drop=ALL --security-opt=no-new-privileges \
+            --pids-limit=256 --memory=1g --cpus=1.5 \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=128m \
+            --entrypoint python agency-os-runtime:ci -c 'import os; s=open("/proc/self/status").read(); m=[line.split() for line in open("/proc/mounts")]; root=next(x for x in m if x[1]=="/"); tmp=next(x for x in m if x[1]=="/tmp"); assert os.geteuid()==10001; assert "NoNewPrivs:\t1" in s; assert "CapEff:\t0000000000000000" in s; assert "ro" in root[3].split(","); assert {"noexec","nosuid","nodev"}.issubset(set(tmp[3].split(","))); open("/tmp/runtime-check","w").close()'
+      - name: Bootstrap isolated PostgreSQL test roles
+        env:
+          PGPASSWORD: agency_os_test_password
+        run: psql -h localhost -U agency_os -d agency_os_worker_test -v ON_ERROR_STOP=1 -f docker/postgres/test-init.sql
       - name: Validate migration graph
         run: alembic heads
       - name: Apply migrations to disposable PostgreSQL test database
         env:
-          DATABASE_URL: postgresql+psycopg://agency_os:agency_os_test_password@localhost:5432/agency_os_worker_test
+          DATABASE_URL: postgresql+psycopg://agency_os_migrator:local-only-test-migrator-password@localhost:5432/agency_os_worker_test
+          MIGRATION_DATABASE_URL: postgresql+psycopg://agency_os_migrator:local-only-test-migrator-password@localhost:5432/agency_os_worker_test
         run: alembic upgrade head
       - name: Compile Python source
         run: python -m compileall -q app migrations tests

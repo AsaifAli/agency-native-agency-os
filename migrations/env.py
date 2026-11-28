@@ -15,6 +15,7 @@ import app.operations_models  # noqa: F401 — register delivery operations meta
 import app.outreach.models  # noqa: F401 — register governed outbound communication metadata
 import app.workforce_models  # noqa: F401 — register governed workforce metadata
 import app.security_models  # noqa: F401 — register machine identity/session metadata
+import app.private_ops_models  # noqa: F401 — register governed knowledge, learning and business drafts
 
 
 config = context.config

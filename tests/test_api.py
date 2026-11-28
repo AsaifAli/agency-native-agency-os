@@ -281,14 +281,14 @@ def test_organization_owner_without_founder_authority_cannot_change_workspace_gr
     org_id = _org_id()
     denied_grant = client.post(
         f"/v1/orgs/{org_id}/workspaces/ws-test/grants",
-        params={"user_id": "someone-else"},
+        params={"user_id": "someone-else", "approval_id": "not-approved"},
         headers=headers,
     )
     assert denied_grant.status_code == 403
 
     denied_revoke = client.delete(
         f"/v1/orgs/{org_id}/workspaces/ws-test/grants/someone-else",
-        headers=headers,
+        params={"approval_id": "not-approved"}, headers=headers,
     )
     assert denied_revoke.status_code == 403
 
@@ -512,3 +512,165 @@ def test_outbox_summary_founder_response_is_scoped_and_payload_free():
     assert "payload" not in body
     assert "secret" not in str(body)
     assert "other_workspace" not in str(body)
+
+
+def test_execution_history_exposes_normalized_usage_without_transcript():
+    org_id, workspace_id, task_id, agent_id = _seed_execution_records("mock")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer dev:owner@test.local"}
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(email="owner@test.local").one()
+        execution = Execution(
+            org_id=org_id, workspace_id=workspace_id, task_id=task_id, agent_id=agent_id,
+            requested_by=user.id, idempotency_key=f"usage-api-{uuid.uuid4().hex}",
+            runtime="mock", data_class=DataClass.synthetic, status=ExecutionStatus.succeeded,
+        )
+        db.add(execution); db.flush(); execution_id = execution.id
+        execution.result = {
+            "provider": "claude_managed_agents", "external_run_id": "sesn_usage",
+            "status": "succeeded", "detail": "private transcript must not be exposed",
+            "usage": {"input_tokens": 120, "output_tokens": 45,
+                      "list_cost_minor": 7, "currency": "USD"},
+        }
+        db.commit()
+    finally:
+        db.close()
+    listed = client.get(f"/v1/orgs/{org_id}/executions", params={"workspace_id": workspace_id}, headers=headers)
+    assert listed.status_code == 200
+    item = next(row for row in listed.json() if row["id"] == execution_id)
+    assert item["provider_usage"] == {"input_tokens": 120, "output_tokens": 45,
+                                      "list_cost_minor": 7, "currency": "USD"}
+    assert "result" not in item and "detail" not in item
+
+
+def test_workspace_grant_mutation_requires_single_use_founder_approval():
+    from app.models import Approval, ApprovalStatus
+    from app.action_policy import workspace_access_resource_id
+
+    db = SessionLocal()
+    try:
+        org = db.query(Organization).filter_by(name="Test Org").one()
+        actor = User(email=f"permission-founder-{uuid.uuid4().hex}@test.local")
+        target = User(email=f"grant-target-{uuid.uuid4().hex}@test.local")
+        db.add_all([actor, target])
+        db.flush()
+        db.add_all([
+            Membership(org_id=org.id, user_id=actor.id, role=Role.viewer),
+            Membership(org_id=org.id, user_id=target.id, role=Role.viewer),
+            FounderAuthority(org_id=org.id, user_id=actor.id, grant_source="test_fixture"),
+        ])
+        resource_id = workspace_access_resource_id("ws-test", target.id, "grant")
+        approval = Approval(
+            org_id=org.id, workspace_id="ws-test",
+            action_type="security.permission.change", resource_id=resource_id,
+            idempotency_key=f"workspace-grant-{uuid.uuid4().hex}",
+            request_payload={"operation": "grant", "user_id": target.id},
+            status=ApprovalStatus.approved, requested_by=actor.id,
+            decided_by=actor.id,
+        )
+        db.add(approval)
+        db.commit()
+        org_id, target_id, approval_id, actor_id = org.id, target.id, approval.id, actor.id
+    finally:
+        db.close()
+
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer dev:{actor.email}"}
+    missing_approval = client.post(
+        f"/v1/orgs/{org_id}/workspaces/ws-test/grants",
+        params={"user_id": target_id, "approval_id": "missing-approval"},
+        headers=headers,
+    )
+    assert missing_approval.status_code == 403
+
+    granted = client.post(
+        f"/v1/orgs/{org_id}/workspaces/ws-test/grants",
+        params={"user_id": target_id, "approval_id": approval_id},
+        headers=headers,
+    )
+    assert granted.status_code == 200, granted.text
+
+    db = SessionLocal()
+    try:
+        consumed = db.get(Approval, approval_id)
+        grant = db.query(WorkspaceGrant).filter_by(
+            org_id=org_id, workspace_id="ws-test", user_id=target_id,
+        ).filter(WorkspaceGrant.revoked_at.is_(None)).one()
+        assert consumed.consumed_at is not None
+        assert consumed.consumed_by == actor_id
+        assert grant.granted_by == actor.id
+    finally:
+        db.close()
+
+    reused = client.post(
+        f"/v1/orgs/{org_id}/workspaces/ws-test/grants",
+        params={"user_id": target_id, "approval_id": approval_id},
+        headers=headers,
+    )
+    assert reused.status_code == 409
+
+
+def test_workspace_grant_revocation_consumes_matching_founder_approval():
+    from app.models import Approval, ApprovalStatus
+    from app.action_policy import workspace_access_resource_id
+
+    db = SessionLocal()
+    try:
+        org = db.query(Organization).filter_by(name="Test Org").one()
+        actor = User(email=f"permission-revoker-{uuid.uuid4().hex}@test.local")
+        target = User(email=f"revoke-target-{uuid.uuid4().hex}@test.local")
+        db.add_all([actor, target])
+        db.flush()
+        db.add_all([
+            Membership(org_id=org.id, user_id=actor.id, role=Role.viewer),
+            Membership(org_id=org.id, user_id=target.id, role=Role.viewer),
+            FounderAuthority(org_id=org.id, user_id=actor.id, grant_source="test_fixture"),
+            WorkspaceGrant(
+                org_id=org.id, workspace_id="ws-test", user_id=target.id,
+                granted_by=actor.id,
+            ),
+        ])
+        resource_id = workspace_access_resource_id("ws-test", target.id, "revoke")
+        approval = Approval(
+            org_id=org.id, workspace_id="ws-test",
+            action_type="security.permission.change", resource_id=resource_id,
+            idempotency_key=f"workspace-revoke-{uuid.uuid4().hex}",
+            request_payload={"operation": "revoke", "user_id": target.id},
+            status=ApprovalStatus.approved, requested_by=actor.id,
+            decided_by=actor.id,
+        )
+        db.add(approval)
+        db.commit()
+        org_id, target_id, approval_id = org.id, target.id, approval.id
+        actor_email = actor.email
+    finally:
+        db.close()
+
+    client = TestClient(app)
+    wrong_operation = client.post(
+        f"/v1/orgs/{org_id}/workspaces/ws-test/grants",
+        params={"user_id": target_id, "approval_id": approval_id},
+        headers={"Authorization": f"Bearer dev:{actor_email}"},
+    )
+    assert wrong_operation.status_code == 403
+
+    response = client.delete(
+        f"/v1/orgs/{org_id}/workspaces/ws-test/grants/{target_id}",
+        params={"approval_id": approval_id},
+        headers={"Authorization": f"Bearer dev:{actor_email}"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "revoked"
+
+    db = SessionLocal()
+    try:
+        consumed = db.get(Approval, approval_id)
+        grant = db.query(WorkspaceGrant).filter_by(
+            org_id=org_id, workspace_id="ws-test", user_id=target_id,
+        ).one()
+        assert consumed.consumed_at is not None
+        assert consumed.consumed_by is not None
+        assert grant.revoked_at is not None
+    finally:
+        db.close()

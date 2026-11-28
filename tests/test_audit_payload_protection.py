@@ -23,10 +23,14 @@ def test_record_event_redacts_personal_data_before_persistence():
         "lead",
         "lead-1",
         "workspace-1",
-        {"note": "Contact founder@example.com or +91 98765 43210"},
+        {
+            "note": "Contact founder@example.com or +91 98765 43210",
+            "contact_name": "test-person-fixture",
+        },
     )
 
     assert event is db.added[0]
+    assert event.payload["contact_name"] == "[REDACTED_PII_FIELD]"
     assert "founder@example.com" not in event.payload["note"]
     assert "+91 98765 43210" not in event.payload["note"]
     assert "[REDACTED_EMAIL]" in event.payload["note"]
@@ -80,3 +84,24 @@ def test_record_event_rejects_oversized_or_non_object_payloads():
         )
 
     assert db.added == []
+
+
+def test_record_event_rejects_resume_tokens_without_persisting_the_event():
+    db = RecordingSession()
+
+    with pytest.raises(DataProtectionBlocked) as error:
+        record_event(
+            db,
+            "org-1",
+            "user-1",
+            "execution.resume_requested",
+            "execution",
+            "execution-1",
+            "workspace-1",
+            {"resume_token": "resume-token-123", "token_prefix": "aos_mi_test."},
+        )
+
+    assert error.value.code == "SECRET_FIELD_DETECTED"
+    assert db.added == []
+
+

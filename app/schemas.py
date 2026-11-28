@@ -122,3 +122,4 @@ class ExecutionOut(BaseModel):
     finished_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    provider_usage: dict | None = None

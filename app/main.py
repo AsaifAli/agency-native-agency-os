@@ -69,7 +69,10 @@ from app.log_sanitization import configure_log_redaction
 configure_log_redaction()
 from app.security_models import BrowserSession  # noqa: F401 — register browser session metadata
 from app.policy import assert_managed_agents_eligible
-from app.action_policy import MANDATORY_APPROVAL_ACTIONS
+from app.action_policy import (
+    MANDATORY_APPROVAL_ACTIONS, require_approved_action,
+    workspace_access_resource_id,
+)
 from app.evaluation_service import (
     evaluate as evaluate_pack,
     catalog as evaluation_catalog,
@@ -83,19 +86,47 @@ from app.execution_service import (
 )
 
 
+_mcp_server = None
+_mcp_subapp = None
+_mcp_asgi_app = None
+if settings.agency_mcp_enabled or settings.claude_managed_mcp_enabled:
+    from app.mcp_server import create_mcp_gateway
+    _mcp_server, _mcp_subapp, _mcp_asgi_app = create_mcp_gateway()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if settings.app_env.lower() == "production":
         if settings.process_role != "api":
             raise RuntimeError("API process must use PROCESS_ROLE=api in production")
         verify_postgres_role(engine, expected_bypassrls=False, require_rls=True, expected_role="agency_os_app")
-    yield
+    if _mcp_server is not None:
+        # Mounted Starlette sub-app lifespans do not run automatically.
+        # Own the MCP session manager explicitly in the host API lifespan.
+        async with _mcp_server.session_manager.run():
+            yield
+    else:
+        yield
 
 
 app = FastAPI(
     title="Agency OS API", version="0.1.0",
     description="Founder-controlled Agency OS foundation", lifespan=lifespan,
 )
+if _mcp_asgi_app is not None:
+    # Generic OS integration endpoint for founder-provisioned Code, Cowork,
+    # and service identities. Keep the Claude-specific path as a compatibility
+    # alias; both mounts share the same authentication and Tool Gateway.
+    app.mount(
+        "/v1/integrations/agency/mcp/sessions",
+        _mcp_asgi_app,
+        name="agency-mcp",
+    )
+    app.mount(
+        "/v1/integrations/claude/mcp/sessions",
+        _mcp_asgi_app,
+        name="claude-managed-mcp-compat",
+    )
 
 configure_oidc()
 
@@ -431,7 +462,7 @@ def create_workspace(
 
 @app.post("/v1/orgs/{org_id}/workspaces/{workspace_id}/grants")
 def create_workspace_grant(
-    org_id: str, workspace_id: str, user_id: str,
+    org_id: str, workspace_id: str, user_id: str, approval_id: str,
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
     require_membership(org_id, p, db)
@@ -445,6 +476,13 @@ def create_workspace_grant(
         org_id=org_id, user_id=user_id
     ).first():
         raise HTTPException(404, "Active organization member not found")
+    require_approved_action(
+        db, approval_id=approval_id, org_id=org_id,
+        workspace_id=workspace_id, action_type="security.permission.change",
+        resource_id=workspace_access_resource_id(workspace_id, user_id, "grant"),
+        actor_user_id=p.user.id,
+        expected_request_payload={"operation": "grant", "user_id": user_id},
+    )
     try:
         if db.get_bind().dialect.name == "postgresql":
             grant_id = db.execute(
@@ -480,7 +518,7 @@ def create_workspace_grant(
 
 @app.delete("/v1/orgs/{org_id}/workspaces/{workspace_id}/grants/{user_id}")
 def revoke_workspace_grant(
-    org_id: str, workspace_id: str, user_id: str,
+    org_id: str, workspace_id: str, user_id: str, approval_id: str,
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
     require_membership(org_id, p, db)
@@ -489,6 +527,13 @@ def revoke_workspace_grant(
         workspace = db.query(Workspace).filter_by(org_id=org_id, id=workspace_id).first()
         if workspace is None:
             raise HTTPException(404, "Workspace not found")
+    require_approved_action(
+        db, approval_id=approval_id, org_id=org_id,
+        workspace_id=workspace_id, action_type="security.permission.change",
+        resource_id=workspace_access_resource_id(workspace_id, user_id, "revoke"),
+        actor_user_id=p.user.id,
+        expected_request_payload={"operation": "revoke", "user_id": user_id},
+    )
     try:
         if db.get_bind().dialect.name == "postgresql":
             revoked = db.execute(
@@ -507,9 +552,12 @@ def revoke_workspace_grant(
                 record_event(db, org_id, p.user.id, "workspace.access_revoked",
                              "workspace_grant", grant.id, workspace_id,
                              {"user_id": user_id})
+        if not revoked:
+            # A no-op must not burn the one-time approval or leave a consumption event.
+            db.rollback()
+            return {"workspace_id": workspace_id, "user_id": user_id, "status": "not_active"}
         db.commit()
-        return {"workspace_id": workspace_id, "user_id": user_id,
-                "status": "revoked" if revoked else "not_active"}
+        return {"workspace_id": workspace_id, "user_id": user_id, "status": "revoked"}
     except Exception:
         db.rollback()
         raise
@@ -1169,6 +1217,10 @@ app.include_router(skills_router)
 # Lightweight service playbooks, scope control, time and project cost operations.
 from app.operations_routes import router as operations_router
 app.include_router(operations_router)
+
+# Workspace-governed knowledge, source-linked business drafts and founder snapshots.
+from app.private_ops_routes import router as private_ops_router
+app.include_router(private_ops_router)
 
 
 # Governed outbound email preparation, approval and suppression (no provider sends).

@@ -1,5 +1,6 @@
 
 from datetime import datetime, timezone
+import uuid
 
 from fastapi import HTTPException
 from sqlalchemy import update
@@ -25,6 +26,52 @@ MANDATORY_APPROVAL_ACTIONS = {
 }
 
 
+def workspace_access_resource_id(workspace_id: str, user_id: str, operation: str) -> str:
+    """Stable, opaque resource key bound to one grant or revoke operation."""
+    if operation not in {"grant", "revoke"}:
+        raise ValueError("Workspace access operation must be grant or revoke")
+    return str(uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"agency-os:workspace-access:v1:{operation}:{workspace_id}:{user_id}",
+    ))
+
+
+def machine_identity_provision_resource_id(
+    workspace_id: str, subject_type: str, subject_id: str, name: str,
+) -> str:
+    """Stable resource key for a specific machine identity provisioning intent."""
+    return str(uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"agency-os:machine-identity:v1:create:{workspace_id}:{subject_type}:{subject_id}:{name.strip()}",
+    ))
+
+
+def machine_identity_revocation_resource_id(identity_id: str) -> str:
+    """Stable resource key for revoking one machine identity."""
+    return str(uuid.uuid5(
+        uuid.NAMESPACE_URL, f"agency-os:machine-identity:v1:revoke:{identity_id}",
+    ))
+
+
+def workforce_capability_resource_id(
+    workspace_id: str, member_id: str, capability_key: str, operation: str,
+) -> str:
+    """Stable resource key for one workforce capability configuration or enablement."""
+    if operation not in {"configure", "enable"}:
+        raise ValueError("Workforce capability operation must be configure or enable")
+    return str(uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"agency-os:workforce-capability:v1:{operation}:{workspace_id}:{member_id}:{capability_key}",
+    ))
+
+
+def workforce_member_activation_resource_id(workspace_id: str, member_id: str) -> str:
+    """Stable resource key for activating one workspace workforce member."""
+    return str(uuid.uuid5(
+        uuid.NAMESPACE_URL, f"agency-os:workforce-member:v1:activate:{workspace_id}:{member_id}",
+    ))
+
+
 def is_approval_required(action_type: str) -> bool:
     return action_type in MANDATORY_APPROVAL_ACTIONS
 
@@ -38,6 +85,7 @@ def require_approved_action(
     action_type: str,
     resource_id: str,
     actor_user_id: str,
+    expected_request_payload: dict | None = None,
 ) -> Approval:
     """Validate and consume an approval within the caller's transaction."""
 
@@ -94,6 +142,9 @@ def require_approved_action(
             status_code=403,
             detail="Approval does not authorize this action",
         )
+
+    if expected_request_payload is not None and approval.request_payload != expected_request_payload:
+        raise HTTPException(403, detail="Approval payload does not match the requested action")
 
     if approval.status != ApprovalStatus.approved:
         raise HTTPException(

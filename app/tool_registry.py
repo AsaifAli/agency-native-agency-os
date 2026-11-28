@@ -1,14 +1,16 @@
 """Versioned, code-owned allowlist of executable OS tools."""
 from dataclasses import dataclass
 import ipaddress
+from datetime import datetime, timezone
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import text
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from sqlalchemy import and_, func, or_, text
 from sqlalchemy.orm import Session
 
 from app.domain_models import LeadResearchDraft
+from app.private_ops_models import KnowledgeItem
 
 
 class HealthReadInput(BaseModel):
@@ -82,6 +84,40 @@ class LeadResearchCaptureOutput(BaseModel):
     status: Literal["pending_review"]
 
 
+class WorkspaceKnowledgeSearchInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    query: str | None = Field(default=None, min_length=2, max_length=160)
+    key: str | None = Field(default=None, min_length=2, max_length=160)
+    limit: int = Field(default=10, ge=1, le=20)
+
+    @model_validator(mode="after")
+    def require_search_term(self):
+        if not self.query and not self.key:
+            raise ValueError("A query or exact knowledge key is required")
+        if self.query is not None:
+            self.query = self.query.strip()
+            if len(self.query) < 2:
+                raise ValueError("Query must contain at least two non-space characters")
+        return self
+
+
+class WorkspaceKnowledgeItemOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    key: str
+    version: int
+    title: str
+    content: str
+    source_type: str
+    source_reference: str
+    classification: Literal["public"]
+
+
+class WorkspaceKnowledgeSearchOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[WorkspaceKnowledgeItemOutput]
+
+
 @dataclass(frozen=True)
 class ToolSpec:
     key: str
@@ -98,6 +134,19 @@ class ToolSpec:
 
 
 TOOLS = {
+    "workspace.knowledge.search": ToolSpec(
+        key="workspace.knowledge.search",
+        provider_name="os_workspace_knowledge_search",
+        version="1.0.0",
+        description="Search approved, workspace-wide public knowledge. Client-linked, internal, confidential, restricted, draft and retired knowledge is never returned.",
+        risk_level="read_only",
+        allowed_data_classes=("public",),
+        required_action="knowledge.read",
+        minimum_scope="workspace",
+        requires_approval=False,
+        input_model=WorkspaceKnowledgeSearchInput,
+        output_model=WorkspaceKnowledgeSearchOutput,
+    ),
     "system.health.read": ToolSpec(
         key="system.health.read",
         provider_name="os_system_health_read",
@@ -173,6 +222,55 @@ def execute_tool(
     idempotency_key: str,
 ) -> dict:
     """Execute only a registered in-process adapter; never dispatch arbitrary URLs."""
+    if spec.key == "workspace.knowledge.search":
+        now = datetime.now(timezone.utc)
+        approved_public_scope = [
+            KnowledgeItem.org_id == identity.org_id,
+            KnowledgeItem.workspace_id == identity.workspace_id,
+            KnowledgeItem.classification == "public",
+            KnowledgeItem.status == "approved",
+            KnowledgeItem.client_id.is_(None),
+            KnowledgeItem.effective_from <= now,
+            or_(KnowledgeItem.effective_until.is_(None), KnowledgeItem.effective_until >= now),
+        ]
+        latest_approved_versions = (
+            db.query(
+                KnowledgeItem.key.label("knowledge_key"),
+                func.max(KnowledgeItem.version).label("latest_version"),
+            )
+            .filter(*approved_public_scope)
+            .group_by(KnowledgeItem.key)
+            .subquery()
+        )
+        statement = db.query(KnowledgeItem).join(
+            latest_approved_versions,
+            and_(
+                KnowledgeItem.key == latest_approved_versions.c.knowledge_key,
+                KnowledgeItem.version == latest_approved_versions.c.latest_version,
+            ),
+        ).filter(*approved_public_scope)
+        if payload.get("key"):
+            statement = statement.filter(KnowledgeItem.key == payload["key"])
+        if payload.get("query"):
+            term = f"%{payload['query']}%"
+            statement = statement.filter(or_(
+                KnowledgeItem.key.ilike(term),
+                KnowledgeItem.title.ilike(term),
+                KnowledgeItem.content.ilike(term),
+            ))
+        rows = statement.order_by(
+            KnowledgeItem.key.asc(), KnowledgeItem.version.desc()
+        ).limit(payload["limit"]).all()
+        return {"items": [
+            {
+                "id": row.id, "key": row.key, "version": row.version,
+                "title": row.title, "content": row.content,
+                "source_type": row.source_type,
+                "source_reference": row.source_reference,
+                "classification": "public",
+            }
+            for row in rows
+        ]}
     if spec.key == "system.health.read":
         db.execute(text("SELECT 1"))
         return {"service": "agency-os-api", "database": "ok"}

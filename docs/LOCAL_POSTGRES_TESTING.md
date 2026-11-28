@@ -60,6 +60,8 @@ stack.
 - The tests clean up only rows created by their own unique test IDs. If a test
   process is forcibly terminated, the entire disposable volume can be removed
   using the cleanup command above.
-- The worker role currently has BYPASSRLS in the application deployment
-  configuration. Replacing this with narrowly scoped database functions and
-  tenant-scoped worker operations remains a production security blocker.
+- The migrations configure `agency_os_worker` as non-superuser `NOBYPASSRLS`.
+  Worker data access is capability-scoped, and migration `d5e7f9a1c3b5` narrows
+  its effective public-table/column privileges. Verify the exact role attributes,
+  grants, ownership and function ACLs in this isolated PostgreSQL run before
+  considering a deployment. This test does not certify any hosted environment.
