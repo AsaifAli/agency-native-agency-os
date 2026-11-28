@@ -298,3 +298,50 @@ def create_execution(
     )
 
     return execution
+
+def current_execution_authorization_error(
+    db: Session,
+    execution: Execution,
+    agent: Agent,
+) -> tuple[str, str] | None:
+    """Recheck live kill switches and capability grants immediately before runtime start."""
+    if not agent.enabled:
+        return ("AGENT_DISABLED", "Agent was disabled after this execution was queued.")
+
+    member = db.query(WorkforceMember).filter_by(
+        org_id=execution.org_id,
+        workspace_id=execution.workspace_id,
+        agent_id=agent.id,
+    ).one_or_none()
+    if member is None:
+        return None  # Legacy non-workforce agents have no WorkforceCapability record.
+    if member.status != "active" or member.is_founder_reserved:
+        return (
+            "WORKFORCE_MEMBER_INACTIVE",
+            "Workforce membership was disabled or reserved after this execution was queued.",
+        )
+
+    required_actions = (
+        {execution.required_capability_action}
+        if execution.required_capability_action
+        else {"task.execute", "research.execute", "report.generate"}
+    )
+    grants = db.query(WorkforceCapability).filter_by(
+        org_id=execution.org_id,
+        workspace_id=execution.workspace_id,
+        member_id=member.id,
+        enabled=True,
+    ).all()
+    eligible = any(
+        execution.data_class.value in (grant.allowed_data_classes or [])
+        and bool(set(grant.allowed_actions or []) & required_actions)
+        and not (grant.tool_allowlist or [])
+        for grant in grants
+    )
+    if not eligible:
+        return (
+            "WORKFORCE_CAPABILITY_REVOKED",
+            "No current enabled capability authorizes this execution's action and data class.",
+        )
+    return None
+
