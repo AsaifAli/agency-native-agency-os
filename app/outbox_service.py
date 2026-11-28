@@ -62,6 +62,10 @@ def _safe_error(value: Exception | str) -> str:
 def _lease_is_active(row: OutboxEvent, *, now: datetime | None = None) -> bool:
     """Return whether a processing row still has a live lease.
 
+    The persisted attempt count is also the claim-generation fencing token.
+    This prevents an old delivery from acting after the same worker ID reclaims
+    the event and obtains a new lease.
+
     Normalize SQLite's naive DateTime values as UTC for deterministic tests;
     PostgreSQL DateTime(timezone=True) values remain timezone-aware.
     """
@@ -186,6 +190,7 @@ def _acknowledge(session_factory, *, message: OutboxMessage, worker_id: str) -> 
             row is None
             or row.status != "processing"
             or row.claimed_by != worker_id
+            or row.attempts != message.attempts
             or not _lease_is_active(row)
         ):
             raise OutboxOwnershipError("Outbox delivery lease is no longer owned by this worker")
@@ -207,6 +212,7 @@ def _record_failure(
             row is None
             or row.status != "processing"
             or row.claimed_by != worker_id
+            or row.attempts != message.attempts
             or not _lease_is_active(row)
         ):
             # The lease expired or ownership changed; stale workers cannot mutate it.
