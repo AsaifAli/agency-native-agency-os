@@ -21,5 +21,5 @@ CREATE ROLE agency_os_worker LOGIN PASSWORD 'local-only-test-worker-password'
 -- the application credential itself.
 CREATE ROLE agency_os_test_app LOGIN PASSWORD 'local-only-test-app-password'
   NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
-GRANT agency_os_app TO agency_os_test_app;
+GRANT agency_os_app TO agency_os_test_app WITH INHERIT TRUE;
 ALTER ROLE agency_os_test_app INHERIT;
