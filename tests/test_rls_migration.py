@@ -395,3 +395,6 @@ def test_qa_issue_table_has_workspace_rls_and_no_worker_access():
     assert "REVOKE DELETE ON TABLE public.qa_issues FROM agency_os_app" in source
     assert "fk_qa_issues_task_scope" in source
     assert "fk_qa_issues_retest_evaluation_scope" in source
+    assert "qa_issue_transition_guard" in source
+    assert "enforce_qa_issue_transition" in source
+    assert "passing task-linked post-fix evaluation" in source
