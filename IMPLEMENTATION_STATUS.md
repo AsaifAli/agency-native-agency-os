@@ -1,28 +1,29 @@
 # Agency OS — authoritative implementation status
 
-**Last reconciled:** 2026-11-27  
-**Source of truth:** `main` at `c5ec7b462835f592edb0db1a31564401423e3467`
-**Latest merged PR:** [#65 — System, Light and Dark dashboard themes](https://github.com/AsaifAli/agency-native-agency-os/pull/65).
-**Consolidated security work:** PR #68 combines bounded tool-session policy and Data Protection Gateway hardening. Founder-reported verification on the earlier code/test head: 530 Python tests passed (20 environment-gated skips, 2 warnings); expanded isolated PostgreSQL 16 suite passed (106 tests, 2 warnings). Subsequent independent-review fixes on PR #68 require focused and full reruns.
-**Release posture:** **NO-GO for production.** Implementation and isolated tests do not establish production readiness.
+**Last reconciled:** 2026-11-28  
+**Candidate source of truth:** `integration/agency-os-consolidated-2026-11` at `4052212c28a125a46dc2f727d726ebfef7048eec`.  
+**Review PR:** [#71 — Consolidated Agency OS integration](https://github.com/AsaifAli/agency-native-agency-os/pull/71), open and mergeable against `main`.  
+**Current main:** `c5ec7b462835f592edb0db1a31564401423e3467`; PR #71 has not been merged.  
+**Included work:** PR #68 security hardening and worker/RLS capability changes, PR #69 hosted-provider-only operating model, and PR #70 Private Operations foundation are reconciled into the PR #71 candidate.  
+**Release posture:** **NO-GO for production.** Passing CI and isolated database tests do not establish production readiness.
 
-This file is the current status summary. Historical branch comparisons, test logs and superseded PR checkpoints should not be treated as current blockers. See `docs/CONSOLIDATION_EXECUTION_LEDGER.md` for the active sequence and `docs/PRODUCTION_GRADE_MASTER_CHECKLIST.md` for the full release gates.
+This file describes the consolidated candidate, not the current `main` branch. Historical branch comparisons and superseded PR checkpoints are not active blockers. See `docs/CONSOLIDATION_EXECUTION_LEDGER.md` for the integration record and `docs/PRODUCTION_GRADE_MASTER_CHECKLIST.md` for release gates.
 
-## Verification evidence on the merged candidate
+## Verification evidence on the consolidated candidate
 
 | Check | Recorded result | Qualification |
 |---|---|---|
-| Backend pytest suite | **483 passed, 19 skipped, 2 warnings** | PR #58 baseline; PR #65 was frontend-only. PR #68 changes backend security code, so this result must be rerun before merging #68. |
-| Isolated PostgreSQL 16 Compose suite | **105 passed, 2 warnings** | PR #58 baseline in a disposable isolated stack; rerun on the latest PR #68 head before treating it as current evidence. |
-| Frontend ESLint | 0 errors; 7 existing React Hook dependency warnings | Fresh run after PR #65; no warnings were suppressed. |
-| Frontend TypeScript | Passed | Fresh run after PR #65. |
-| Next.js production build | Passed; 32 static pages generated | Fresh run after PR #65. |
-| Dashboard theme browser checks | Passed | System/light/dark selection, persistence across reload, live OS light↔dark changes and 320px overflow check. |
-| PR #68 security regressions | Partial | Earlier DPG harnesses passed; latest audit-token, scoped resume-metadata and mandatory tool-session policy regressions were added after that run and still require execution. |
-| Consolidated security full Python pytest suite | **530 passed, 20 skipped, 2 warnings** (founder-reported on earlier code/test head) | PR #68 has since received independent-review fixes; rerun focused and full suites on the final head before merge. |
-| GitHub Actions | Not run | Intentionally ignored per founder direction. |
+| Backend pytest + PostgreSQL 16 integration | **576 passed, 0 skipped, 2 warnings** | CI run [46132870973](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46132870973) on candidate SHA `4052212c28a125a46dc2f727d726ebfef7048eec`. |
+| Human tenant/workspace RLS | Passed in live PostgreSQL 16 CI | Dedicated `agency_os_test_app` NOBYPASSRLS login; cross-org/workspace access, grants/revocation and pooled-context behavior executed. |
+| Worker capability boundary | Passed in live PostgreSQL 16 CI | Actual `agency_os_worker` NOBYPASSRLS login; capability, forged-GUC, direct-table/function privilege and scope checks executed. |
+| Browser-session retention, orchestration-link RLS, outcome isolation and audit immutability | Passed in live PostgreSQL 16 CI | Previously skipped suites now execute; append-only evidence is preserved by fixtures. |
+| PostgreSQL role bootstrap and migration upgrade | Passed | PostgreSQL 16 role setup, Alembic graph validation, full upgrade to head and Python compilation passed. Disposable CI database only. |
+| Frontend TypeScript and Next.js production build | Passed | CI run above; no frontend lint result is claimed by this workflow. |
+| Pull-request CI | Passed | [Run 46132876408](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46132876408) completed successfully. |
+| Live Claude/Anthropic provider compatibility | Not verified | No live provider provisioning, credentials or production provider execution claimed. |
+| Production migration, deployment, restore drill or compliance assessment | Not performed | Requires separate staging/production controls and explicit founder go/no-go. |
 
-No production database migration, production deployment, external provider activation, client-data operation or compliance assessment is claimed.
+The two backend warnings are dependency deprecations (Starlette/httpx and Authlib/httpx); they did not fail CI. No production database migration, production deployment, external provider activation, client-data operation or compliance assessment is claimed.
 
 ## Mission and architecture
 
@@ -57,7 +58,7 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 - Workspace-scoped execution history and execution trace APIs; Founder Console Processes and Monitoring views.
 
 ### Audit, privacy and retention
-- Audit payloads reject invalid/oversized structures, detect known credential-bearing fields fail-closed and redact supported free-text/structured PII. PR #68 removes the generic audit exemption for `resume_token`; resume identifiers remain validated only in the narrowly scoped execution-control boundary. Latest audit-token and worker-function privilege regressions are added but await rerun.
+- Audit payloads reject invalid/oversized structures, detect known credential-bearing fields fail-closed and redact supported free-text/structured PII. The consolidated candidate removes the generic audit exemption for `resume_token`; resume identifiers remain validated only in the narrowly scoped execution-control boundary. Audit-token and worker-function privilege regressions passed in CI run `46132870973`.
 - PostgreSQL audit events reject UPDATE/DELETE by application and worker roles. This is append-only protection, **not cryptographic tamper-evidence**; hash chaining or externally anchored integrity checkpoints are not implemented.
 - Browser sessions store a digest of the JWT identifier, support server-side revocation and rotation, and are pruned in bounded batches.
 - Agent sessions are constrained by machine identity data-class grants and cannot outlive the identity.
@@ -95,7 +96,7 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 - Complete a route/function/role/grant/ownership inventory for RLS, SECURITY DEFINER functions and pooled-connection context; mapped ORM tables are now checked against the required RLS inventory, but global `users` identity-table access still needs separate review.
 - Complete negative cross-workspace tests for every API and nested object; organization membership must not substitute for exact workspace grant.
 - Prove isolation across current browser/agent sessions, tool outputs and logs, then across files, object storage, caches, search/RAG and generated artifacts when those paths are implemented. No file upload/extraction, object storage, RAG ingestion or business-data cache path currently exists; the signed website lead intake is a fixed-workspace CRM ingestion and does not call an AI provider.
-- Complete Data Protection Gateway classification/minimization/PII-secret detection/redaction for every ingestion, file extraction, RAG, connector, provider callback, tool, log, cache and artifact path. Current implemented provider-facing boundaries cover Managed Agents requests/results/callbacks, Tool Gateway input/output, audit payloads and structured logs. PR #68 adds structured credential-key rejection, structured PII-field redaction and provider event-ID protection; it remains draft pending full tests. No file upload/extraction, object storage, RAG ingestion or general connector ingestion path is currently implemented. There is no automated content classifier; current runtime eligibility is a conservative data-class/authorization gate.
+- Complete Data Protection Gateway classification/minimization/PII-secret detection/redaction for every ingestion, file extraction, RAG, connector, provider callback, tool, log, cache and artifact path. Current implemented provider-facing boundaries cover Managed Agents requests/results/callbacks, Tool Gateway input/output, audit payloads and structured logs. The consolidated security work adds structured credential-key rejection, structured PII-field redaction and provider event-ID protection; the current regression suite passed in CI run `46132870973`. No file upload/extraction, object storage, RAG ingestion or general connector ingestion path is currently implemented. There is no automated content classifier; current runtime eligibility is a conservative data-class/authorization gate.
 - Enforce per-client policy and runtime eligibility before any provider receives data.
 - Complete scoped credential rotation, egress allowlists/SSRF defenses, sandbox isolation, resource limits, malware-safe file processing and secrets-history review.
 - Add cryptographic audit integrity checkpoints; current append-only trigger alone is not cryptographic tamper-evidence.
@@ -126,8 +127,8 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 
 ## Immediate work order
 
-1. Exact-main stabilization and frontend checks: **complete for PR #65**. Re-run backend and PostgreSQL suites after PR #68 because it changes security code.
-2. Complete tenant/RLS and Data Protection Gateway inventory and negative tests; PR #68 is the current draft hardening bundle.
+1. Consolidated candidate stabilization: **CI complete for PR #71 head `4052212c`**; exact-main verification remains pending until the PR is merged.
+2. Continue tenant/RLS and Data Protection Gateway inventory and route-by-route negative tests. Live PostgreSQL 16 human/worker isolation suites now execute in CI; broader API/object/artifact coverage remains open.
 3. Artifact/object storage isolation and retention lifecycle.
 4. OS MCP adapter over the Tool Gateway, with all grants fail-closed.
 5. Worker/outbox recovery and reconciliation acceptance.
@@ -153,7 +154,7 @@ npx tsc --noEmit
 npm run build
 cd ..
 
-# Focused security regressions added in PR #68
+# Focused security regressions in the consolidated PR #71 candidate
 python -m pytest -q tests/test_data_protection.py tests/test_log_sanitization.py tests/test_audit_payload_protection.py tests/test_tool_gateway_policy.py tests/test_machine_identity.py tests/test_rls_migration.py
 
 # Full backend suite
@@ -166,7 +167,7 @@ docker compose -p agency-os-pg-test \
   --exit-code-from postgres-tests postgres-tests
 ```
 
-Then run browser critical-flow/accessibility tests and verify the exact merged commit. PR #68 remains draft until the focused, full and PostgreSQL suites pass. Live provider credentials, DNS, object storage, email/webhooks, staging deployment and backup restore require founder-environment access and will be presented as a final checklist. Production migration/deployment and destructive data actions require separate explicit approval.
+Then run browser critical-flow/accessibility tests and verify the exact merged commit. PR #71 remains open for review; the current candidate CI is green, but merge and production release remain separate decisions. Live provider credentials, DNS, object storage, email/webhooks, staging deployment and backup restore require founder-environment access and will be presented as a final checklist. Production migration/deployment and destructive data actions require separate explicit approval.
 
 
 ## Latest founder verification update — 2026-11-27
@@ -176,7 +177,7 @@ Then run browser critical-flow/accessibility tests and verify the exact merged c
 - The user's local uncommitted `.gitignore`, `frontend/next-env.d.ts` and generated `frontend/tsconfig.tsbuildinfo` were observed and not modified. The pre-existing local PostgreSQL volume remains out of scope and untouched.
 
 
-## Latest founder verification update — 2026-11-27 (PR #68 head 41ffdd29)
+## Historical founder verification update — 2026-11-27 (pre-consolidation PR #68 head 41ffdd29)
 
 Founder-reported test results on the exact PR head after fast-forwarding to `41ffdd29a8968e6b7f62d3ea9057f78296c6f5b3`:
 
