@@ -83,19 +83,37 @@ from app.execution_service import (
 )
 
 
+_mcp_server = None
+_mcp_subapp = None
+_mcp_asgi_app = None
+if settings.claude_managed_mcp_enabled:
+    from app.mcp_server import create_mcp_gateway
+    _mcp_server, _mcp_subapp, _mcp_asgi_app = create_mcp_gateway()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if settings.app_env.lower() == "production":
         if settings.process_role != "api":
             raise RuntimeError("API process must use PROCESS_ROLE=api in production")
         verify_postgres_role(engine, expected_bypassrls=False, require_rls=True, expected_role="agency_os_app")
-    yield
+    if _mcp_subapp is not None:
+        async with _mcp_subapp.router.lifespan_context(_mcp_subapp):
+            yield
+    else:
+        yield
 
 
 app = FastAPI(
     title="Agency OS API", version="0.1.0",
     description="Founder-controlled Agency OS foundation", lifespan=lifespan,
 )
+if _mcp_asgi_app is not None:
+    app.mount(
+        "/v1/integrations/claude/mcp/sessions",
+        _mcp_asgi_app,
+        name="claude-managed-mcp",
+    )
 
 configure_oidc()
 
