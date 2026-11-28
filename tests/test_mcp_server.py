@@ -210,7 +210,11 @@ def test_streamable_http_mcp_list_and_call_delegate_to_os_tool_gateway(monkeypat
     host_app.mount("/mcp", wrapped)
 
     with TestClient(host_app, base_url="https://mcp.example.test") as client:
-        auth = {"Authorization": "Bearer aos_ms_test", "Origin": "https://mcp.example.test"}
+        auth = {
+            "Authorization": "Bearer aos_ms_test",
+            "Origin": "https://mcp.example.test",
+            "Accept": "application/json, text/event-stream",
+        }
         initialized = client.post(
             f"/mcp/{SESSION_ID}",
             headers=auth,
