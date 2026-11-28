@@ -118,6 +118,7 @@ This repository is a substantial development foundation, **not a production-read
 
 ## Security and identity
 
+- [Execution sandbox design and acceptance gates](docs/EXECUTION_SANDBOX_DESIGN.md) — current boundary, target isolation architecture and release evidence.
 - [20-point pre-deploy security audit](docs/PRE_DEPLOY_SECURITY_AUDIT_20_POINT.md)
 - [Authentik OIDC setup and configuration](docs/AUTHENTIK_SETUP.md)
 - [External setup checklist](docs/EXTERNAL_SETUP_CHECKLIST.md)
