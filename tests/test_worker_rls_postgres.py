@@ -92,15 +92,13 @@ def test_worker_is_nobypassrls_and_scoped_to_one_workspace():
                 event_type="auth.browser_session_pruned", resource_id=old_session.id
             ).count() == 1
     finally:
+        # Audit rows are append-only and retain FK references to the fixture principals/workspaces.
+        # Keep those synthetic records in the disposable CI database; remove only mutable dependents.
         with Admin() as db:
             db.query(Task).filter(Task.org_id.in_([org_a.id, org_b.id])).delete(synchronize_session=False)
             if old_session is not None:
-                db.query(AuditEvent).filter(AuditEvent.resource_id == old_session.id).delete(synchronize_session=False)
                 db.query(BrowserSession).filter(BrowserSession.id == old_session.id).delete(synchronize_session=False)
             db.query(Membership).filter(Membership.org_id == org_a.id).delete(synchronize_session=False)
-            db.query(Workspace).filter(Workspace.org_id.in_([org_a.id, org_b.id])).delete(synchronize_session=False)
-            db.query(Organization).filter(Organization.id.in_([org_a.id, org_b.id])).delete(synchronize_session=False)
-            db.query(User).filter(User.id == user.id).delete(synchronize_session=False)
             db.commit()
         worker_engine.dispose()
         admin_engine.dispose()
