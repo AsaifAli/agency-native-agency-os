@@ -12,7 +12,7 @@ type Sender = { id: string; display_name: string; email_address: string; status:
 type Message = { id: string; sender_id: string; contact_id: string; lead_id: string | null; recipient: string; subject: string; body: string; status: string; approval_id: string | null; stop_reason: string; queued_at: string | null; sent_at: string | null; provider_message_id: string | null };
 type Block = { id: string; contact_id: string; channel: string; status: string; reason: string; note: string; recorded_at: string };
 type Consent = { id: string; contact_id: string; channel: string; status: string; recorded_at: string };
-type Approval = { id: string; workspace_id: string; action_type: string; resource_id: string; status: string; request_payload: Record<string, unknown> };
+type Approval = { id: string; workspace_id: string; action_type: string; resource_id: string; status: string; request_payload: Record<string, unknown>; consumed_at: string | null };
 function contactLabel(item: Contact) { return [item.first_name,item.last_name].filter(Boolean).join(" ") + " · " + item.email; }
 
 export default function OutreachPage() {
@@ -110,7 +110,7 @@ export default function OutreachPage() {
 
   async function requestOrFindApproval(resourceId:string,requestPayload:Record<string,unknown>):Promise<string|null> {
     const matches=approvals.filter(item=>item.action_type==="external_communication.sensitive"&&item.resource_id===resourceId&&JSON.stringify(item.request_payload)===JSON.stringify(requestPayload));
-    const approved=matches.find(item=>item.status==="approved");
+    const approved=matches.find(item=>item.status==="approved"&&!item.consumed_at);
     if(approved)return approved.id;
     if(matches.some(item=>item.status==="pending")){
       setSuccess("A matching approval is already pending. Review it in Founder Approvals, then return here and retry.");
