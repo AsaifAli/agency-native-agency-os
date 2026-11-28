@@ -6,6 +6,10 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth import Principal, get_principal, require_founder_authority, require_workspace_access_from_context
+from app.action_policy import (
+    require_approved_action, machine_identity_provision_resource_id,
+    machine_identity_revocation_resource_id,
+)
 from app.audit import record_event
 from app.db import get_db
 from app.data_protection import DataProtectionBlocked, sanitize_text
@@ -80,6 +84,7 @@ class MachineSessionCredentialCreate(BaseModel):
 def create_machine_identity(
     org_id: str,
     body: MachineIdentityCreate,
+    approval_id: str,
     db: Session = Depends(get_db),
     principal: Principal = Depends(get_principal),
 ):
@@ -91,6 +96,23 @@ def create_machine_identity(
             raise HTTPException(404, "Agent not found")
         if not subject.enabled:
             raise HTTPException(409, "Agent must be enabled before provisioning a machine identity")
+    expected_payload = {
+        "operation": "create",
+        "name": body.name,
+        "subject_type": body.subject_type,
+        "subject_id": body.subject_id,
+        "scopes": sorted(body.scopes),
+        "allowed_data_classes": sorted(body.allowed_data_classes),
+        "ttl_days": body.ttl_days,
+    }
+    require_approved_action(
+        db, approval_id=approval_id, org_id=org_id,
+        workspace_id=body.workspace_id, action_type="security.permission.change",
+        resource_id=machine_identity_provision_resource_id(
+            body.workspace_id, body.subject_type, body.subject_id, body.name,
+        ), actor_user_id=principal.user.id,
+        expected_request_payload=expected_payload,
+    )
     raw_secret, digest, _ = issue_machine_credential()
     identity = MachineIdentity(
         org_id=org_id, workspace_id=body.workspace_id, name=body.name.strip(),
@@ -121,7 +143,7 @@ def create_machine_identity(
 
 @router.post("/v1/orgs/{org_id}/machine-identities/{identity_id}/revoke")
 def revoke_machine_identity(
-    org_id: str, identity_id: str, workspace_id: str,
+    org_id: str, identity_id: str, workspace_id: str, approval_id: str,
     db: Session = Depends(get_db),
     principal: Principal = Depends(get_principal),
 ):
@@ -132,6 +154,13 @@ def revoke_machine_identity(
     ).with_for_update().first()
     if identity is None:
         raise HTTPException(404, "Machine identity not found")
+    require_approved_action(
+        db, approval_id=approval_id, org_id=org_id,
+        workspace_id=workspace_id, action_type="security.permission.change",
+        resource_id=machine_identity_revocation_resource_id(identity.id),
+        actor_user_id=principal.user.id,
+        expected_request_payload={"operation": "revoke", "machine_identity_id": identity.id},
+    )
     if identity.revoked_at is None:
         now = datetime.now(timezone.utc)
         identity.revoked_at = now

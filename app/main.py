@@ -69,7 +69,10 @@ from app.log_sanitization import configure_log_redaction
 configure_log_redaction()
 from app.security_models import BrowserSession  # noqa: F401 — register browser session metadata
 from app.policy import assert_managed_agents_eligible
-from app.action_policy import MANDATORY_APPROVAL_ACTIONS
+from app.action_policy import (
+    MANDATORY_APPROVAL_ACTIONS, require_approved_action,
+    workspace_access_resource_id,
+)
 from app.evaluation_service import (
     evaluate as evaluate_pack,
     catalog as evaluation_catalog,
@@ -459,7 +462,7 @@ def create_workspace(
 
 @app.post("/v1/orgs/{org_id}/workspaces/{workspace_id}/grants")
 def create_workspace_grant(
-    org_id: str, workspace_id: str, user_id: str,
+    org_id: str, workspace_id: str, user_id: str, approval_id: str,
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
     require_membership(org_id, p, db)
@@ -473,6 +476,13 @@ def create_workspace_grant(
         org_id=org_id, user_id=user_id
     ).first():
         raise HTTPException(404, "Active organization member not found")
+    require_approved_action(
+        db, approval_id=approval_id, org_id=org_id,
+        workspace_id=workspace_id, action_type="security.permission.change",
+        resource_id=workspace_access_resource_id(workspace_id, user_id, "grant"),
+        actor_user_id=p.user.id,
+        expected_request_payload={"operation": "grant", "user_id": user_id},
+    )
     try:
         if db.get_bind().dialect.name == "postgresql":
             grant_id = db.execute(
@@ -508,7 +518,7 @@ def create_workspace_grant(
 
 @app.delete("/v1/orgs/{org_id}/workspaces/{workspace_id}/grants/{user_id}")
 def revoke_workspace_grant(
-    org_id: str, workspace_id: str, user_id: str,
+    org_id: str, workspace_id: str, user_id: str, approval_id: str,
     db: Session = Depends(get_db), p: Principal = Depends(get_principal),
 ):
     require_membership(org_id, p, db)
@@ -517,6 +527,13 @@ def revoke_workspace_grant(
         workspace = db.query(Workspace).filter_by(org_id=org_id, id=workspace_id).first()
         if workspace is None:
             raise HTTPException(404, "Workspace not found")
+    require_approved_action(
+        db, approval_id=approval_id, org_id=org_id,
+        workspace_id=workspace_id, action_type="security.permission.change",
+        resource_id=workspace_access_resource_id(workspace_id, user_id, "revoke"),
+        actor_user_id=p.user.id,
+        expected_request_payload={"operation": "revoke", "user_id": user_id},
+    )
     try:
         if db.get_bind().dialect.name == "postgresql":
             revoked = db.execute(
@@ -535,9 +552,12 @@ def revoke_workspace_grant(
                 record_event(db, org_id, p.user.id, "workspace.access_revoked",
                              "workspace_grant", grant.id, workspace_id,
                              {"user_id": user_id})
+        if not revoked:
+            # A no-op must not burn the one-time approval or leave a consumption event.
+            db.rollback()
+            return {"workspace_id": workspace_id, "user_id": user_id, "status": "not_active"}
         db.commit()
-        return {"workspace_id": workspace_id, "user_id": user_id,
-                "status": "revoked" if revoked else "not_active"}
+        return {"workspace_id": workspace_id, "user_id": user_id, "status": "revoked"}
     except Exception:
         db.rollback()
         raise

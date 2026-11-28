@@ -1,4 +1,5 @@
 import pytest
+import uuid
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -9,7 +10,8 @@ from sqlalchemy.pool import StaticPool
 from app.auth import Principal, get_principal
 from app.db import Base, get_db, set_rls_context
 from app.machine_identity import authenticate_machine_token, authorize_tool_session, create_agent_session, expire_due_agent_sessions
-from app.models import FounderAuthority, Membership, Organization, Role, User, Workspace, WorkspaceGrant
+from app.models import Approval, ApprovalStatus, FounderAuthority, Membership, Organization, Role, User, Workspace, WorkspaceGrant
+from app.action_policy import machine_identity_provision_resource_id, machine_identity_revocation_resource_id
 from app.security_models import AgentSession, MachineIdentity, ToolInvocation
 from app.security_routes import router
 from app.tool_gateway_routes import router as tool_gateway_router
@@ -75,15 +77,96 @@ def security_client():
     db.close(); Base.metadata.drop_all(engine); engine.dispose()
 
 
+def _approved_security_change(client, resource_id, request_payload):
+    db = client.factory()
+    try:
+        approval = Approval(
+            org_id=client.org_id, workspace_id=client.workspace_id,
+            action_type="security.permission.change", resource_id=resource_id,
+            idempotency_key=f"security-change-{uuid.uuid4().hex}",
+            request_payload=request_payload, status=ApprovalStatus.approved,
+            requested_by=client.founder.id, decided_by=client.founder.id,
+        )
+        db.add(approval)
+        db.commit()
+        return approval.id
+    finally:
+        db.close()
+
+
 def _create_identity(client, scopes=None, classes=None, subject_type="worker"):
-    response = client.post(f"/v1/orgs/{client.org_id}/machine-identities", json={
+    payload = {
         "workspace_id": client.workspace_id, "name": "Research Worker",
         "subject_type": subject_type, "subject_id": "research-worker",
         "scopes": scopes or ["sessions:create", "tools:invoke", "tool:research.read"],
         "allowed_data_classes": classes or ["synthetic", "public"], "ttl_days": 14,
-    })
+    }
+    expected = {
+        "operation": "create", "name": payload["name"],
+        "subject_type": payload["subject_type"], "subject_id": payload["subject_id"],
+        "scopes": sorted(payload["scopes"]),
+        "allowed_data_classes": sorted(payload["allowed_data_classes"]),
+        "ttl_days": payload["ttl_days"],
+    }
+    resource_id = machine_identity_provision_resource_id(
+        client.workspace_id, subject_type, payload["subject_id"], payload["name"],
+    )
+    approval_id = _approved_security_change(client, resource_id, expected)
+    response = client.post(
+        f"/v1/orgs/{client.org_id}/machine-identities",
+        params={"approval_id": approval_id}, json=payload,
+    )
     assert response.status_code == 201, response.text
     return response.json()
+
+
+def _revoke_identity(client, identity_id):
+    approval_id = _approved_security_change(
+        client, machine_identity_revocation_resource_id(identity_id),
+        {"operation": "revoke", "machine_identity_id": identity_id},
+    )
+    return client.post(
+        f"/v1/orgs/{client.org_id}/machine-identities/{identity_id}/revoke",
+        params={"approval_id": approval_id},
+    )
+
+
+def test_machine_identity_approval_is_bound_to_exact_scopes_and_data_classes(security_client):
+    payload = {
+        "workspace_id": security_client.workspace_id,
+        "name": "Restricted Worker",
+        "subject_type": "worker",
+        "subject_id": "restricted-worker",
+        "scopes": ["tool:research.read"],
+        "allowed_data_classes": ["synthetic"],
+        "ttl_days": 14,
+    }
+    approved_payload = {
+        "operation": "create", "name": payload["name"],
+        "subject_type": payload["subject_type"], "subject_id": payload["subject_id"],
+        "scopes": ["tool:research.read"],
+        "allowed_data_classes": ["synthetic"], "ttl_days": 14,
+    }
+    resource_id = machine_identity_provision_resource_id(
+        security_client.workspace_id, "worker", "restricted-worker", "Restricted Worker",
+    )
+    approval_id = _approved_security_change(security_client, resource_id, approved_payload)
+    payload["scopes"] = ["tool:research.read", "tool:crm.write"]
+
+    response = security_client.post(
+        f"/v1/orgs/{security_client.org_id}/machine-identities",
+        params={"approval_id": approval_id}, json=payload,
+    )
+
+    assert response.status_code == 403
+    db = security_client.factory()
+    try:
+        assert db.query(MachineIdentity).filter_by(
+            org_id=security_client.org_id, subject_id="restricted-worker",
+        ).count() == 0
+        assert db.get(Approval, approval_id).consumed_at is None
+    finally:
+        db.close()
 
 
 def test_machine_secret_is_returned_once_and_only_hash_is_persisted(security_client):
@@ -157,7 +240,7 @@ def test_founder_revocation_cancels_active_sessions(security_client):
     principal = authenticate_machine_token("Bearer " + issued["token"], db)
     session = create_agent_session(db, principal, purpose="Research", data_class="public", ttl_seconds=600)
     db.commit(); db.close()
-    response = security_client.post(f"/v1/orgs/{security_client.org_id}/machine-identities/{issued['id']}/revoke")
+    response = _revoke_identity(security_client, issued["id"])
     assert response.status_code == 200, response.text
     db = security_client.factory()
     try:
@@ -199,6 +282,7 @@ def test_nonfounder_cannot_issue_machine_identity(security_client):
     security_client.set_principal(operator)
     response = security_client.post(
         f"/v1/orgs/{security_client.org_id}/machine-identities",
+        params={"approval_id": "not-approved"},
         json={
             "workspace_id": security_client.workspace_id,
             "name": "Unauthorized Worker",
@@ -214,6 +298,7 @@ def test_nonfounder_cannot_issue_machine_identity(security_client):
 def test_machine_identity_rejects_commercial_data_until_client_policy_exists(security_client):
     response = security_client.post(
         f"/v1/orgs/{security_client.org_id}/machine-identities",
+        params={"approval_id": "not-approved"},
         json={
             "workspace_id": security_client.workspace_id,
             "name": "Commercial Worker",
@@ -243,9 +328,7 @@ def test_machine_session_cannot_outlive_its_identity(security_client):
 
 def test_revoked_machine_credential_cannot_authenticate(security_client):
     issued = _create_identity(security_client)
-    revoked = security_client.post(
-        f"/v1/orgs/{security_client.org_id}/machine-identities/{issued['id']}/revoke"
-    )
+    revoked = _revoke_identity(security_client, issued["id"])
     assert revoked.status_code == 200
     db = security_client.factory()
     try:
