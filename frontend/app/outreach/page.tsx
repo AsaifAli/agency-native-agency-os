@@ -11,6 +11,8 @@ type Lead = { id: string; company_name: string; stage: string; contact_id: strin
 type Sender = { id: string; display_name: string; email_address: string; status: string; max_per_hour: number; max_per_day: number };
 type Message = { id: string; sender_id: string; contact_id: string; lead_id: string | null; recipient: string; subject: string; body: string; status: string; approval_id: string | null; stop_reason: string; queued_at: string | null; sent_at: string | null; provider_message_id: string | null };
 type Block = { id: string; contact_id: string; channel: string; status: string; reason: string; note: string; recorded_at: string };
+type Consent = { id: string; contact_id: string; channel: string; status: string; recorded_at: string };
+type Approval = { id: string; workspace_id: string; action_type: string; resource_id: string; status: string; request_payload: Record<string, unknown> };
 function contactLabel(item: Contact) { return [item.first_name,item.last_name].filter(Boolean).join(" ") + " · " + item.email; }
 
 export default function OutreachPage() {
@@ -21,6 +23,8 @@ export default function OutreachPage() {
   const [senders,setSenders] = useState<Sender[]>([]);
   const [messages,setMessages] = useState<Message[]>([]);
   const [blocks,setBlocks] = useState<Block[]>([]);
+  const [consents,setConsents] = useState<Consent[]>([]);
+  const [approvals,setApprovals] = useState<Approval[]>([]);
   const [senderName,setSenderName] = useState("Agency Team");
   const [senderEmail,setSenderEmail] = useState("");
   const [maxHour,setMaxHour] = useState("10");
@@ -39,6 +43,7 @@ export default function OutreachPage() {
   const [eventNotes,setEventNotes] = useState<Record<string,string>>({});
   const [releaseNotes,setReleaseNotes] = useState<Record<string,string>>({});
   const [error,setError] = useState("");
+  const [success,setSuccess] = useState("");
   const [loading,setLoading] = useState(true);
   const [saving,setSaving] = useState(false);
   const [busyId,setBusyId] = useState("");
@@ -62,18 +67,22 @@ export default function OutreachPage() {
     if (!workspace || !orgId()) return;
     setLoading(true); setError("");
     try {
-      const [contactRows,leadRows,senderRows,messageRows,blockRows] = await Promise.all([
+      const [contactRows,leadRows,senderRows,messageRows,blockRows,consentRows,approvalRows] = await Promise.all([
         api<Contact[]>(`/v1/orgs/${orgId()}/contacts?workspace_id=${encodeURIComponent(workspace)}`),
         api<Lead[]>(`/v1/orgs/${orgId()}/leads?workspace_id=${encodeURIComponent(workspace)}`),
         api<Sender[]>(`/v1/orgs/${orgId()}/outreach/senders?workspace_id=${encodeURIComponent(workspace)}`),
         api<Message[]>(`/v1/orgs/${orgId()}/outreach/messages?workspace_id=${encodeURIComponent(workspace)}`),
         api<Block[]>(`/v1/orgs/${orgId()}/outreach/blocks?workspace_id=${encodeURIComponent(workspace)}&status=active`),
+        api<Consent[]>(`/v1/orgs/${orgId()}/outreach/consents?workspace_id=${encodeURIComponent(workspace)}`),
+        api<Approval[]>(`/v1/orgs/${orgId()}/approvals?workspace_id=${encodeURIComponent(workspace)}`),
       ]);
       setContacts(contactRows.filter(item => !!item.email));
       setLeads(leadRows);
       setSenders(senderRows);
       setMessages(messageRows);
       setBlocks(blockRows);
+      setConsents(consentRows);
+      setApprovals(approvalRows);
       setSenderId(current => senderRows.some(item => item.id===current) ? current : senderRows.find(item => item.status==="active")?.id || senderRows[0]?.id || "");
       setContactId(current => contactRows.some(item => item.id===current && !!item.email) ? current : contactRows.find(item => !!item.email)?.id || "");
       setConsentContact(current => contactRows.some(item => item.id===current && !!item.email) ? current : contactRows.find(item => !!item.email)?.id || "");
@@ -99,12 +108,42 @@ export default function OutreachPage() {
     } catch(e) { setError((e as Error).message); } finally { setSaving(false); }
   }
 
+  async function requestOrFindApproval(resourceId:string,requestPayload:Record<string,unknown>):Promise<string|null> {
+    const matches=approvals.filter(item=>item.action_type==="external_communication.sensitive"&&item.resource_id===resourceId&&JSON.stringify(item.request_payload)===JSON.stringify(requestPayload));
+    const approved=matches.find(item=>item.status==="approved");
+    if(approved)return approved.id;
+    if(matches.some(item=>item.status==="pending")){
+      setSuccess("A matching approval is already pending. Review it in Founder Approvals, then return here and retry.");
+      return null;
+    }
+    await api("/v1/orgs/"+orgId()+"/approvals",{
+      method:"POST",
+      body:JSON.stringify({
+        workspace_id:workspace,action_type:"external_communication.sensitive",resource_id:resourceId,
+        idempotency_key:"outreach-action:"+crypto.randomUUID(),request_payload:requestPayload,
+      }),
+    });
+    setSuccess("Approval request created. Review it in Founder Approvals, then return here and retry the action.");
+    await loadData();
+    return null;
+  }
+
   async function senderStatus(item: Sender,status:"active"|"paused") {
-    setBusyId(item.id); setError("");
+    setBusyId(item.id); setError(""); setSuccess("");
     try {
-      await api<Sender>(`/v1/orgs/${orgId()}/outreach/senders/${item.id}/status`,{
+      let approvalQuery="";
+      if(status==="active"){
+        const approvalId=await requestOrFindApproval(item.id,{
+          operation:"activate_outbound_sender",sender_id:item.id,
+          max_per_hour:item.max_per_hour,max_per_day:item.max_per_day,
+        });
+        if(!approvalId)return;
+        approvalQuery="?approval_id="+encodeURIComponent(approvalId);
+      }
+      await api<Sender>(`/v1/orgs/${orgId()}/outreach/senders/${item.id}/status${approvalQuery}`,{
         method:"PATCH",body:JSON.stringify({status}),
       });
+      setSuccess(status==="active"?"Sender activated using its approved, single-use action.":"Sender paused.");
       await loadData();
     } catch(e) { setError((e as Error).message); } finally { setBusyId(""); }
   }
@@ -172,11 +211,22 @@ export default function OutreachPage() {
   async function releaseBlock(item:Block) {
     const note=(releaseNotes[item.id]||"").trim();
     if(note.length<3){setError("A founder release note is required.");return;}
-    setBusyId(item.id);setError("");
+    setBusyId(item.id);setError("");setSuccess("");
     try{
-      await api(`/v1/orgs/${orgId()}/outreach/blocks/${item.id}/release`,{
+      const latest=consents.filter(row=>row.contact_id===item.contact_id&&row.channel===item.channel)
+        .sort((a,b)=>new Date(b.recorded_at).getTime()-new Date(a.recorded_at).getTime())[0];
+      if(!latest){setError("A current, eligible channel-consent record is required before requesting release.");return;}
+      const recordedAt=latest.recorded_at.endsWith("Z")?latest.recorded_at.slice(0,-1)+"+00:00":latest.recorded_at;
+      const approvalId=await requestOrFindApproval(item.id,{
+        operation:"release_communication_block",block_id:item.id,contact_id:item.contact_id,
+        channel:item.channel,reason:item.reason,consent_id:latest.id,consent_status:latest.status,
+        consent_recorded_at:recordedAt,note,
+      });
+      if(!approvalId)return;
+      await api(`/v1/orgs/${orgId()}/outreach/blocks/${item.id}/release?approval_id=${encodeURIComponent(approvalId)}`,{
         method:"POST",body:JSON.stringify({note}),
       });
+      setSuccess("Communication block released using its approved, single-use action.");
       await loadData();
     }catch(e){setError((e as Error).message);}finally{setBusyId("");}
   }
@@ -187,6 +237,7 @@ export default function OutreachPage() {
       <section className="panel">
         <div className="panel-head"><div className="panel-title">Workspace</div><select className="field" value={workspace} onChange={e=>setWorkspace(e.target.value)}>{workspaces.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></div>
         {error && <div className="error">{error}</div>}
+        {success && <div className="success">{success} <Link href="/approvals" className="activity-meta">Open Founder Approvals</Link></div>}
         <h2 className="panel-title">Approved sender identities</h2>
         <form onSubmit={createSender} style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:8,marginBottom:14}}>
           <input className="field" value={senderName} onChange={e=>setSenderName(e.target.value)} placeholder="Display name" maxLength={160} required/>
