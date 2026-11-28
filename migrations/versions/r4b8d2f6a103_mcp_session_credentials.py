@@ -214,7 +214,7 @@ def upgrade() -> None:
             p_session_id text
         ) RETURNS boolean
         LANGUAGE sql
-        STABLE
+        VOLATILE
         SECURITY DEFINER
         SET search_path = pg_catalog, public, agency_os_private
         AS $function$
