@@ -8,10 +8,12 @@ from sqlalchemy.pool import StaticPool
 
 from app.auth import Principal, get_principal
 from app.db import Base, get_db, set_rls_context
-from app.models import Approval, ApprovalStatus, Membership, Organization, Role, User, Workspace, FounderAuthority, WorkspaceGrant, Agent
-from app.action_policy import workforce_capability_resource_id, workforce_member_activation_resource_id
+from app.models import Approval, ApprovalStatus, Membership, Organization, Role, User, Workspace, FounderAuthority, WorkspaceGrant, Agent, AgentVersion
+from app.action_policy import workforce_capability_resource_id, workforce_member_activation_resource_id, agent_version_resource_id
 from app.workforce_routes import router
 from app.workforce_service import initialize_workforce
+from app.agent_registry_service import ensure_initial_agent_version
+from app.config import settings
 import app.domain_models  # noqa: F401 — register Revenue/Delivery tables before metadata.create_all
 import app.workforce_models  # noqa: F401
 import app.operations_models  # noqa: F401
@@ -1323,3 +1325,132 @@ def test_workforce_capability_configuration_rejects_missing_approval(app_client)
         ).count() == 0
     finally:
         db.close()
+
+
+
+def test_agent_version_activation_and_rollback_require_exact_founder_approval(app_client, monkeypatch):
+    client = app_client
+    identity = client.identity
+    monkeypatch.setattr(settings, "app_env", "test")
+    monkeypatch.setattr(settings, "mock_runtime_enabled", True)
+
+    db = client.factory()
+    try:
+        agent = Agent(
+            org_id=identity["org"].id,
+            workspace_id=identity["workspace"].id,
+            name="Versioned Test Agent",
+            department="Engineering",
+            instructions="Original instructions.",
+            runtime="mock",
+            data_class="synthetic",
+            enabled=True,
+        )
+        db.add(agent)
+        db.flush()
+        version_one = ensure_initial_agent_version(
+            db, agent, created_by=identity["principal"].id,
+        )
+        db.commit()
+        agent_id = agent.id
+        version_one_id = version_one.id
+        version_one_hash = version_one.config_sha256
+    finally:
+        db.close()
+
+    base_url = f"/v1/orgs/{identity['org'].id}/agents/{agent_id}/versions"
+    created = client.post(
+        base_url,
+        params={"workspace_id": identity["workspace"].id},
+        json={
+            "name": "Version Two",
+            "department": "Solutions",
+            "instructions": "Updated instructions.",
+            "runtime": "mock",
+            "data_class": "synthetic",
+            "runtime_config": {},
+            "change_reason": "Improve execution instructions",
+        },
+    )
+    assert created.status_code == 201, created.text
+    draft = created.json()
+    assert draft["version_number"] == 2
+    assert draft["is_active"] is False
+
+    def create_approval(resource_id, payload):
+        approval_db = client.factory()
+        try:
+            approval = Approval(
+                org_id=identity["org"].id,
+                workspace_id=identity["workspace"].id,
+                action_type="security.permission.change",
+                resource_id=resource_id,
+                idempotency_key=f"agent-version-approval-{uuid.uuid4().hex}",
+                request_payload=payload,
+                status=ApprovalStatus.approved,
+                requested_by=identity["principal"].id,
+                decided_by=identity["principal"].id,
+            )
+            approval_db.add(approval)
+            approval_db.commit()
+            return approval.id
+        finally:
+            approval_db.close()
+
+    activation_payload = {
+        "operation": "activate",
+        "agent_id": agent_id,
+        "version_id": draft["id"],
+        "config_sha256": draft["config_sha256"],
+    }
+    activation_approval = create_approval(
+        agent_version_resource_id(
+            identity["workspace"].id, agent_id, draft["id"], "activate",
+        ),
+        activation_payload,
+    )
+    activated = client.post(
+        f"{base_url}/{draft['id']}/activate",
+        params={"workspace_id": identity["workspace"].id},
+        json={"approval_id": activation_approval},
+    )
+    assert activated.status_code == 200, activated.text
+    assert activated.json()["is_active"] is True
+
+    rollback_reason = "Restore the original tested configuration"
+    rollback_payload = {
+        "operation": "rollback",
+        "agent_id": agent_id,
+        "source_version_id": version_one_id,
+        "source_config_sha256": version_one_hash,
+        "change_reason": rollback_reason,
+    }
+    rollback_approval = create_approval(
+        agent_version_resource_id(
+            identity["workspace"].id, agent_id, version_one_id, "rollback",
+        ),
+        rollback_payload,
+    )
+    rolled_back = client.post(
+        f"{base_url}/{version_one_id}/rollback",
+        params={"workspace_id": identity["workspace"].id},
+        json={"approval_id": rollback_approval, "change_reason": rollback_reason},
+    )
+    assert rolled_back.status_code == 200, rolled_back.text
+    assert rolled_back.json()["version_number"] == 3
+    assert rolled_back.json()["config_sha256"] == version_one_hash
+    assert rolled_back.json()["is_active"] is True
+
+    verify_db = client.factory()
+    try:
+        versions = verify_db.query(AgentVersion).filter_by(
+            org_id=identity["org"].id,
+            workspace_id=identity["workspace"].id,
+            agent_id=agent_id,
+        ).order_by(AgentVersion.version_number).all()
+        assert [version.version_number for version in versions] == [1, 2, 3]
+        agent = verify_db.query(Agent).filter_by(id=agent_id).one()
+        assert agent.current_version_id == versions[2].id
+        assert agent.instructions == "Original instructions."
+    finally:
+        verify_db.close()
