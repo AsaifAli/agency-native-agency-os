@@ -101,3 +101,46 @@ def test_expired_owner_cannot_record_failure_even_if_worker_id_was_reused(lease_
     assert row.status == "processing"
     assert row.claimed_by == "reused-worker-id"
     assert row.last_error is None
+
+
+
+def test_reclaimed_delivery_fences_old_ack_when_worker_id_is_reused(lease_context):
+    Session, db, event_id, old_message = lease_context
+    row = db.query(OutboxEvent).filter_by(id=event_id).one()
+    # Simulate the same worker process reclaiming the event after the first
+    # lease expired. The worker ID is unchanged, but attempts is the claim epoch.
+    row.attempts = old_message.attempts + 1
+    row.lease_expires_at = datetime.now(timezone.utc) + timedelta(seconds=60)
+    db.commit()
+
+    with pytest.raises(OutboxOwnershipError):
+        _acknowledge(Session, message=old_message, worker_id="reused-worker-id")
+
+    db.expire_all()
+    row = db.query(OutboxEvent).filter_by(id=event_id).one()
+    assert row.status == "processing"
+    assert row.attempts == old_message.attempts + 1
+
+
+def test_reclaimed_delivery_fences_old_failure_when_worker_id_is_reused(lease_context):
+    Session, db, event_id, old_message = lease_context
+    row = db.query(OutboxEvent).filter_by(id=event_id).one()
+    row.attempts = old_message.attempts + 1
+    row.lease_expires_at = datetime.now(timezone.utc) + timedelta(seconds=60)
+    db.commit()
+
+    recorded = _record_failure(
+        Session,
+        message=old_message,
+        worker_id="reused-worker-id",
+        error=RuntimeError("stale synthetic failure"),
+        base_retry_seconds=1,
+        max_retry_seconds=2,
+    )
+    assert recorded is False
+
+    db.expire_all()
+    row = db.query(OutboxEvent).filter_by(id=event_id).one()
+    assert row.status == "processing"
+    assert row.attempts == old_message.attempts + 1
+    assert row.last_error is None
