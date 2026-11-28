@@ -1019,6 +1019,10 @@ class ManagedAgentsRuntime(AgentRuntime):
                         request.persist_resume_event(resume_token, sent_events[0]["id"])
 
             runtime_config = request.runtime_config or {}
+            if not isinstance(runtime_config, dict) or set(runtime_config) - {"timeout_seconds"}:
+                raise RuntimeNotConfiguredError(
+                    "The versioned Managed Agents runtime configuration is invalid."
+                )
             timeout_seconds = runtime_config.get(
                 "timeout_seconds", self.config.claude_managed_timeout_seconds,
             )
