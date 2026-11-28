@@ -23,6 +23,11 @@ class WorkforceUnit(Base):
         CheckConstraint("unit_type IN ('office','group','department','team')", name="ck_workforce_unit_type"),
         UniqueConstraint("org_id", "workspace_id", "department_key", "name", name="uq_workforce_unit_name"),
         Index("uq_workforce_unit_scope_id", "org_id", "workspace_id", "id", unique=True),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "parent_unit_id"],
+            ["workforce_units.org_id", "workforce_units.workspace_id", "workforce_units.id"],
+            ondelete="RESTRICT", name="fk_workforce_unit_parent_workspace",
+        ),
         Index("ix_workforce_unit_scope_parent", "org_id", "workspace_id", "parent_unit_id"),
     )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
@@ -280,6 +285,26 @@ class WorkforcePosition(Base):
         CheckConstraint("autonomy_ceiling BETWEEN 0 AND 3", name="ck_workforce_position_autonomy"),
         CheckConstraint("status IN ('planned','active','paused','retired')", name="ck_workforce_position_status"),
         UniqueConstraint("org_id", "workspace_id", "position_key", name="uq_workforce_position_key"),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "unit_id"],
+            ["workforce_units.org_id", "workforce_units.workspace_id", "workforce_units.id"],
+            ondelete="RESTRICT", name="fk_workforce_position_unit_workspace",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "team_unit_id"],
+            ["workforce_units.org_id", "workforce_units.workspace_id", "workforce_units.id"],
+            ondelete="RESTRICT", name="fk_workforce_position_team_unit_workspace",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "assigned_member_id"],
+            ["workforce_members.org_id", "workforce_members.workspace_id", "workforce_members.id"],
+            ondelete="RESTRICT", name="fk_workforce_position_member_workspace",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "reports_to_position_key"],
+            ["workforce_positions.org_id", "workforce_positions.workspace_id", "workforce_positions.position_key"],
+            ondelete="RESTRICT", name="fk_workforce_position_reports_to_workspace",
+        ),
         Index("ix_workforce_position_scope_department", "org_id", "workspace_id", "department_key"),
     )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
