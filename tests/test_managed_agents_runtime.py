@@ -1079,3 +1079,70 @@ def test_managed_agents_rejects_malformed_or_non_usd_usage():
     ]
     with pytest.raises(RuntimeManualReviewRequired):
         runtime._extract_result(events, "sesn_bad_usage")
+
+def test_managed_agents_reconciles_usage_only_from_idle_authoritative_session():
+    calls = []
+
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_reconcile":
+            return httpx.Response(200, json={
+                "id": "sesn_reconcile",
+                "status": "idle",
+                "usage": {
+                    "input_tokens": 31,
+                    "output_tokens": 12,
+                    "list_cost": {"amount": "9", "currency": "USD"},
+                },
+            })
+        return httpx.Response(404)
+
+    runtime = ManagedAgentsRuntime(
+        config(),
+        client_factory=lambda: httpx.Client(
+            base_url="https://api.anthropic.com",
+            headers={
+                "Authorization": "Bearer test-key",
+                "anthropic-version": "2026-10-21",
+                "anthropic-beta": "managed-agents-2026-04-01",
+            },
+            transport=httpx.MockTransport(handler),
+        ),
+    )
+
+    usage = runtime.fetch_idle_session_usage("sesn_reconcile")
+
+    assert usage == {
+        "input_tokens": 31,
+        "output_tokens": 12,
+        "list_cost_minor": 9,
+        "currency": "USD",
+    }
+    assert calls == [("GET", "/v1/sessions/sesn_reconcile")]
+
+
+def test_managed_agents_does_not_reconcile_usage_from_non_idle_session():
+    def handler(req):
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_active":
+            return httpx.Response(200, json={
+                "id": "sesn_active",
+                "status": "running",
+                "usage": {"input_tokens": 31, "output_tokens": 12},
+            })
+        return httpx.Response(404)
+
+    runtime = ManagedAgentsRuntime(
+        config(),
+        client_factory=lambda: httpx.Client(
+            base_url="https://api.anthropic.com",
+            headers={
+                "Authorization": "Bearer test-key",
+                "anthropic-version": "2026-10-21",
+                "anthropic-beta": "managed-agents-2026-04-01",
+            },
+            transport=httpx.MockTransport(handler),
+        ),
+    )
+
+    assert runtime.fetch_idle_session_usage("sesn_active") is None
+
