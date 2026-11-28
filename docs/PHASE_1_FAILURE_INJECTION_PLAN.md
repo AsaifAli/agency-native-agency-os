@@ -17,7 +17,7 @@ This confirms CI success for that commit. It does not establish a worker process
 - Expired processing leases can be reconciled and reclaimed.
 - Outbox delivery now renews active leases from an independent session while a handler runs. Renewal is conditional on processing status, worker ID, claim-generation attempt count, and an unexpired current lease.
 - If renewal fails or ownership is reclaimed, the handler is not forcibly interrupted. Its eventual acknowledgement/failure is rejected by the authoritative ownership check. Any external side effect still requires consumer-side idempotency.
-- New PostgreSQL coverage simulates a real subprocess crash after claim commit, then reclaims the expired synthetic event. This does not simulate a process crash after an external side effect has committed.
+- New PostgreSQL coverage simulates a real subprocess crash after a synthetic consumer side effect commits but before acknowledgement. The event is reclaimed and the consumer replay uses a unique idempotency key; the test asserts exactly one effect. This is a database-backed test consumer, not a live external provider.
 - Health summaries are workspace-scoped and payload-free. Alert delivery and metrics export are not yet implemented.
 
 ## Required failure-injection matrix
