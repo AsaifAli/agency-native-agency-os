@@ -440,6 +440,7 @@ def summarize_outbox(
         "pending_age_warning_seconds": settings.outbox_pending_age_warning_seconds,
         "expired_lease_warning_count": settings.outbox_expired_lease_warning_count,
         "dead_letter_warning_count": settings.outbox_dead_letter_warning_count,
+        "exhausted_pending_warning_count": settings.outbox_exhausted_pending_warning_count,
     }
     alerts = []
     if age is not None and age >= thresholds["pending_age_warning_seconds"]:
@@ -448,6 +449,8 @@ def summarize_outbox(
         alerts.append("expired_leases_detected")
     if dead_letter_count >= thresholds["dead_letter_warning_count"]:
         alerts.append("dead_letter_threshold_exceeded")
+    if int(exhausted_pending or 0) >= thresholds["exhausted_pending_warning_count"]:
+        alerts.append("exhausted_pending_detected")
     return {
         "health": "warning" if alerts else "healthy",
         "alerts": alerts,
