@@ -46,7 +46,22 @@ RAAS does not imply contingent/performance-based pricing. Pricing, attribution, 
 
 ## Automation boundaries
 
-Native Python workers and the PostgreSQL transactional outbox are the initial automation architecture. No n8n, Activepieces, Temporal or second workflow engine is required. External calls run outside database transactions; consumers must be idempotent; delivery is at-least-once with bounded retries, dead letters and reconciliation.
+Native Python workers and the PostgreSQL transactional outbox are the initial automation architecture. No n8n, Activepieces, Temporal or second workflow engine is required for the current workload. External calls run outside database transactions; consumers must be idempotent; delivery is at-least-once with bounded retries, dead letters and reconciliation.
+
+### n8n evaluation decision
+
+n8n remains an optional integration/trigger layer, not an execution system of record or a second business control plane. Do not reactivate the currently suspended instance until a concrete webhook, connector or schedule requirement cannot be handled proportionately by the OS outbox and workers.
+
+The current agency-managed use case may fit n8n's Sustainable Use License: the agency may build and operate workflows for clients on its own instance, provided clients do not access the n8n editor or change workflow logic. If clients configure workflows through n8n UI, API, MCP or an AI agent, or n8n is offered as a hosted service, obtain the appropriate commercial license first. Confirm any changed use case with n8n licensing before adoption. n8n is source-available under a fair-code license, not OSI open source. See the [n8n license FAQ](https://support.n8n.io/article/can-i-use-your-license-for-my-use-case?trk=article-ssr-frontend-pulse_little-text-block) and [Sustainable Use License](https://github.com/n8n-io/n8n-docs/blob/main/docs/n8n-community-license/README.md).
+
+If adopted later:
+- n8n may receive webhooks, run schedules and call authenticated Agency OS APIs; it must never write core tables or own approval, CRM, project, execution or audit state.
+- Keep its editor and public API private to authorized operators; clients receive approved outputs and workflow visualizations through the Agency OS, not direct n8n access.
+- Use external task-runner mode for Code nodes; n8n documents that internal mode shares the n8n process identity and is not suitable for production code execution. Harden runners as separate unprivileged, read-only containers.
+- Require TLS, SSO/MFA, encryption-key rotation, node allowlists, SSRF protection, execution-data redaction, restricted egress, workflow versioning, release review, logs and recovery procedures.
+- Do not enable queue mode or a second Redis/worker fleet unless measured workflow volume justifies it; n8n queue mode introduces its own Redis-backed execution workers and database state.
+
+Security references: [Securing n8n](https://docs.n8n.io/deploy/host-n8n/configure-n8n/security/), [Task runners](https://docs.n8n.io/deploy/host-n8n/configure-n8n/set-up-task-runners/), [Queue mode](https://docs.n8n.io/deploy/host-n8n/configure-n8n/scaling/enable-queue-mode/).
 
 ## Private AI and Business Operations layer (planned)
 
