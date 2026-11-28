@@ -245,3 +245,26 @@ def test_restricted_data_classes_are_rejected(execution_context, data_class):
 
     with pytest.raises(PolicyViolation):
         create_test_execution(ctx)
+
+
+
+def test_create_execution_pins_immutable_agent_version(execution_context):
+    from app.models import AgentVersion
+
+    ctx = execution_context
+    execution = create_test_execution(ctx)
+    ctx["db"].commit()
+    ctx["db"].refresh(execution)
+
+    agent = ctx["db"].get(Agent, ctx["agent_id"])
+    version = ctx["db"].get(AgentVersion, execution.agent_version_id)
+
+    assert execution.agent_version_id is not None
+    assert agent.current_version_id == version.id
+    assert version.agent_id == agent.id
+    assert version.version_number == 1
+    assert version.name == agent.name
+    assert version.instructions == agent.instructions
+    assert version.runtime == execution.runtime
+    assert version.data_class == execution.data_class
+    assert len(version.config_sha256) == 64
