@@ -1,6 +1,6 @@
 # Claude Managed Agents MCP Adapter — Design and Acceptance Contract
 
-**Status:** Design contract; implementation not yet started.  
+**Status:** Partially implemented on the consolidated integration branch; disabled by default. Live Anthropic provider validation and external configuration remain pending.  
 **Owner:** Claude runtime adapter, with the OS Tool Gateway as the only authorization and execution authority.  
 **Initial data policy:** synthetic/public only. No local model, local inference or local fallback.
 
@@ -133,3 +133,41 @@ External calls occur outside database transactions. Persist intent and reference
 - Managed Agents environment limited-network allowlist containing only the Agency OS MCP host.
 - Provider Agent configured for the supported model/system prompt; session-local overrides supply the MCP server and toolset.
 - Staging-only smoke test with synthetic data before any production enablement.
+
+
+## 10. Current implementation status
+
+### Implemented in the consolidated branch
+
+- Optional Streamable HTTP MCP ASGI transport mounted at `/v1/integrations/claude/mcp/sessions/{agent_session_id}`; the route is absent unless explicitly enabled.
+- Session-path plus high-entropy bearer authentication. Only a SHA-256 token digest is persisted; raw bearer material is returned once to the worker adapter and sent only to Anthropic Vault over HTTPS.
+- PostgreSQL-backed authentication, expiry, revocation and request-rate limiting. Worker issuance is execution-capability-bound; provider Vault references are loaded and updated through worker-only SECURITY DEFINER functions. Neither API nor worker roles receive direct SELECT access to credential hashes.
+- Host and Origin validation, MCP SDK DNS-rebinding protection, request-body limit and per-process concurrency limit.
+- Read-only MCP discovery and invocation through the existing Tool Gateway. Discovery filters by agent scopes, workforce grants, allowed data class, explicit tool allowlist and tool risk. The server does not have a second tool registry or direct business-table access.
+- Managed Agents adapter support for environment-network validation, Vault static-bearer creation, exact metadata reconciliation after ambiguous Vault creates, session-local `agent_with_overrides`, `mcp_toolset`, `mcp_servers`, `vault_ids`, and credential archive/revocation.
+- Interrupted credential setup is detected through the OS-owned execution lookup. The adapter revokes/archives an orphan rather than blindly creating a second provider session.
+- The route and provider integration remain disabled by default; only explicitly configured read-only tools can be enabled.
+
+### Not yet verified
+
+- No live Anthropic API key, Vault, Environment, Agent or Managed Agents session has been provisioned or exercised by CI.
+- No real provider-to-OS MCP initialize/list/call handshake has been smoke-tested.
+- No production or staging deployment has been enabled, and no production database migration has been run.
+- CI uses mocks for the Anthropic API and a disposable PostgreSQL database. It proves local contracts and authorization tests, not provider availability or deployment networking.
+
+### Remaining engineering work
+
+- Add a bounded cleanup/reconciliation worker for credentials left in `delete_pending` after a provider archive failure. Until then, the OS bearer is revoked immediately and provider-side archival failures require manual reconciliation.
+- Add a staging smoke test against a dedicated Anthropic Vault and limited-network cloud Environment using synthetic data.
+- Add multi-replica concurrency, crash-after-provider-call, lease-expiry and provider credential cleanup drills.
+- Keep write tools, approval-bearing tools, client-data tools and external side effects disabled until an OS approval adapter consumes approval and action atomically and passes negative tests.
+- Workforce `budget_minor` is not yet a fully enforced runtime spend cap; provider spend reservation/settlement remains a separate gap.
+- The initial transport concurrency semaphore is per API process; database request-rate limiting is shared. A global in-flight concurrency cap across multiple API replicas is not yet implemented.
+
+### Current external setup
+
+1. Configure a public HTTPS API origin that routes the MCP session path to the Agency OS API.
+2. Create a dedicated Anthropic Vault for this environment and set `CLAUDE_MANAGED_MCP_VAULT_ID`.
+3. Configure the Managed Agents Environment as `cloud` with `networking.type=limited`, `allow_mcp_servers=false`, and the exact MCP hostname in `allowed_hosts`.
+4. Set `CLAUDE_MANAGED_MCP_PUBLIC_BASE_URL` and a reviewed comma-separated `CLAUDE_MANAGED_MCP_ENABLED_TOOL_KEYS` allowlist. The current first-release surface is read-only.
+5. Keep `CLAUDE_MANAGED_MCP_ENABLED=false` until a synthetic-data staging smoke test verifies the full provider/Vault/MCP/Tool Gateway lifecycle.
