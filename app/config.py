@@ -99,6 +99,29 @@ class Settings(BaseSettings):
                 "OUTBOX_MAX_RETRY_SECONDS must be greater than or equal "
                 "to OUTBOX_BASE_RETRY_SECONDS"
             )
+        if self.claude_managed_mcp_enabled:
+            mcp_url = urlparse(self.claude_managed_mcp_public_base_url)
+            if not self.claude_managed_agents_enabled:
+                raise ValueError("CLAUDE_MANAGED_AGENTS_ENABLED must be true when Claude MCP is enabled")
+            if (
+                mcp_url.scheme != "https" or not mcp_url.hostname
+                or mcp_url.username or mcp_url.password or mcp_url.query or mcp_url.fragment
+                or mcp_url.path not in ("", "/") or mcp_url.port not in (None, 443)
+            ):
+                raise ValueError("CLAUDE_MANAGED_MCP_PUBLIC_BASE_URL must be an HTTPS origin")
+            host = (mcp_url.hostname or "").lower().rstrip(".")
+            if host in {"localhost", "localhost.localdomain"} or host.endswith((".localhost", ".local", ".internal", ".test")):
+                raise ValueError("Claude MCP public host cannot be local or internal")
+            try:
+                address = ipaddress.ip_address(host)
+            except ValueError:
+                address = None
+            if address is not None and not address.is_global:
+                raise ValueError("Claude MCP public host cannot be a private or reserved IP")
+            if not self.claude_managed_mcp_vault_id.startswith("vlt_"):
+                raise ValueError("CLAUDE_MANAGED_MCP_VAULT_ID must identify the dedicated Anthropic Vault")
+            if not [key.strip() for key in self.claude_managed_mcp_enabled_tool_keys.split(",") if key.strip()]:
+                raise ValueError("CLAUDE_MANAGED_MCP_ENABLED_TOOL_KEYS must contain a reviewed tool allowlist")
         if self.app_env.lower() == "production" and self.process_role != "migration":
             errors = []
             if self.dev_auth_enabled:
