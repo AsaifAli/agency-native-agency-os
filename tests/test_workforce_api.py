@@ -481,6 +481,7 @@ def test_founder_can_enable_capability_activate_execute_and_pause_member(app_cli
     )
     assert paused.status_code == 200, paused.text
     assert paused.json()["status"] == "paused"
+    assert paused.json()["active_agent_sessions_cancelled"] == 1
     db = app_client.factory()
     try:
         member = db.query(WorkforceMember).filter_by(id=member_id).one()
@@ -493,6 +494,13 @@ def test_founder_can_enable_capability_activate_execute_and_pause_member(app_cli
         session = db.query(AgentSession).filter_by(id=session_id).one()
         assert session.status == "cancelled"
         assert session.ended_at is not None
+        from fastapi import HTTPException
+        from app.machine_identity import authenticate_machine_token
+        with pytest.raises(HTTPException) as exc:
+            authenticate_machine_token(
+                f"Bearer aos_mi_{identity_id}.{secret}", db
+            )
+        assert exc.value.status_code == 401
     finally:
         db.close()
 
