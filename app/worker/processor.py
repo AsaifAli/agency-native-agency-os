@@ -422,6 +422,13 @@ def process_one_execution(
                 request.persist_mcp_provider_credential = persist_mcp_provider_credential
                 request.revoke_mcp_session_credential = revoke_mcp_session_credential
                 request.mark_mcp_provider_credential_archived = mark_mcp_provider_credential_archived
+
+                def revoke_terminal_mcp_credential(reason: str) -> None:
+                    if request.get_mcp_provider_credential is None:
+                        return
+                    info = request.get_mcp_provider_credential()
+                    if isinstance(info, dict) and isinstance(info.get("credential_id"), str):
+                        request.revoke_mcp_session_credential(info["credential_id"], reason)
         runtime_result = runtime.start(request)
         if request.control_check is not None and request.control_check() == "cancel":
             raise RuntimeCancelled("OS cancellation request observed after provider return.")
@@ -448,6 +455,8 @@ def process_one_execution(
         if runtime_error is None:
             serialized_result = _serialize_result(runtime_result)
     except DataProtectionBlocked as exc:
+        if settings.claude_managed_mcp_enabled and "revoke_terminal_mcp_credential" in locals():
+            revoke_terminal_mcp_credential("MCP_EXECUTION_DATA_PROTECTION_BLOCKED")
         data_protection_block_code = exc.code
         runtime_error = (
             "DATA_PROTECTION_BLOCKED",
@@ -455,6 +464,8 @@ def process_one_execution(
             False,
         )
     except RuntimeNotConfiguredError:
+        if settings.claude_managed_mcp_enabled and "revoke_terminal_mcp_credential" in locals():
+            revoke_terminal_mcp_credential("MCP_RUNTIME_NOT_CONFIGURED")
         runtime_error = (
             "RUNTIME_NOT_CONFIGURED", "The requested runtime is unavailable.", False,
         )
@@ -465,6 +476,8 @@ def process_one_execution(
             False,
         )
     except RuntimeCancelled:
+        if settings.claude_managed_mcp_enabled and "revoke_terminal_mcp_credential" in locals():
+            revoke_terminal_mcp_credential("MCP_EXECUTION_CANCELLED")
         cancellation_requested = True
     except RuntimePaused:
         pause_requested = True
@@ -474,6 +487,8 @@ def process_one_execution(
             "The runtime provider or network is temporarily unavailable.", True,
         )
     except RuntimeExecutionError:
+        if settings.claude_managed_mcp_enabled and "revoke_terminal_mcp_credential" in locals():
+            revoke_terminal_mcp_credential("MCP_RUNTIME_UNSUCCESSFUL")
         runtime_error = (
             "RUNTIME_UNSUCCESSFUL",
             "The runtime did not complete successfully.", True,
