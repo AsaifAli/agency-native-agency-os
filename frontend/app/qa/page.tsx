@@ -43,7 +43,7 @@ function QAIssueCard({ issue, evaluations, workspaceId, onTransition }: {
   const eligibleRuns = evaluations.filter(run =>
     run.task_id === issue.task_id &&
     !!issue.fixed_at &&
-    new Date(run.created_at).getTime() >= new Date(issue.fixed_at).getTime()
+    new Date(run.created_at).getTime() > new Date(issue.fixed_at).getTime()
   );
   const passingRuns = eligibleRuns.filter(run => run.passed);
   const failingRuns = eligibleRuns.filter(run => !run.passed);
