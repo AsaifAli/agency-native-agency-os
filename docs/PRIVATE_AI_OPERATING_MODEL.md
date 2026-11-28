@@ -1,6 +1,6 @@
 # Private AI and Business Operations Layer
 
-**Status: architecture proposal / planned capability.** This document records a selective adaptation of the ReStructure Brief article, "The Private AI Operating System" (reviewed 2026-11-28). It does not claim that the workflows below are implemented, deployed, local-only or production-ready.
+**Status: approved implementation direction; capabilities are being delivered incrementally.** This document records a selective adaptation of the ReStructure Brief article, "The Private AI Operating System" (reviewed 2026-11-28). Individual capabilities remain unimplemented until their code, tests and acceptance evidence are merged. The Agency OS will use approved hosted model providers only. Local AI runtimes, local model serving and local inference are explicitly out of scope.
 
 ## 1. Decision
 
@@ -82,19 +82,19 @@ Produce a concise founder brief from persisted OS records, with a traceable as-o
 
 This is a read model over OS-owned records, not a second ledger. Missing or stale data must be disclosed; the brief must not invent a KPI or imply a payment/deployment occurred without persisted confirmation.
 
-## 3. Private and hybrid model routing
+## 3. Hosted model routing and data eligibility
 
-"Private" is a deployment and data-flow property, not a marketing label. The article's local-only design is one possible topology, not a property of our current environment.
+The Agency OS will use approved hosted model providers only. Do not add Ollama, local model serving, local inference, hybrid local routing or a local-AI fallback.
 
-Introduce a provider-neutral model routing policy only after the Data Protection Gateway can classify the payload and enforce per-client eligibility:
+Provider selection is a governed adapter decision, not a way around the Data Protection Gateway:
 
 - Public/synthetic data may use an explicitly approved external provider.
-- Commercial/client-confidential data uses only a runtime and contract explicitly approved for that data class and client.
-- Restricted data is local-only or blocked, according to policy.
-- If no eligible runtime exists, stop and request a human decision; do not silently fall back to a public model.
-- Record model/provider, policy decision, data class, prompt/template version, token/cost metadata where available, result reference and audit correlation. Never log raw secrets or unnecessary client content.
+- Commercial/client-confidential data may use only a hosted runtime and contract explicitly approved for that data class and client.
+- Restricted data is blocked unless a specific hosted provider/runtime is explicitly eligible under client policy and verified contractual/security controls.
+- If no eligible hosted runtime exists, stop and request a human decision; never silently fall back to another provider.
+- Record provider/model, policy decision, data class, prompt/template version, token/cost metadata where available, result reference and audit correlation. Never log raw secrets or unnecessary client content.
 
-Ollama or another local inference adapter may be evaluated as an optional runtime for suitable workloads. Do not promise that data never leaves the office until network egress, telemetry, backups, model downloads, observability, support access and every integration have been verified. A local model does not remove the need for tenant isolation, authorization, DPG, retention, audit or evaluation.
+A hosted provider is not automatically approved merely because it is configured. Verify data-processing terms, retention/training controls, region, access, egress, observability, support access and client authorization before sending client data. The DPG and tenant authorization remain mandatory for every provider call.
 
 ## 4. Runtime and automation boundaries
 
@@ -119,7 +119,7 @@ Routine internal preparation can be automated only when explicitly allowlisted a
 3. **Meeting-to-proposal:** transcript consent/retention, typed extraction, provenance, proposal revision and margin flags; founder approval remains mandatory.
 4. **Receivables:** invoice source linkage, reminder drafts, receipt matching proposals and reconciliation; no payment execution or autonomous write-off.
 5. **Founder brief:** source-backed daily summary and unified exception queue.
-6. **Private runtime option:** evaluate local inference against approved synthetic workloads, then test DPG, egress, quality, cost, operations and restore before any client data.
+6. **Hosted provider governance:** inventory approved hosted providers, data-processing terms, retention/training controls, regions, access and client eligibility; fail closed when no eligible provider exists.
 
 Each stage requires additive PostgreSQL migration review, API authorization, cross-workspace negative tests, audit/outbox behavior, idempotency/recovery tests, Founder Console workflows, synthetic end-to-end evidence and a rollback plan. Existing persistent databases and volumes must not be reset or migrated without explicit approval, backup and recovery path.
 
