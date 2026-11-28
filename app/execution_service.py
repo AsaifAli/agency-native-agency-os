@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
 from app.audit import record_event
+from app.agent_registry_service import ensure_initial_agent_version
 from app.models import (
     Agent,
     DataClass,
@@ -204,6 +205,7 @@ def create_execution(
                 "Workforce member requires an enabled data-eligible execution capability with no ungoverned tools"
             )
 
+    agent_version = ensure_initial_agent_version(db, agent, created_by=requested_by)
     _validate_runtime_policy(agent)
 
     execution = Execution(
@@ -211,10 +213,11 @@ def create_execution(
         workspace_id=workspace_id,
         task_id=task.id,
         agent_id=agent.id,
+        agent_version_id=agent_version.id,
         requested_by=requested_by,
         idempotency_key=idempotency_key,
-        runtime=agent.runtime,
-        data_class=agent.data_class,
+        runtime=agent_version.runtime,
+        data_class=agent_version.data_class,
         client_authorized=False,
         status=ExecutionStatus.queued,
         attempt_count=0,
