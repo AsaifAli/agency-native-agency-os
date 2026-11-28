@@ -200,6 +200,14 @@ def ensure_initial_agent_version(
         ).one_or_none()
         if version is None:
             raise AgentVersionConflict("Agent active version pointer is invalid")
+        if (
+            agent.name != version.name
+            or agent.department != version.department
+            or agent.instructions != version.instructions
+            or agent.runtime != version.runtime
+            or agent.data_class != version.data_class
+        ):
+            raise AgentVersionConflict("Agent fields diverge from the active immutable version")
         return version
 
     existing = db.query(AgentVersion).filter_by(
