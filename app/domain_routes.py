@@ -224,10 +224,25 @@ def create_lead(
         if body.client_id and contact.client_id and contact.client_id != body.client_id:
             raise HTTPException(422, "Lead contact must belong to the selected client")
     client_id = body.client_id or (contact.client_id if contact else None)
+    normalized_email = (body.email or (contact.email if contact else "")).lower().strip()
+    duplicate = None
+    if normalized_email:
+        duplicate = db.query(Lead).filter_by(
+            org_id=org_id, workspace_id=body.workspace_id, email=normalized_email,
+        ).first()
+    if duplicate is None and body.contact_id:
+        duplicate = db.query(Lead).filter_by(
+            org_id=org_id, workspace_id=body.workspace_id, contact_id=body.contact_id,
+        ).first()
+    if duplicate is not None:
+        raise HTTPException(
+            409,
+            "Potential duplicate lead exists in this workspace; review and update the existing lead instead.",
+        )
     item = Lead(org_id=org_id, workspace_id=body.workspace_id,
                 client_id=client_id, contact_id=body.contact_id,
                 company_name=body.company_name, contact_name=body.contact_name,
-                email=body.email.lower().strip(), source=body.source,
+                email=normalized_email, source=body.source,
                 score=body.score, qualification_notes=body.qualification_notes,
                 created_by=p.user.id)
     db.add(item)
