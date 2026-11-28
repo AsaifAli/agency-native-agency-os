@@ -1,25 +1,25 @@
 # Agency OS — authoritative implementation status
 
 **Last reconciled:** 2026-11-28  
-**Candidate source of truth:** the current head of `integration/agency-os-consolidated-2026-11` tracked by [PR #71](https://github.com/AsaifAli/agency-native-agency-os/pull/71).  
-**Review PR:** [#71 — Consolidated Agency OS integration](https://github.com/AsaifAli/agency-native-agency-os/pull/71), open and mergeable against `main`.  
-**Current main:** `c5ec7b462835f592edb0db1a31564401423e3467`; PR #71 has not been merged.  
-**Included work:** PR #68 security hardening and worker/RLS capability changes, PR #69 hosted-provider-only operating model, and PR #70 Private Operations foundation are reconciled into the PR #71 candidate.  
-**Release posture:** **NO-GO for production.** Passing CI and isolated database tests do not establish production readiness.
+**Current main:** `f07a8b7b8a864cbc08da35bf4b4c422cd4baf25e` — merge commit for PR #71.  
+**Consolidation PR:** [#71 — Consolidated Agency OS integration](https://github.com/AsaifAli/agency-native-agency-os/pull/71), merged 2026-11-28 16:28:33 UTC.  
+**Single working branch:** `integration/agency-os-consolidated-2026-11`, fast-forwarded to the merged main baseline; no unique commits were discarded.  
+**Included work:** PR #68 security hardening and worker/RLS capability changes, PR #69 hosted-provider-only operating model, PR #70 Private Operations foundation, and the subsequent PR #71 integration work for Agency Learning, Cowork/Code MCP, execution/runtime hardening, approval enforcement and provider usage observability.  
+**Release posture:** **NO-GO for production.** Merge and CI evidence do not establish live provider compatibility, staging readiness, production isolation or compliance.
 
-This file describes the consolidated candidate, not the current `main` branch. Historical branch comparisons and superseded PR checkpoints are not active blockers. See `docs/CONSOLIDATION_EXECUTION_LEDGER.md` for the integration record and `docs/PRODUCTION_GRADE_MASTER_CHECKLIST.md` for release gates.
+This file is the implementation summary for the merged baseline. Historical candidate wording below is retained only where it describes the actual verification scope; do not interpret candidate-era CI as a fresh test run on the merge commit. See `docs/CONSOLIDATION_EXECUTION_LEDGER.md`, `docs/PRODUCTION_GRADE_MASTER_CHECKLIST.md` and `docs/EXECUTION_SANDBOX_DESIGN.md` for integration history, release gates and sandbox boundaries.
 
-## Verification evidence on the consolidated candidate
+## Verification evidence
 
 | Check | Recorded result | Qualification |
 |---|---|---|
-| Backend pytest + PostgreSQL 16 integration | **579 passed, 0 skipped, 2 warnings** | CI run [46133997208](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46133997208) on the current candidate head. |
+| Backend pytest + PostgreSQL 16 integration | **579 passed, 0 skipped, 2 warnings** | Recorded pre-merge CI run [46133997208](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46133997208); not a fresh run on merge commit `f07a8b7`. |
 | Human tenant/workspace RLS | Passed in live PostgreSQL 16 CI | Dedicated `agency_os_test_app` NOBYPASSRLS login; cross-org/workspace access, grants/revocation and pooled-context behavior executed. |
 | Worker capability boundary | Passed in live PostgreSQL 16 CI | Actual `agency_os_worker` NOBYPASSRLS login; capability, forged-GUC, direct-table/function privilege and scope checks executed. |
 | Browser-session retention, orchestration-link RLS, outcome isolation and audit immutability | Passed in live PostgreSQL 16 CI | Previously skipped suites now execute; append-only evidence is preserved by fixtures. |
 | PostgreSQL role bootstrap and migration upgrade | Passed | PostgreSQL 16 role setup, Alembic graph validation, full upgrade to head and Python compilation passed. Disposable CI database only. |
 | Frontend TypeScript and Next.js production build | Passed | CI run above; no frontend lint result is claimed by this workflow. |
-| Pull-request CI | Passed | [Run 46134005729](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46134005729) completed successfully. |
+| Pull-request CI | Passed | [Run 46134005729](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46134005729) completed successfully on the pre-merge candidate. The merged PR description also records later successful CI on commit `a3c9d3d` (657 backend tests); exact merge-commit CI has not been independently verified in this session. |
 | Live Claude/Anthropic provider compatibility | Not verified | No live provider provisioning, credentials or production provider execution claimed. |
 | Production migration, deployment, restore drill or compliance assessment | Not performed | Requires separate staging/production controls and explicit founder go/no-go. |
 
@@ -127,7 +127,7 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 
 ## Immediate work order
 
-1. Consolidated candidate stabilization: **CI complete for the current PR #71 candidate**; exact-main verification remains pending until the PR is merged.
+1. Consolidation baseline: **PR #71 merged** at `f07a8b7`; the single integration branch is fast-forwarded to this baseline. Fresh local verification on the exact merge commit remains pending.
 2. Continue tenant/RLS and Data Protection Gateway inventory and route-by-route negative tests. Live PostgreSQL 16 human/worker isolation suites now execute in CI; broader API/object/artifact coverage remains open.
 3. Artifact/object storage isolation and retention lifecycle.
 4. Claude Managed Agents MCP lifecycle hardening: delete-pending cleanup worker, provider smoke test, and multi-replica/crash-recovery drills.
@@ -167,7 +167,7 @@ docker compose -p agency-os-pg-test \
   --exit-code-from postgres-tests postgres-tests
 ```
 
-Then run browser critical-flow/accessibility tests and verify the exact merged commit. PR #71 remains open for review; the current candidate CI is green, but merge and production release remain separate decisions. Live provider credentials, DNS, object storage, email/webhooks, staging deployment and backup restore require founder-environment access and will be presented as a final checklist. Production migration/deployment and destructive data actions require separate explicit approval.
+Then run browser critical-flow/accessibility tests and verify the exact merged commit. PR #71 is merged; production release remains a separate founder-controlled decision. Live provider credentials, DNS, object storage, email/webhooks, staging deployment and backup restore require founder-environment access and will be presented as a final checklist. Production migration/deployment and destructive data actions require separate explicit approval.
 
 
 ## Historical founder verification update — 2026-11-27 (pre-consolidation)
