@@ -90,7 +90,7 @@ Never commit `.env`. Use separate dev, staging and production configuration. Rev
 - `docs/AGENCY_ORGANIZATION_WORKFORCE_BLUEPRINT.md` — departments, teams, positions and reporting structure.
 - `docs/WORKFORCE_AUTONOMY_AND_FOUNDER_AUTHORITY.md` and `docs/FOUNDER_AUTONOMY_MODEL.md` — founder authority and governed autonomy.
 - `docs/INTEGRATION_MAP.md` — migration decisions and native module boundaries.
-- `docs/PRIVATE_AI_OPERATING_MODEL.md` — planned knowledge layer, lead response, proposal preparation, receivables and private-runtime policy; proposed, not implemented.
+- `docs/PRIVATE_AI_OPERATING_MODEL.md` — approved implementation direction for the knowledge layer, lead response, proposal preparation, receivables and hosted-provider governance; delivery is phased and local AI is out of scope.
 - `docs/POSTGRES_RLS_OPERATIONS.md` — API/worker/migrator roles, tenant RLS, live verification and existing-volume setup.
 - `docs/CLAUDE_MANAGED_AGENTS_ADAPTER.md` — runtime adapter behavior and limitations.
 - `docs/SKILLS_AND_SKILL_GOVERNANCE.md` — curated, provenance-pinned Agent Skills library, admission policy and runtime boundary.
