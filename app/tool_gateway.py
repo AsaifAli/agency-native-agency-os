@@ -52,7 +52,6 @@ def _deny(
         identity_id,
         workspace_id,
         {
-            "machine_identity_id": identity_id,
             "tool_key": safe_tool_key,
             "reason_code": reason_code,
             "redaction_counts": redaction_counts or {},
@@ -384,8 +383,6 @@ def invoke_registered_tool(
         invocation.id,
         identity.workspace_id,
         {
-            "machine_identity_id": identity.id,
-            "session_id": session.id,
             "tool_key": spec.key,
             "tool_version": spec.version,
             "risk_level": spec.risk_level,
