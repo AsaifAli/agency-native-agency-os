@@ -44,6 +44,8 @@ def upgrade() -> None:
             OR (
                 session_user = 'agency_os_worker'
                 AND subject_type = 'agent'
+                AND revoked_at IS NULL
+                AND expires_at > clock_timestamp()
                 AND EXISTS (
                     SELECT 1
                     FROM public.executions AS e
@@ -78,6 +80,8 @@ def upgrade() -> None:
             OR (
                 session_user = 'agency_os_worker'
                 AND subject_type = 'agent'
+                AND revoked_at IS NULL
+                AND expires_at > clock_timestamp()
                 AND EXISTS (
                     SELECT 1
                     FROM public.executions AS e
@@ -143,3 +147,4 @@ def downgrade() -> None:
         "Unsafe downgrade refused: restoring workspace-wide machine identity "
         "and session visibility would allow cross-client credential enumeration"
     )
+
