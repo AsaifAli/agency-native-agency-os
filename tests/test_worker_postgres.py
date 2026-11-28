@@ -1037,6 +1037,7 @@ import app.models  # register Organization and Workspace metadata
 import app.security_models  # register security FK metadata
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
+from app.models import Organization, Workspace  # register outbox FK metadata in this process
 from app.outbox_service import claim_outbox_batch
 
 engine = create_engine(os.environ["AGENCY_OS_TEST_DATABASE_URL"], pool_pre_ping=True)
