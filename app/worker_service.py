@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.audit import record_event
 from app.models import (
+    AuditEvent,
     Execution,
     ExecutionAttempt,
     ExecutionAttemptStatus,
@@ -632,6 +633,24 @@ def _record_provider_usage_observation(
         normalized, sort_keys=True, separators=(",", ":"), allow_nan=False
     )
     snapshot_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    existing_payloads = (
+        db.query(AuditEvent.payload)
+        .filter(
+            AuditEvent.org_id == execution.org_id,
+            AuditEvent.workspace_id == execution.workspace_id,
+            AuditEvent.event_type == "execution.provider_usage_observed",
+            AuditEvent.resource_type == "execution_attempt",
+            AuditEvent.resource_id == attempt.id,
+        )
+        .all()
+    )
+    if any(
+        isinstance(row[0], dict)
+        and row[0].get("snapshot_sha256") == snapshot_hash
+        for row in existing_payloads
+    ):
+        return snapshot_hash
+
     record_event(
         db,
         execution.org_id,
@@ -646,6 +665,7 @@ def _record_provider_usage_observation(
             "provider": attempt.runtime,
             "provider_session_id": attempt.external_run_id,
             "source": source,
+            "observed_at": datetime.now(timezone.utc).isoformat(),
             "snapshot_sha256": snapshot_hash,
             "usage": normalized,
         },
