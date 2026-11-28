@@ -26,6 +26,9 @@ class ExecutionRequest:
     persist_control_event: Callable[[str, str], None] | None = None
     execute_custom_tool: Callable[[str, dict, str], dict] | None = None
     prepare_mcp_session: Callable[[], dict] | None = None
+    persist_mcp_provider_credential: Callable[[str, str, str], None] | None = None
+    revoke_mcp_session_credential: Callable[[str, str], None] | None = None
+    mark_mcp_provider_credential_archived: Callable[[str, str], None] | None = None
     control_check: Callable[[], str | None] | None = None
     request_metadata: dict = field(default_factory=dict)
 
