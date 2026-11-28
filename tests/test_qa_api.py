@@ -169,7 +169,7 @@ def test_qa_issue_requires_a_passing_task_linked_retest_before_closure(client):
     created = create_issue(client)
     assert created.status_code == 201, created.text
     issue_id = created.json()["id"]
-    url = f"/v1/orgs/{client.org_id}/qa/issues/{issue_id}/transition"
+    url = f"/v1/orgs/{client.org_id}/qa/issues/{issue_id}/transition?workspace_id={client.ws_id}"
 
     for status in ("triaged", "in_progress", "fixed", "retest"):
         response = client.patch(url, headers=headers(), json={"status": status})
