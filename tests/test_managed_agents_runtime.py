@@ -768,3 +768,203 @@ def test_malformed_managed_agent_session_create_response_requires_manual_review(
 
     with pytest.raises(RuntimeManualReviewRequired, match="malformed"):
         runtime.start(request())
+
+
+def _mcp_config(**overrides):
+    values = {
+        "claude_managed_mcp_enabled": True,
+        "claude_managed_mcp_public_base_url": "https://mcp.example.test",
+        "claude_managed_mcp_vault_id": "vlt_test",
+        "claude_managed_mcp_enabled_tool_keys": "system.health.read",
+        "claude_managed_mcp_requests_per_minute": 120,
+        "claude_managed_mcp_max_concurrent_requests": 8,
+        "claude_managed_mcp_max_request_body_bytes": 1048576,
+    }
+    values.update(overrides)
+    return config(**values)
+
+
+def _mcp_request(**overrides):
+    values = {
+        "prepare_mcp_session": lambda: {
+            "session_id": "a1b2c3d4-e5f6-4789-9012-1234567890ab",
+            "credential_id": "b1b2c3d4-e5f6-4789-9012-1234567890ab",
+            "token": "aos_ms_b1b2c3d4-e5f6-4789-9012-1234567890ab." + ("x" * 43),
+            "expires_at": "2026-11-28T12:00:00+00:00",
+        },
+        "persist_mcp_provider_credential": lambda *_args: None,
+        "revoke_mcp_session_credential": lambda *_args: None,
+        "mark_mcp_provider_credential_archived": lambda *_args: None,
+    }
+    values.update(overrides)
+    return request(**values)
+
+
+def test_managed_agents_creates_session_scoped_vault_mcp_credential_and_archives_on_success():
+    seen = []
+    persisted = []
+    revoked = []
+    archived = []
+    mcp_url = "https://mcp.example.test/v1/integrations/claude/mcp/sessions/a1b2c3d4-e5f6-4789-9012-1234567890ab"
+    metadata = {
+        "agency_os_execution_id": "exec-test",
+        "agency_os_session_id": "a1b2c3d4-e5f6-4789-9012-1234567890ab",
+        "agency_os_mcp_server_url": mcp_url,
+    }
+
+    def handler(req):
+        seen.append((req.method, req.url.path))
+        if req.method == "GET" and req.url.path == "/v1/agents/agent_test":
+            return httpx.Response(200, json={
+                "id": "agent_test", "archived_at": None,
+                "tools": [], "mcp_servers": [], "skills": [], "multiagent": None,
+            })
+        if req.method == "GET" and req.url.path == "/v1/environments/env_test":
+            return httpx.Response(200, json={
+                "id": "env_test", "archived_at": None,
+                "config": {"type": "cloud", "networking": {
+                    "type": "limited", "allow_mcp_servers": False,
+                    "allowed_hosts": ["mcp.example.test"],
+                }},
+            })
+        if req.method == "POST" and req.url.path == "/v1/vaults/vlt_test/credentials":
+            body = json.loads(req.content)
+            assert body["auth"] == {
+                "type": "static_bearer",
+                "token": _mcp_request().prepare_mcp_session()["token"],
+                "mcp_server_url": mcp_url,
+            }
+            assert body["metadata"] == metadata
+            return httpx.Response(200, json={
+                "id": "vcrd_test", "archived_at": None,
+                "auth": {"type": "static_bearer", "mcp_server_url": mcp_url},
+                "metadata": metadata,
+            })
+        if req.method == "POST" and req.url.path == "/v1/sessions":
+            body = json.loads(req.content)
+            assert body["vault_ids"] == ["vlt_test"]
+            assert body["agent"]["type"] == "agent_with_overrides"
+            assert body["agent"]["id"] == "agent_test"
+            assert body["agent"]["mcp_servers"] == [{
+                "type": "url", "name": "agency_os", "url": mcp_url,
+            }]
+            toolset = next(item for item in body["agent"]["tools"] if item["type"] == "mcp_toolset")
+            assert toolset["mcp_server_name"] == "agency_os"
+            assert toolset["default_config"]["enabled"] is False
+            assert toolset["configs"] == [{
+                "name": "system.health.read", "enabled": True,
+                "permission_policy": {"type": "always_allow"},
+            }]
+            serialized = json.dumps(body)
+            assert "aos_ms_" not in serialized
+            return httpx.Response(200, json={"id": "sesn_mcp", "status": "running"})
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_mcp":
+            return httpx.Response(200, json={"id": "sesn_mcp", "status": "idle"})
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_mcp/events":
+            return httpx.Response(200, json={"data": [
+                {"type": "agent.message", "content": [{"type": "text", "text": "MCP work completed."}]},
+                {"type": "session.status_idle", "stop_reason": {"type": "end_turn"}},
+            ]})
+        if req.method == "POST" and req.url.path == "/v1/vaults/vlt_test/credentials/vcrd_test/archive":
+            return httpx.Response(200, json={"id": "vcrd_test", "archived_at": "2026-11-28T11:00:00Z"})
+        return httpx.Response(404)
+
+    runtime = ManagedAgentsRuntime(
+        _mcp_config(),
+        client_factory=lambda: httpx.Client(
+            base_url="https://api.anthropic.com",
+            transport=httpx.MockTransport(handler),
+        ),
+        sleep=lambda _seconds: None,
+    )
+    result = runtime.start(_mcp_request(
+        persist_mcp_provider_credential=lambda *args: persisted.append(args),
+        revoke_mcp_session_credential=lambda *args: revoked.append(args),
+        mark_mcp_provider_credential_archived=lambda *args: archived.append(args),
+    ))
+    assert result.detail == "MCP work completed."
+    assert persisted == [(
+        "b1b2c3d4-e5f6-4789-9012-1234567890ab",
+        "vlt_test",
+        "vcrd_test",
+    )]
+    assert revoked == [("b1b2c3d4-e5f6-4789-9012-1234567890ab", "MCP_SESSION_COMPLETED")]
+    assert archived == [("b1b2c3d4-e5f6-4789-9012-1234567890ab", "vcrd_test")]
+    assert ("POST", "/v1/vaults/vlt_test/credentials/vcrd_test/archive") in seen
+
+
+def test_managed_agents_reconciles_ambiguous_vault_create_without_duplicate_post():
+    calls = []
+    mcp_url = "https://mcp.example.test/v1/integrations/claude/mcp/sessions/a1b2c3d4-e5f6-4789-9012-1234567890ab"
+    metadata = {
+        "agency_os_execution_id": "exec-test",
+        "agency_os_session_id": "a1b2c3d4-e5f6-4789-9012-1234567890ab",
+        "agency_os_mcp_server_url": mcp_url,
+    }
+
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        if req.method == "GET" and req.url.path == "/v1/agents/agent_test":
+            return httpx.Response(200, json={"id": "agent_test", "archived_at": None, "tools": [], "mcp_servers": [], "skills": [], "multiagent": None})
+        if req.method == "GET" and req.url.path == "/v1/environments/env_test":
+            return httpx.Response(200, json={"config": {"type": "cloud", "networking": {
+                "type": "limited", "allow_mcp_servers": False, "allowed_hosts": ["mcp.example.test"],
+            }}})
+        if req.method == "POST" and req.url.path == "/v1/vaults/vlt_test/credentials":
+            return httpx.Response(503, json={"error": "temporary"})
+        if req.method == "GET" and req.url.path == "/v1/vaults/vlt_test/credentials":
+            return httpx.Response(200, json={"data": [{
+                "id": "vcrd_reconciled", "archived_at": None,
+                "auth": {"type": "static_bearer", "mcp_server_url": mcp_url},
+                "metadata": metadata,
+            }], "next_page": None})
+        if req.method == "POST" and req.url.path == "/v1/sessions":
+            body = json.loads(req.content)
+            assert body["vault_ids"] == ["vlt_test"]
+            return httpx.Response(200, json={"id": "sesn_reconciled", "status": "running"})
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_reconciled":
+            return httpx.Response(200, json={"id": "sesn_reconciled", "status": "idle"})
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_reconciled/events":
+            return httpx.Response(200, json={"data": [
+                {"type": "agent.message", "content": [{"type": "text", "text": "Recovered MCP create."}]},
+                {"type": "session.status_idle", "stop_reason": {"type": "end_turn"}},
+            ]})
+        if req.method == "POST" and req.url.path.endswith("/vcrd_reconciled/archive"):
+            return httpx.Response(200, json={"id": "vcrd_reconciled"})
+        return httpx.Response(404)
+
+    persisted = []
+    runtime = ManagedAgentsRuntime(
+        _mcp_config(),
+        client_factory=lambda: httpx.Client(base_url="https://api.anthropic.com", transport=httpx.MockTransport(handler)),
+        sleep=lambda _seconds: None,
+    )
+    result = runtime.start(_mcp_request(persist_mcp_provider_credential=lambda *args: persisted.append(args)))
+    assert result.detail == "Recovered MCP create."
+    assert calls.count(("POST", "/v1/vaults/vlt_test/credentials")) == 1
+    assert persisted[0][2] == "vcrd_reconciled"
+
+
+def test_managed_agents_rejects_mcp_environment_with_unrestricted_server_networking():
+    calls = []
+
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        if req.method == "GET" and req.url.path == "/v1/agents/agent_test":
+            return httpx.Response(200, json={"id": "agent_test", "archived_at": None, "tools": [], "mcp_servers": [], "skills": [], "multiagent": None})
+        if req.method == "GET" and req.url.path == "/v1/environments/env_test":
+            return httpx.Response(200, json={"config": {"type": "cloud", "networking": {
+                "type": "limited", "allow_mcp_servers": True, "allowed_hosts": ["mcp.example.test"],
+            }}})
+        return httpx.Response(404)
+
+    runtime = ManagedAgentsRuntime(
+        _mcp_config(),
+        client_factory=lambda: httpx.Client(base_url="https://api.anthropic.com", transport=httpx.MockTransport(handler)),
+    )
+    with pytest.raises(RuntimeNotConfiguredError):
+        runtime.start(_mcp_request())
+    assert calls == [
+        ("GET", "/v1/agents/agent_test"),
+        ("GET", "/v1/environments/env_test"),
+    ]
