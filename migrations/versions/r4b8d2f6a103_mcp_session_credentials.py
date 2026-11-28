@@ -274,6 +274,60 @@ def upgrade() -> None:
         TO agency_os_app
     """)
 
+    # The worker may retrieve only the non-secret provider reference for
+    # the credential attached to its current execution.
+    op.execute("""
+        CREATE OR REPLACE FUNCTION agency_os_private.load_mcp_provider_credential(
+            p_execution_id text
+        ) RETURNS TABLE(
+            credential_id text,
+            session_id text,
+            vault_id text,
+            provider_credential_id text,
+            credential_expires_at timestamptz
+        )
+        LANGUAGE plpgsql
+        VOLATILE
+        SECURITY DEFINER
+        SET search_path = pg_catalog, public, agency_os_private
+        AS $function$
+        BEGIN
+            IF session_user <> 'agency_os_worker'
+               OR p_execution_id IS NULL OR length(p_execution_id) <> 36 THEN
+                RETURN;
+            END IF;
+            RETURN QUERY
+            SELECT cred.id::text, cred.session_id::text, cred.provider_vault_id::text,
+                   cred.provider_credential_id::text, cred.expires_at
+              FROM public.machine_session_credentials AS cred
+              JOIN public.executions AS e
+                ON e.org_id = cred.org_id
+               AND e.workspace_id = cred.workspace_id
+               AND e.machine_session_id = cred.session_id
+             WHERE e.id = p_execution_id
+               AND e.status::text = 'running'
+               AND agency_os_private.worker_has_execution_context(e.org_id, e.workspace_id, e.id)
+               AND cred.revoked_at IS NULL
+               AND cred.expires_at > clock_timestamp()
+               AND cred.provider_credential_status = 'active'
+               AND cred.provider_credential_id IS NOT NULL
+             FOR UPDATE OF cred;
+        END
+        $function$
+    """)
+    op.execute("""
+        ALTER FUNCTION agency_os_private.load_mcp_provider_credential(text)
+        OWNER TO agency_os_migrator
+    """)
+    op.execute("""
+        REVOKE ALL ON FUNCTION agency_os_private.load_mcp_provider_credential(text)
+        FROM PUBLIC, agency_os_app
+    """)
+    op.execute("""
+        GRANT EXECUTE ON FUNCTION agency_os_private.load_mcp_provider_credential(text)
+        TO agency_os_worker
+    """)
+
     # Provider Vault references can be attached/revoked/archived only by the
     # current worker execution for the exact AgentSession.
     op.execute("""
@@ -437,6 +491,10 @@ def downgrade() -> None:
             FROM PUBLIC, agency_os_app
         """)
         op.execute("""
+            REVOKE ALL ON FUNCTION agency_os_private.load_mcp_provider_credential(text)
+            FROM PUBLIC, agency_os_worker, agency_os_app
+        """)
+        op.execute("""
             REVOKE ALL ON FUNCTION agency_os_private.attach_mcp_provider_credential(text, text, text)
             FROM PUBLIC, agency_os_worker, agency_os_app
         """)
@@ -453,6 +511,9 @@ def downgrade() -> None:
         """)
         op.execute("""
             DROP FUNCTION IF EXISTS agency_os_private.is_mcp_session_credential_active(text, text, text, text, text, text)
+        """)
+        op.execute("""
+            DROP FUNCTION IF EXISTS agency_os_private.load_mcp_provider_credential(text)
         """)
         op.execute("""
             DROP FUNCTION IF EXISTS agency_os_private.attach_mcp_provider_credential(text, text, text)
