@@ -37,7 +37,7 @@ def _utc(value: datetime) -> datetime:
 
 def _recently_checked(result: dict, now: datetime) -> bool:
     marker = result.get("usage_reconciliation")
-    if not isinstance(marker, dict) or marker.get("status") != "pending":
+    if not isinstance(marker, dict) or marker.get("status") not in {"pending", "reconciled"}:
         return False
     raw = marker.get("checked_at")
     if not isinstance(raw, str):
@@ -91,27 +91,32 @@ def _persist_snapshot(
             return "skipped"
 
         result = dict(attempt.result or {})
-        if isinstance(result.get("usage"), dict):
-            return "skipped"
+        current_usage = result.get("usage")
+        if not isinstance(current_usage, dict):
+            current_usage = None
 
         checked_at = observed_at.isoformat()
         if usage is None:
-            result["usage_reconciliation"] = {
+            marker = dict(result.get("usage_reconciliation") or {})
+            marker.update({
                 "status": "pending",
                 "checked_at": checked_at,
                 "reason": pending_reason,
-            }
+            })
+            result["usage_reconciliation"] = marker
             attempt.result = result
             db.commit()
             return "pending"
 
         normalized = _validate_provider_usage(usage)
         if normalized is None:
-            result["usage_reconciliation"] = {
+            marker = dict(result.get("usage_reconciliation") or {})
+            marker.update({
                 "status": "pending",
                 "checked_at": checked_at,
-                "reason": "provider_session_not_idle_or_usage_unavailable",
-            }
+                "reason": pending_reason,
+            })
+            result["usage_reconciliation"] = marker
             attempt.result = result
             db.commit()
             return "pending"
@@ -120,6 +125,21 @@ def _persist_snapshot(
             normalized, sort_keys=True, separators=(",", ":"), allow_nan=False
         )
         snapshot_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        previous_marker = result.get("usage_reconciliation")
+        if (
+            current_usage == normalized
+            and isinstance(previous_marker, dict)
+            and previous_marker.get("snapshot_sha256") == snapshot_hash
+        ):
+            previous_marker.update({
+                "status": "reconciled",
+                "checked_at": checked_at,
+            })
+            result["usage_reconciliation"] = previous_marker
+            attempt.result = result
+            db.commit()
+            return "skipped"
+
         result["usage"] = normalized
         result["usage_reconciliation"] = {
             "status": "reconciled",
@@ -179,6 +199,7 @@ def reconcile_abandoned_managed_agent_usage(
                 ExecutionAttempt.execution_id,
                 ExecutionAttempt.external_run_id,
                 ExecutionAttempt.result,
+                ExecutionAttempt.attempt_number,
             )
             .join(Execution, Execution.id == ExecutionAttempt.execution_id)
             .filter(
@@ -194,10 +215,17 @@ def reconcile_abandoned_managed_agent_usage(
         )
 
     candidates = []
-    for attempt_id, execution_id, external_run_id, raw_result in rows:
+    latest_by_session = {}
+    for attempt_id, execution_id, external_run_id, raw_result, attempt_number in rows:
+        key = (execution_id, external_run_id)
+        current = latest_by_session.get(key)
+        if current is None or attempt_number > current[0]:
+            latest_by_session[key] = (
+                attempt_number, attempt_id, execution_id, external_run_id, raw_result,
+            )
+
+    for _number, attempt_id, execution_id, external_run_id, raw_result in latest_by_session.values():
         result = raw_result if isinstance(raw_result, dict) else {}
-        if isinstance(result.get("usage"), dict):
-            continue
         if _recently_checked(result, observed_at):
             counts["skipped"] += 1
             continue
