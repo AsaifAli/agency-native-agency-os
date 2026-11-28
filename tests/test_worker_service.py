@@ -2444,6 +2444,8 @@ def test_provider_usage_snapshot_is_preserved_in_append_only_audit(worker_contex
     ctx = worker_context
     db = ctx["db"]
     execution, attempt = claim_for_lifecycle_test(ctx, worker_id="usage-audit-worker")
+    execution.runtime = "claude_managed_agents"
+    attempt.runtime = "claude_managed_agents"
     start_execution(
         db,
         execution_id=execution.id,
