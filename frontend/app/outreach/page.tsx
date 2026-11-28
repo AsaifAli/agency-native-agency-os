@@ -74,7 +74,7 @@ export default function OutreachPage() {
         api<Message[]>(`/v1/orgs/${orgId()}/outreach/messages?workspace_id=${encodeURIComponent(workspace)}`),
         api<Block[]>(`/v1/orgs/${orgId()}/outreach/blocks?workspace_id=${encodeURIComponent(workspace)}&status=active`),
         api<Consent[]>(`/v1/orgs/${orgId()}/outreach/consents?workspace_id=${encodeURIComponent(workspace)}`),
-        api<Approval[]>(`/v1/orgs/${orgId()}/approvals?workspace_id=${encodeURIComponent(workspace)}`),
+        api<Approval[]>(`/v1/orgs/${orgId()}/approvals?workspace_id=${encodeURIComponent(workspace)}`).catch(()=>[]),
       ]);
       setContacts(contactRows.filter(item => !!item.email));
       setLeads(leadRows);
