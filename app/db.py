@@ -117,7 +117,7 @@ REQUIRED_RLS_TABLES = frozenset({
     "contacts", "contract_records", "delegations", "evaluation_runs",
     "executions", "founder_authorities", "invoice_records",
     "lead_research_drafts", "lead_research_records", "leads",
-    "machine_identities", "memberships", "milestones",
+    "machine_identities", "machine_session_credentials", "memberships", "milestones",
     "onboarding_checklist_items", "opportunities", "orchestration_plan_drafts",
     "orchestration_plan_delegations", "orchestration_plans", "outbound_message_events", "outbound_messages",
     "outbound_senders", "outbox_events", "outreach_drafts", "outcome_measurements", "payment_receipts",
