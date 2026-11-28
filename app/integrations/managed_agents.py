@@ -672,11 +672,104 @@ class ManagedAgentsRuntime(AgentRuntime):
             enabled_tools = self._validate_provider_agent(client, request)
             resuming_existing_session = bool(request.external_run_id)
             session_id = request.external_run_id
+            mcp_state: dict | None = None
+
+            def cleanup_mcp(reason: str) -> None:
+                nonlocal mcp_state
+                if mcp_state is None:
+                    return
+                self._cleanup_mcp_credential(
+                    client,
+                    request,
+                    os_credential_id=mcp_state["credential_id"],
+                    provider_credential_id=mcp_state.get("provider_credential_id"),
+                    reason=reason,
+                )
+                mcp_state = None
+
+            if self.config.claude_managed_mcp_enabled:
+                self._validate_mcp_environment(client)
+                if resuming_existing_session:
+                    if request.get_mcp_provider_credential is None:
+                        raise RuntimeManualReviewRequired(
+                            "No OS-owned MCP provider credential lookup is available for session recovery."
+                        )
+                    mcp_state = request.get_mcp_provider_credential()
+                    if (
+                        not isinstance(mcp_state, dict)
+                        or not isinstance(mcp_state.get("credential_id"), str)
+                        or not isinstance(mcp_state.get("session_id"), str)
+                        or not isinstance(mcp_state.get("provider_credential_id"), str)
+                        or mcp_state.get("vault_id") != self.config.claude_managed_mcp_vault_id
+                    ):
+                        raise RuntimeManualReviewRequired(
+                            "The persisted MCP Vault credential is unavailable for this provider session."
+                        )
+
             if not session_id:
+                if self.config.claude_managed_mcp_enabled:
+                    if request.prepare_mcp_session is None:
+                        raise RuntimeManualReviewRequired(
+                            "No execution-scoped MCP session preparation callback is available."
+                        )
+                    prepared = request.prepare_mcp_session()
+                    if (
+                        not isinstance(prepared, dict)
+                        or not isinstance(prepared.get("session_id"), str)
+                        or not isinstance(prepared.get("credential_id"), str)
+                        or not isinstance(prepared.get("token"), str)
+                    ):
+                        raise RuntimeManualReviewRequired(
+                            "The OS did not return a complete MCP session credential."
+                        )
+                    mcp_state = {
+                        "credential_id": prepared["credential_id"],
+                        "session_id": prepared["session_id"],
+                        "provider_credential_id": None,
+                    }
+                    mcp_url = self._mcp_session_url(prepared["session_id"])
+                    try:
+                        provider_credential_id = self._create_mcp_vault_credential(
+                            client,
+                            request=request,
+                            os_session_id=prepared["session_id"],
+                            token=prepared["token"],
+                            mcp_url=mcp_url,
+                        )
+                        mcp_state["provider_credential_id"] = provider_credential_id
+                        if request.persist_mcp_provider_credential is None:
+                            raise RuntimeManualReviewRequired(
+                                "No OS persistence callback exists for the Anthropic Vault credential."
+                            )
+                        request.persist_mcp_provider_credential(
+                            prepared["credential_id"],
+                            self.config.claude_managed_mcp_vault_id,
+                            provider_credential_id,
+                        )
+                    except RuntimeManualReviewRequired:
+                        cleanup_mcp("MCP_VAULT_CREATE_AMBIGUOUS")
+                        raise
+                    except RuntimeNotConfiguredError:
+                        cleanup_mcp("MCP_VAULT_CREATE_REJECTED")
+                        raise
+                    except Exception as exc:
+                        cleanup_mcp("MCP_VAULT_PERSIST_FAILED")
+                        raise RuntimeManualReviewRequired(
+                            "The Anthropic Vault credential could not be persisted safely."
+                        ) from exc
+
                 body = {
                     # The Agent may expose only exact custom tools from the OS registry.
-                    "agent": self.config.claude_managed_agent_id,
+                    "agent": (
+                        self._mcp_agent_override(enabled_tools, mcp_url)
+                        if mcp_state is not None
+                        else self.config.claude_managed_agent_id
+                    ),
                     "environment_id": self.config.claude_managed_environment_id,
+                    **(
+                        {"vault_ids": [self.config.claude_managed_mcp_vault_id]}
+                        if mcp_state is not None else {}
+                    ),
                     "budget": {
                         "type": "limit",
                         "max_list_cost": {
@@ -707,29 +800,35 @@ class ManagedAgentsRuntime(AgentRuntime):
                 try:
                     created = self._request(client, "POST", "/v1/sessions", json=body)
                 except RuntimeNotConfiguredError:
-                    # A definitive provider rejection is not an ambiguous create.
+                    if mcp_state is not None:
+                        cleanup_mcp("MCP_SESSION_CREATE_REJECTED")
                     raise
-                except RuntimeExecutionError as exc:
-                    # A transport failure, 429/5xx, or malformed success response
-                    # does not prove the provider did not create a billable session.
-                    # Never let the worker blindly retry POST /sessions.
+                except (RuntimeTransientError, RuntimeExecutionError) as exc:
+                    if mcp_state is not None:
+                        cleanup_mcp("MCP_SESSION_CREATE_AMBIGUOUS")
                     raise RuntimeManualReviewRequired(
                         "Claude Managed Agents session creation outcome is ambiguous; "
                         "reconcile the provider session before retrying."
                     ) from exc
 
                 if not isinstance(created, dict):
+                    if mcp_state is not None:
+                        cleanup_mcp("MCP_SESSION_CREATE_MALFORMED")
                     raise RuntimeManualReviewRequired(
                         "Claude Managed Agents returned a malformed session creation "
                         "response; provider reconciliation is required."
                     )
                 session_id = created.get("id")
                 if not isinstance(session_id, str) or not session_id.strip():
+                    if mcp_state is not None:
+                        cleanup_mcp("MCP_SESSION_CREATE_MALFORMED")
                     raise RuntimeManualReviewRequired(
                         "Claude Managed Agents may have created a session without "
                         "returning a usable ID; provider reconciliation is required."
                     )
                 if request.persist_external_run_id is None:
+                    if mcp_state is not None:
+                        cleanup_mcp("MCP_SESSION_ID_PERSIST_FAILED")
                     raise RuntimeManualReviewRequired(
                         "The provider session was created but no durable OS persistence "
                         "callback is available; reconcile before retrying."
@@ -737,8 +836,8 @@ class ManagedAgentsRuntime(AgentRuntime):
                 try:
                     request.persist_external_run_id(session_id)
                 except Exception:
-                    # The provider session exists, but the OS could not durably attach
-                    # its ID to this execution. Do not create another session on retry.
+                    if mcp_state is not None:
+                        cleanup_mcp("MCP_SESSION_ID_PERSIST_FAILED")
                     raise RuntimeManualReviewRequired(
                         "The provider session was created but its ID could not be "
                         "persisted by Agency OS; reconcile before retrying."
