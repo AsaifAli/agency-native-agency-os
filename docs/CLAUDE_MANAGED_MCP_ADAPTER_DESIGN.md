@@ -1,12 +1,12 @@
 # Claude Managed Agents MCP Adapter — Design and Acceptance Contract
 
-**Status:** Partially implemented on the consolidated integration branch; disabled by default. Live Anthropic provider validation and external configuration remain pending.  
+**Status:** Compatibility design only; disabled by default and not part of the active Managed Agents tool path. The active path is the native execution-bound custom-tool callback into the OS Tool Gateway. Do not enable both transports. Live Anthropic provider validation and external configuration remain pending.
 **Owner:** Claude runtime adapter, with the OS Tool Gateway as the only authorization and execution authority.  
 **Initial data policy:** synthetic/public only. No local model, local inference or local fallback.
 
 ## 1. Architectural boundary
 
-MCP transport belongs to the Claude Managed Agents integration layer. It is not a second tool system.
+This document records a provider-native MCP compatibility option. It is not the active Managed Agents integration path. The active path uses `agent.custom_tool_use` callbacks; Cowork and Claude Code use the shared Agency MCP gateway. Do not enable both Managed Agents tool transports. This compatibility option still converges on the same Tool Gateway and is not a second tool registry.
 
 - The Claude adapter owns provider-specific Agent/session configuration, MCP server registration, Anthropic Vault credentials, session lifecycle and provider event handling.
 - The OS owns machine identity, AgentSession, session credentials, workspace scope, RBAC/ABAC, workforce grants, data-class eligibility, approvals, idempotency, tool execution, persisted results and audit.
