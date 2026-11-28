@@ -352,3 +352,11 @@ def test_every_security_definer_migration_function_is_private_and_pins_search_pa
             assert match.group(1).startswith("agency_os_private."), path.name
             assert re.search(r"SET\s+search_path\s*=\s*pg_catalog(?:\s*,|\s*$)", definition, re.IGNORECASE), path.name
     assert checked >= 30
+
+
+def test_machine_identity_and_session_rls_are_bound_to_the_authenticated_identity():
+    source = (Path(__file__).parents[1] / "migrations/versions/e5f6a7b8c9d0_machine_identity_session_rls.py").read_text()
+    assert "id = nullif(current_setting('agency_os.machine_identity_lookup_id', true), '')" in source
+    assert "machine_identity_id = nullif(current_setting('agency_os.machine_identity_lookup_id', true), '')" in source
+    assert "worker_has_execution_context" in source
+    assert "user_has_workspace_access" in source

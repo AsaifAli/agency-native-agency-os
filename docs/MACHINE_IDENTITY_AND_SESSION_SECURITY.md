@@ -17,6 +17,7 @@ Machine identities and bounded sessions are the authentication foundation for th
 - Interactive `service` identities may mint one short-lived MCP credential for their own session only when they also hold `tools:invoke`. Agent/worker MCP credentials remain bound to the existing worker execution lifecycle.
 - Interactive MCP credentials are displayed once, stored as digests, expire within the session and at most one hour, and can be revoked per session. PostgreSQL issuance/revocation uses narrowly scoped SECURITY DEFINER functions; the API role cannot SELECT, INSERT or UPDATE the credential table directly.
 - Session organization/workspace/identity are derived from the authenticated identity, never caller-supplied.
+- Machine identities and agent sessions are row-scoped to the authenticated machine identity as well as its organization/workspace. A Cowork/Code service identity cannot enumerate another service identity or its sessions in the same workspace; worker access remains tied to its execution/maintenance capability.
 - Session lifetime is bounded to 60 seconds through 24 hours and cannot outlive the identity.
 - Sessions persist purpose, data class, status and lifecycle timestamps. The worker maintenance loop expires due sessions in bounded, row-locked batches and writes an audit event for each expiry.
 - Tool authorization requires the exact active session, matching scope, identity, workspace and data class. The REST Tool Gateway and MCP transport share the same code-owned registry and invocation service.

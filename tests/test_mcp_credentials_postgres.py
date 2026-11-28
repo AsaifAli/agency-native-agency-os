@@ -310,6 +310,7 @@ def test_service_identity_mcp_credential_uses_narrow_database_capabilities():
     from app.session_credentials import (
         authenticate_session_credential,
         issue_session_credential,
+        load_active_session_context,
     )
 
     admin_engine = create_engine(ADMIN_URL, pool_pre_ping=True)
@@ -344,7 +345,24 @@ def test_service_identity_mcp_credential_uses_narrow_database_capabilities():
                 allowed_data_classes=["public"],
                 expires_at=now + timedelta(hours=2), created_by_user_id=user.id,
             )
-            db.add(identity)
+            other_identity_id = str(uuid.uuid4())
+            other_identity = MachineIdentity(
+                id=other_identity_id, org_id=org.id, workspace_id=workspace.id,
+                name="Separate Cowork integration", subject_type="service",
+                subject_id="cowork", token_hash=hashlib.sha256(uuid.uuid4().bytes).hexdigest(),
+                token_prefix=f"aos_mi_{other_identity_id}.",
+                scopes=["sessions:create", "tools:invoke"],
+                allowed_data_classes=["public"],
+                expires_at=now + timedelta(hours=2), created_by_user_id=user.id,
+            )
+            other_session_id = str(uuid.uuid4())
+            other_session = AgentSession(
+                id=other_session_id, org_id=org.id, workspace_id=workspace.id,
+                machine_identity_id=other_identity_id, purpose="Separate client session",
+                data_class="public", status="active", created_at=now, last_seen_at=now,
+                expires_at=now + timedelta(minutes=30),
+            )
+            db.add_all([identity, other_identity, other_session])
             db.commit()
             org_id, workspace_id = org.id, workspace.id
 
@@ -402,6 +420,10 @@ def test_service_identity_mcp_credential_uses_narrow_database_capabilities():
             assert loaded_principal.identity.id == identity_id
             assert loaded_session.id == session_id
             assert db.info["agency_os_rls_context"]["machine_identity_lookup_id"] == identity_id
+            visible_identity_ids = {row[0] for row in db.query(MachineIdentity.id).all()}
+            visible_session_ids = {row[0] for row in db.query(AgentSession.id).all()}
+            assert visible_identity_ids == {identity_id}
+            assert visible_session_ids == {session_id}
 
             issued = issue_session_credential(
                 db, principal, session_id=session_id, ttl_seconds=600
@@ -416,6 +438,12 @@ def test_service_identity_mcp_credential_uses_narrow_database_capabilities():
             assert context.workspace_id == workspace_id
             assert context.machine_identity_id == identity_id
             assert context.session_id == session_id
+            assert db.info["agency_os_rls_context"]["machine_identity_lookup_id"] == identity_id
+            session_principal, active_session = load_active_session_context(db, context)
+            assert session_principal.identity.id == identity_id
+            assert active_session.id == session_id
+            assert {row[0] for row in db.query(MachineIdentity.id).all()} == {identity_id}
+            assert {row[0] for row in db.query(AgentSession.id).all()} == {session_id}
 
             with pytest.raises(DBAPIError):
                 db.execute(text("SELECT token_hash FROM public.machine_session_credentials")).all()

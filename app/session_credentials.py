@@ -279,6 +279,7 @@ def authenticate_session_credential(
         )
     set_rls_context(
         db, machine_org_id=context.org_id, machine_workspace_id=context.workspace_id,
+        machine_identity_lookup_id=context.machine_identity_id,
     )
     db.commit()
     return context
@@ -291,6 +292,7 @@ def load_active_session_context(
     """Revalidate credential, identity and session at every tool-dispatch boundary."""
     set_rls_context(
         db, machine_org_id=context.org_id, machine_workspace_id=context.workspace_id,
+        machine_identity_lookup_id=context.machine_identity_id,
     )
     if db.get_bind().dialect.name == "postgresql":
         active = db.execute(
