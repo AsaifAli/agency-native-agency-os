@@ -120,6 +120,16 @@ def test_mcp_credential_hash_is_not_readable_and_auth_is_database_owned():
                        has_table_privilege(current_user, 'public.machine_session_credentials', 'DELETE')
             """)).one()
             assert tuple(privileges) == (False, True, False, False)
+            worker_function_privileges = connection.execute(text("""
+                SELECT
+                    has_function_privilege(current_user,
+                      'agency_os_private.attach_mcp_provider_credential(text,text,text)', 'EXECUTE'),
+                    has_function_privilege(current_user,
+                      'agency_os_private.revoke_mcp_session_credential(text,text)', 'EXECUTE'),
+                    has_function_privilege(current_user,
+                      'agency_os_private.mark_mcp_provider_credential_archived(text,text)', 'EXECUTE')
+            """)).one()
+            assert tuple(worker_function_privileges) == (True, True, True)
 
             # Caller-forged tenant GUCs cannot satisfy the execution-bound INSERT policy.
             connection.execute(
@@ -146,6 +156,24 @@ def test_mcp_credential_hash_is_not_readable_and_auth_is_database_owned():
                     "identity": expected[2], "session": expected[3],
                     "hash": hashlib.sha256(f"forged-{suffix}".encode()).hexdigest(),
                 })
+            connection.rollback()
+            # The worker may call the bounded lifecycle functions, but forged
+            # tenant GUCs cannot make them act without a live execution capability.
+            assert connection.execute(text("""
+                SELECT agency_os_private.attach_mcp_provider_credential(
+                    :credential_id, 'vlt_test', 'cred_test'
+                )
+            """), {"credential_id": credential_id}).scalar_one() is False
+            assert connection.execute(text("""
+                SELECT agency_os_private.revoke_mcp_session_credential(
+                    :credential_id, 'TEST_FORGED_CONTEXT'
+                )
+            """), {"credential_id": credential_id}).scalar_one() is False
+            assert connection.execute(text("""
+                SELECT agency_os_private.mark_mcp_provider_credential_archived(
+                    :credential_id, 'cred_test'
+                )
+            """), {"credential_id": credential_id}).scalar_one() is False
             connection.rollback()
 
         with Admin() as db:
