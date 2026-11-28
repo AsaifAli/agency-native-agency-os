@@ -1377,6 +1377,13 @@ def test_agent_version_activation_and_rollback_require_exact_founder_approval(ap
     assert draft["version_number"] == 2
     assert draft["is_active"] is False
 
+    client.set_principal(identity["operator"])
+    hidden_versions = client.get(
+        base_url, params={"workspace_id": identity["workspace"].id},
+    )
+    assert hidden_versions.status_code == 403
+    client.set_principal(identity["principal"])
+
     def create_approval(resource_id, payload):
         approval_db = client.factory()
         try:
