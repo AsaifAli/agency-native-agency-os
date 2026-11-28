@@ -1,6 +1,6 @@
 # Execution sandbox design and acceptance
 
-**Status: Phase 1 API/worker container hardening is configured and statically tested; Docker runtime verification is pending. Per-execution sandboxing and artifact gateway are not implemented.**
+**Status: Phase 1 API/worker container hardening is configured and verified in GitHub CI (image build, Compose validation and constrained container runtime checks). API/worker application startup and worker claim/recovery under these restrictions still require staging verification. Per-execution sandboxing and artifact gateway are not implemented.**
 
 This document defines the execution-isolation boundary for the internal Agency OS. It does not claim that Docker Compose process separation, PostgreSQL RLS, or an Anthropic Managed Agents environment is itself a per-execution sandbox.
 
@@ -24,7 +24,7 @@ This document defines the execution-isolation boundary for the internal Agency O
 
 The consolidated candidate separates API and worker processes in Docker Compose and uses distinct PostgreSQL API, worker and migration roles. The worker verifies its production database role and RLS posture at startup. The Tool Gateway applies OS-issued machine/session scope, capability checks, input/output protection, schema validation, idempotency, durable invocation records and audit. These controls are valuable but do not isolate arbitrary code per execution.
 
-The application image now declares a dedicated UID/GID 10001 runtime user. The API and ordinary worker Compose services are configured for non-root execution, read-only root filesystems, a bounded noexec/nosuid/nodev `/tmp` tmpfs, all Linux capabilities dropped, no-new-privileges, PID limits, memory limits and CPU limits. Static contract tests cover these settings. Docker/Compose is not installed in the current execution environment, so image build, effective runtime identity, read-only filesystem behavior, health, worker claim/recovery and graceful shutdown under these constraints still require CI or staging verification. The ordinary worker remains a long-running process, not a disposable per-execution container. Managed Agents environment sandboxing and egress remain unverified; an environment identifier is not evidence of a verified sandbox.
+The application image now declares a dedicated UID/GID 10001 runtime user. The API and ordinary worker Compose services are configured for non-root execution, read-only root filesystems, a bounded noexec/nosuid/nodev `/tmp` tmpfs, all Linux capabilities dropped, no-new-privileges, PID limits, memory limits and CPU limits. Static contract tests cover these settings. GitHub CI successfully validates the Compose configuration, builds the image and runs it with the configured restrictions; it verifies effective UID 10001, `NoNewPrivs`, zero effective Linux capabilities, a read-only root mount and the bounded noexec/nosuid/nodev `/tmp` tmpfs. Application startup/health, migrations and worker claim/recovery/graceful shutdown under these restrictions still require staging verification. The ordinary worker remains a long-running process, not a disposable per-execution container. Managed Agents environment sandboxing and egress remain unverified; an environment identifier is not evidence of a verified sandbox.
 
 **Therefore: per-execution sandboxing is currently an implementation gap. Do not run untrusted generated code, arbitrary shell commands, or hostile file-processing workloads in the API or ordinary worker.**
 
@@ -63,7 +63,8 @@ A container is a useful first isolation layer, not a universal hostile-code boun
 - [x] Declare dedicated non-root UID/GID 10001 in the application image.
 - [x] Configure API and worker read-only root filesystems, bounded writable tmpfs, dropped Linux capabilities, no-new-privileges, PID/CPU/memory limits.
 - [x] Keep API and worker roles distinct; no host paths or container runtime sockets are mounted.
-- [ ] Verify Docker image build, effective UID, health, migration compatibility, worker claims, shutdown and log handling under these restrictions in CI/staging.
+- [x] Verify Compose configuration, Docker image build, effective UID, read-only root mount, zero effective capabilities, no-new-privileges and bounded tmpfs in GitHub CI.
+- [ ] Verify API startup/health, migration compatibility, worker claims, shutdown and log handling under these restrictions in staging.
 - These are defense-in-depth controls for the service containers, not a substitute for per-execution isolation.
 
 ### Phase 2 — isolated execution broker

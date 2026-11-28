@@ -190,7 +190,7 @@ Before enabling an external client:
 - [ ] Configure public HTTPS routing, exact Host/Origin, DNS-rebinding protections, request limits and rate limits.
 - [ ] Configure a dedicated machine identity per runtime/workspace and review exact scopes.
 - [ ] Verify the client can securely store and send its configured bearer header; for Cowork, confirm the custom connector's fixed-header setup and rotate the dedicated service identity on schedule.
-- [ ] Run initialize/list/call tests with synthetic/public data from the actual client.
+- [ ] Run modern `server/discover`/list/call tests with synthetic/public data from the actual client; use initialize/list/call only for clients that require the legacy protocol.
 - [ ] Test wrong workspace, wrong session path, expired/revoked credential, disabled identity, missing tool scope, data-class mismatch, secret payload, prompt injection and duplicate calls.
 - [ ] Confirm audit records and session revocation behavior.
 - [ ] Verify Cowork connector permissions independently; do not assume MCP authorization governs native Cowork connectors. Remote Cowork connectors originate from Anthropic cloud infrastructure and require a public HTTPS endpoint.
