@@ -1179,3 +1179,41 @@ def test_managed_agents_defers_usage_when_idle_session_has_open_workflow_run():
     )
 
     assert runtime.fetch_idle_session_usage("sesn_open_run") is None
+
+
+
+def test_managed_agents_reconciles_usage_from_terminated_session():
+    def handler(req):
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_terminated":
+            return httpx.Response(200, json={
+                "id": "sesn_terminated",
+                "status": "terminated",
+                "usage": {
+                    "input_tokens": 4,
+                    "output_tokens": 2,
+                    "list_cost": {"amount": "3", "currency": "USD"},
+                },
+            })
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_terminated/events":
+            return httpx.Response(200, json={"data": []})
+        return httpx.Response(404)
+
+    runtime = ManagedAgentsRuntime(
+        config(),
+        client_factory=lambda: httpx.Client(
+            base_url="https://api.anthropic.com",
+            headers={
+                "Authorization": "Bearer test-key",
+                "anthropic-version": "2026-10-21",
+                "anthropic-beta": "managed-agents-2026-04-01",
+            },
+            transport=httpx.MockTransport(handler),
+        ),
+    )
+
+    assert runtime.fetch_idle_session_usage("sesn_terminated") == {
+        "input_tokens": 4,
+        "output_tokens": 2,
+        "list_cost_minor": 3,
+        "currency": "USD",
+    }
