@@ -170,4 +170,6 @@ def test_private_operations_migration_enforces_workspace_rls_and_app_worker_gran
     assert "FORCE ROW LEVEL SECURITY" in source
     assert "user_has_workspace_access" in source
     assert "agency_os.machine_org_id" in source and "agency_os.machine_workspace_id" in source
-    assert "TO agency_os_app" in source and "TO agency_os_worker" in source
+    assert "TO agency_os_app" in source
+    assert "session_user <> 'agency_os_worker'" in source
+    assert "REVOKE ALL ON public." in source and "FROM agency_os_worker" in source
