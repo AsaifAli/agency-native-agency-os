@@ -534,7 +534,7 @@ def test_worker_public_table_grants_are_least_privilege():
         "workspaces",
     }
     expected_insert = {
-        "agent_sessions", "audit_events", "executions",
+        "audit_events", "executions",
         "lead_research_drafts", "tool_invocations",
     }
     expected_update = {
