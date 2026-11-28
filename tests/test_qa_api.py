@@ -273,3 +273,39 @@ def test_failed_retest_returns_issue_to_work_and_is_audited(client):
         assert event.payload["to_status"] == "in_progress"
     finally:
         db.close()
+
+
+def test_qa_issue_redacts_pii_before_persistence(client):
+    payload = {
+        "workspace_id": client.ws_id,
+        "project_id": client.project_id,
+        "task_id": client.task_id,
+        "title": "Contact alice@example.test reported approval bypass",
+        "description": "Reproduced by alice@example.test in the test workspace.",
+        "severity": "major",
+    }
+    response = client.post(
+        f"/v1/orgs/{client.org_id}/qa/issues",
+        headers=headers(), json=payload,
+    )
+    assert response.status_code == 201, response.text
+    assert "alice@example.test" not in response.json()["title"]
+    assert "alice@example.test" not in response.json()["description"]
+    assert "[REDACTED_EMAIL]" in response.json()["description"]
+
+
+def test_qa_issue_blocks_provider_secrets(client):
+    response = client.post(
+        f"/v1/orgs/{client.org_id}/qa/issues",
+        headers=headers(),
+        json={
+            "workspace_id": client.ws_id,
+            "project_id": client.project_id,
+            "task_id": client.task_id,
+            "title": "Provider key leaked in logs",
+            "description": "Observed key sk-or-v1-abcdefghijklmnopqrstuvwx in output.",
+            "severity": "critical",
+        },
+    )
+    assert response.status_code == 422
+    assert "data-protection" in response.json()["detail"].lower()
