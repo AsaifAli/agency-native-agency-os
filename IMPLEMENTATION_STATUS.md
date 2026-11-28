@@ -1,6 +1,6 @@
 # Agency OS — authoritative implementation status
 
-**Last reconciled:** 2026-11-28 16:40 UTC  
+**Last reconciled:** 2026-11-28 17:02 UTC  
 **Working branch:** `main` is the single active integration branch for founder-authorized work. Do not create parallel feature branches or PRs unless explicitly requested.  
 **Verified code baseline:** PR #71 was merged into `main` at 2026-11-28 16:28:33 UTC; merged code commit `f07a8b7b8a864cbc08da35bf4b4c422cd4baf25e`. PRs #68, #69 and #70, plus the learning/Cowork/Code integration work in PR #71, are included.  
 **Code-baseline CI:** [Run 46165349483](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46165349483) completed successfully. Backend and frontend jobs passed, including PostgreSQL role bootstrap/migrations/integration tests, Python compilation, hardened runtime image checks, frontend typecheck and production build. Subsequent changes to `IMPLEMENTATION_STATUS.md` and `CLAUDE.md` are documentation-only; follow-up CI is triggered by those commits. No new test count is inferred from job status alone.  
@@ -22,7 +22,7 @@ This file describes the merged `main` baseline. Historical PR/branch checkpoints
 | Live Claude/Anthropic provider compatibility | Not verified | No live provider provisioning, credentials or production provider execution claimed. |
 | Production migration, deployment, restore drill or compliance assessment | Not performed | Requires separate staging/production controls and explicit founder go/no-go. |
 
-No production database migration, production deployment, external provider activation, client-data operation or compliance assessment is claimed.
+No production database migration, production deployment, external provider activation, client-data operation or compliance assessment is claimed. The outbox handler registry remains empty; no external side-effect handler has been enabled. Phase 1 failure-injection acceptance remains in progress because the full failure matrix, operational alerts/metrics, and staging lifecycle verification are not complete.
 
 ## Mission and architecture
 
@@ -53,7 +53,8 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 - Worker production startup verifies `PROCESS_ROLE=worker`, PostgreSQL and the `agency_os_worker` role with `NOBYPASSRLS`.
 - Worker execution and maintenance use database-verified, capability-bound claim/renew/release operations; caller-forgeable machine GUCs do not establish worker authorization.
 - Durable execution lifecycle includes persisted attempts, leases, heartbeats, bounded retries, expired-lease recovery, pause/cancel acknowledgement and workspace-scoped maintenance.
-- PostgreSQL outbox foundation supports allowlisted handlers, SKIP LOCKED claims, leases, bounded attempts, acknowledgement, sanitized errors, retry, dead letter and reconciliation.
+- PostgreSQL outbox foundation supports allowlisted handlers, SKIP LOCKED claims, bounded attempts, acknowledgement, sanitized errors, retry, dead letter and reconciliation. Long-running handlers renew active leases through independent database sessions; renewal, acknowledgement and failure writes are fenced by worker ID, live lease and claim-generation attempt count. A stale worker cannot mutate a reclaimed delivery even when its worker ID is reused.
+- PostgreSQL CI now exercises a subprocess crash after a synthetic consumer effect commits but before outbox acknowledgement. Recovery reclaims the event and the consumer's unique idempotency key prevents duplicate effects. SQLite and PostgreSQL tests also cover long-handler heartbeat renewal and stale-generation renewal refusal. This is synthetic database-backed evidence, not live external-provider delivery.
 - Workspace-scoped execution history and execution trace APIs; Founder Console Processes and Monitoring views.
 
 ### Audit, privacy and retention
