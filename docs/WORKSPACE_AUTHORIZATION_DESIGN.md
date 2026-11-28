@@ -1,10 +1,10 @@
 # Human Workspace Authorization — Design and Implementation Plan
 
-**Status:** Design baseline; implementation not yet applied  
+**Status:** Implemented on the merged PR #71 baseline; this document preserves the design rationale and records remaining verification gaps.  
 **Scope:** Human API principals and PostgreSQL row-level security  
 **Security objective:** An organization membership must not, by itself, grant access to every workspace in that organization.
 
-## Confirmed current-state finding
+## Historical pre-implementation finding (resolved in the current baseline)
 
 The current authorization boundary is organization membership:
 
@@ -17,6 +17,20 @@ The current authorization boundary is organization membership:
 
 This is a cross-cutting authorization issue. Adding a Python check alone is insufficient because direct SQL and missed routes would remain exposed.
 
+## Current implementation evidence (merged baseline)
+
+The original organization-wide workspace-access gap described below was addressed before the PR #71 merge. The current implementation includes:
+
+- A persisted `workspace_grants` model with organization/workspace/user scope, retained revocation state and founder-governed grant/revoke operations.
+- Explicit human workspace authorization through centralized guards, including `require_workspace_access` / `require_workspace_access_from_context` and module-level wrappers.
+- PostgreSQL RLS policies that use exact workspace grants for human access to workspace-owned rows; machine and worker authorization remain separate.
+- Founder-only grant/revoke actions bound to matching, single-use approvals; approval consumption, grant mutation and audit are committed atomically.
+- Workspace creation and creator access are handled through the current workspace lifecycle rather than relying on organization membership alone.
+- Structural route inventory checks in `tests/test_route_auth_inventory.py`, API authorization regressions in `tests/test_workspace_authorization.py`, and live PostgreSQL RLS coverage in `tests/test_tenant_rls_postgres.py` and related role-specific suites.
+- The shared `public.users` identity directory is deliberately outside tenant RLS; its API/worker column privileges are separately constrained and tested in `tests/test_user_identity_privileges_postgres.py`.
+
+**Evidence boundary:** these tests establish the covered authorization paths and database role contracts. They do not constitute an exhaustive independent BOLA assessment of every nested resource, nor do they prove isolation for file/object storage, caches or RAG ingestion paths that are not yet implemented. Continue the route-by-route and nested-object review before client-data activation.
+
 ## Target authorization model
 
 Keep organization membership and workspace access as separate concepts:
@@ -27,7 +41,7 @@ Keep organization membership and workspace access as separate concepts:
 4. **Machine principals** retain their separate, narrowly scoped worker/machine authorization path. Human workspace grants must not widen machine access.
 5. **Workspace creation** and the creator's initial grant must commit atomically.
 
-### Proposed grant record
+### Implemented grant record and retained schema
 
 Add a `workspace_grants` table with:
 
@@ -51,7 +65,7 @@ The migration must preserve current access rather than silently locking existing
 - Workspace creation inserts the workspace and creator grant in one transaction.
 - If existing membership provisioning code is retained, explicitly decide whether the inviter must also grant one or more workspaces; do not restore implicit organization-wide access.
 
-## PostgreSQL RLS design
+## PostgreSQL RLS implementation
 
 Introduce a narrowly owned SECURITY DEFINER predicate:
 
@@ -79,7 +93,7 @@ The `workspace_grants` table needs its own restrictive policies. A user may read
 
 Execution attempts and other child records must inherit the parent execution's exact workspace authorization. Org-level outbox events remain organization-scoped only where their payload is genuinely org-wide; workspace events must require the matching workspace grant.
 
-## API and lifecycle changes
+## API and lifecycle implementation
 
 Create centralized helpers with consistent semantics:
 
@@ -90,7 +104,7 @@ Create centralized helpers with consistent semantics:
 - Membership invitation/provisioning that does not automatically grant all workspaces.
 - All workspace-scoped route families must call the centralized guard before reading or mutating workspace data. Resource-by-ID routes must not perform an unscoped read first; either require an explicit workspace identifier or use a narrowly scoped lookup that proves the grant before returning the row.
 
-Route families found during the initial audit include core workspace/bootstrap and execution routes in `app/main.py`; Revenue/Delivery in `app/domain_routes.py`; commercial and delivery operations in `app/operations_routes.py`; Outreach in `app/outreach/routes.py`; Workforce and orchestration in `app/workforce_routes.py`; Telephony in `app/telephony/routes.py`; and founder/security routes in `app/security_routes.py` and `app/revenue_research_routes.py`. The existing `tests/test_route_auth_inventory.py` proves that routes have an authentication boundary and that workspace routes reference a workspace identifier; it does **not** prove workspace authorization. Extend it to fail when any workspace-scoped route lacks the centralized workspace guard (or a documented, reviewed equivalent). The final implementation must build and test a complete endpoint inventory rather than relying on this initial list.
+Route families found during the initial audit include core workspace/bootstrap and execution routes in `app/main.py`; Revenue/Delivery in `app/domain_routes.py`; commercial and delivery operations in `app/operations_routes.py`; Outreach in `app/outreach/routes.py`; Workforce and orchestration in `app/workforce_routes.py`; Telephony in `app/telephony/routes.py`; and founder/security routes in `app/security_routes.py` and `app/revenue_research_routes.py`. The existing `tests/test_route_auth_inventory.py` now checks for authentication boundaries, organization membership/role checks, workspace identifier use and centralized workspace guards (or reviewed equivalents). This is a structural regression guard, not proof of semantic authorization for every nested object. Maintain the endpoint inventory as routes are added and extend negative BOLA tests for each resource family.
 
 ## Required regression and integration tests
 
@@ -122,14 +136,13 @@ Route families found during the initial audit include core workspace/bootstrap a
 - Transaction rollback, commit, pooled connection reuse and revocation are tested.
 - Worker/machine scope remains exact-workspace and is not widened by human grant changes.
 
-## Rollout and acceptance gates
+## Remaining validation and rollout gates
 
-1. Complete endpoint/schema inventory and threat review.
-2. Add failing API and PostgreSQL tests first.
-3. Implement grant model, migration/backfill, policies, lifecycle services and route guards as one coordinated change.
-4. Run unit, API, isolated PostgreSQL and full backend suites; verify migration upgrade/downgrade in disposable databases.
-5. Review generated SQL and policy semantics independently.
-6. Only then mark the PR ready. Do not enable production rollout until a production migration plan, backup/restore evidence and an approved rollback path exist.
+1. Keep the route/schema/function inventory current and complete the nested-object BOLA review.
+2. Add failing API and PostgreSQL regressions before each authorization behavior change.
+3. Re-run unit, API and isolated PostgreSQL suites on the exact release commit; review generated SQL and policy semantics independently.
+4. Test revocation, pooled-connection reuse, worker crash/recovery and approval/action atomicity in the target staging topology.
+5. Do not enable production rollout until a production migration plan, backup/restore evidence and an approved rollback path exist.
 
 ## Explicit non-goals
 
