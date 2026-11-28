@@ -330,6 +330,7 @@ class Execution(Base):
         ForeignKey("agents.id"), nullable=False
     )
     agent_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    required_capability_action: Mapped[str | None] = mapped_column(String(120), nullable=True)
     requested_by: Mapped[str] = mapped_column(
         ForeignKey("users.id"), nullable=False
     )
