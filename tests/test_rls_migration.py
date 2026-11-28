@@ -236,3 +236,19 @@ def test_private_operations_migration_enforces_workspace_rls_and_denies_worker_r
     assert "session_user <> 'agency_os_worker'" in source
     assert "TO agency_os_app" in source
     assert "REVOKE ALL ON public." in source and "FROM agency_os_worker" in source
+
+
+def test_ci_runs_human_rls_tests_with_a_dedicated_least_privilege_app_login():
+    root = PATH.parents[2]
+    test_roles = (root / "docker/postgres/test-init.sql").read_text()
+    workflow = (root / ".github/workflows/ci.yml").read_text()
+
+    # The test login inherits only the app role's grants; it remains a distinct
+    # NOBYPASSRLS login so verify_postgres_role checks the actual session role.
+    assert "GRANT agency_os_app TO agency_os_test_app" in test_roles
+    assert "ALTER ROLE agency_os_test_app INHERIT" in test_roles
+    assert "NOBYPASSRLS" in test_roles
+
+    assert "AGENCY_OS_TEST_RLS_DATABASE_URL:" in workflow
+    assert "agency_os_test_app:local-only-test-app-password" in workflow
+    assert "AGENCY_OS_TEST_MIGRATOR_DATABASE_URL:" in workflow
