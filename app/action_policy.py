@@ -72,6 +72,20 @@ def workforce_member_activation_resource_id(workspace_id: str, member_id: str) -
     ))
 
 
+
+def agent_version_resource_id(
+    workspace_id: str, agent_id: str, version_id: str, operation: str,
+) -> str:
+    """Stable approval resource for activating or rolling back one Agent version."""
+    if operation not in {"activate", "rollback"}:
+        raise ValueError("Agent version operation must be activate or rollback")
+    return str(uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"agency-os:agent-version:v1:{operation}:{workspace_id}:{agent_id}:{version_id}",
+    ))
+
+
+
 def is_approval_required(action_type: str) -> bool:
     return action_type in MANDATORY_APPROVAL_ACTIONS
 
