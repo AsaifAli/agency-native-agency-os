@@ -55,6 +55,20 @@ jobs:
           cache-dependency-path: requirements.txt
       - name: Install backend dependencies
         run: python -m pip install --upgrade pip && pip install -r requirements-dev.txt
+      - name: Build and verify hardened API/worker runtime image
+        env:
+          POSTGRES_PASSWORD: ci-bootstrap-password
+          POSTGRES_MIGRATOR_PASSWORD: ci-migrator-password
+          POSTGRES_APP_PASSWORD: ci-api-password
+          POSTGRES_WORKER_PASSWORD: ci-worker-password
+        run: |
+          cp .env.runtime.example .env.runtime
+          docker compose config --quiet
+          docker build --tag agency-os-runtime:ci .
+          docker run --rm --read-only --cap-drop=ALL --security-opt=no-new-privileges \
+            --pids-limit=256 --memory=1g --cpus=1.5 \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=128m \
+            --entrypoint python agency-os-runtime:ci -c 'import os; s=open("/proc/self/status").read(); m=[line.split() for line in open("/proc/mounts")]; root=next(x for x in m if x[1]=="/"); tmp=next(x for x in m if x[1]=="/tmp"); assert os.geteuid()==10001; assert "NoNewPrivs:\t1" in s; assert "CapEff:\t0000000000000000" in s; assert "ro" in root[3].split(","); assert {"noexec","nosuid","nodev"}.issubset(set(tmp[3].split(","))); open("/tmp/runtime-check","w").close()'
       - name: Bootstrap isolated PostgreSQL test roles
         env:
           PGPASSWORD: agency_os_test_password

@@ -137,3 +137,13 @@ def test_api_and_worker_images_run_non_root_with_bounded_container_security():
         assert "user: \"10001:10001\"" in service_block
 
     assert "docker.sock" not in compose
+
+
+def test_ci_builds_and_executes_hardened_runtime_image():
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    assert "docker compose config --quiet" in workflow
+    assert "docker build --tag agency-os-runtime:ci ." in workflow
+    assert "--read-only --cap-drop=ALL --security-opt=no-new-privileges" in workflow
+    assert "os.geteuid()==10001" in workflow
+    assert "NoNewPrivs:" in workflow
+    assert "CapEff:" in workflow
