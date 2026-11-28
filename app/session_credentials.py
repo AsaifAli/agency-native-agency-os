@@ -124,8 +124,7 @@ def issue_session_credential(
     record_event(
         db, identity.org_id, None, "machine_session_credential.issued",
         "machine_session_credential", credential.id, identity.workspace_id,
-        {"session_id": session.id, "machine_identity_id": identity.id,
-         "credential_version": 1, "expires_at": expires_at.isoformat()},
+        {"credential_version": 1, "expires_at": expires_at.isoformat()},
     )
     return IssuedSessionCredential(
         credential_id=credential.id, token=token, expires_at=expires_at, credential_version=1,
@@ -229,6 +228,9 @@ def load_active_session_context(
     context: SessionCredentialContext,
 ) -> tuple[MachinePrincipal, AgentSession]:
     """Revalidate credential, identity and session at every tool-dispatch boundary."""
+    set_rls_context(
+        db, machine_org_id=context.org_id, machine_workspace_id=context.workspace_id,
+    )
     if db.get_bind().dialect.name == "postgresql":
         active = db.execute(
             text("""
