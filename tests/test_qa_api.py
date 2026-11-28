@@ -360,3 +360,20 @@ def test_qa_issue_history_is_workspace_scoped_and_chronological(client):
         headers=headers(), params={"workspace_id": client.other_ws_id},
     )
     assert wrong_workspace.status_code == 404
+
+
+def test_qa_issue_rejects_passing_evaluation_created_before_fix(client):
+    created = create_issue(client)
+    assert created.status_code == 201, created.text
+    issue_id = created.json()["id"]
+    url = f"/v1/orgs/{client.org_id}/qa/issues/{issue_id}/transition?workspace_id={client.ws_id}"
+    for status in ("triaged", "in_progress", "fixed", "retest"):
+        response = client.patch(url, headers=headers(), json={"status": status})
+        assert response.status_code == 200, response.text
+
+    response = client.patch(
+        url, headers=headers(),
+        json={"status": "closed", "retest_evaluation_run_id": client.passing_eval_id},
+    )
+    assert response.status_code == 409
+    assert "after the issue was marked fixed" in response.json()["detail"]
