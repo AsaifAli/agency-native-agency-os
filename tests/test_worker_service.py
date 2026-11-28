@@ -2373,3 +2373,67 @@ def test_failed_managed_agent_attempt_usage_is_reconciled(worker_context):
         "output_tokens": 3,
     }
     assert db.get(Execution, execution.id).result["usage"]["output_tokens"] == 3
+
+
+
+def test_processor_links_retried_attempt_to_existing_managed_agent_session(worker_context, monkeypatch):
+    ctx = worker_context
+    db = ctx["db"]
+    execution = create_worker_execution(ctx, max_attempts=2)
+    execution.runtime = "claude_managed_agents"
+    execution.attempt_count = 1
+    execution.status = ExecutionStatus.queued
+    previous_usage = {
+        "input_tokens": 100,
+        "output_tokens": 50,
+        "list_cost_minor": 10,
+        "currency": "USD",
+    }
+    previous_attempt = ExecutionAttempt(
+        execution_id=execution.id,
+        attempt_number=1,
+        runtime="claude_managed_agents",
+        status=ExecutionAttemptStatus.failed,
+        external_run_id="sesn_shared_retry",
+        result={"usage": previous_usage},
+        finished_at=datetime.now(timezone.utc),
+    )
+    db.add(previous_attempt)
+    db.commit()
+
+    class Runtime:
+        def start(self, request):
+            assert request.external_run_id == "sesn_shared_retry"
+            # Simulate the resumed provider session returning its newer
+            # cumulative snapshot; the adapter does not create a new session.
+            return ExecutionResult(
+                provider="claude_managed_agents",
+                external_run_id="sesn_shared_retry",
+                status="succeeded",
+                detail="Resumed session completed.",
+                usage={
+                    "input_tokens": 120,
+                    "output_tokens": 60,
+                    "list_cost_minor": 15,
+                    "currency": "USD",
+                },
+            )
+
+    monkeypatch.setattr("app.worker.processor.get_runtime", lambda _name: Runtime())
+    session_factory = sessionmaker(bind=db.get_bind(), autoflush=False, autocommit=False)
+    processed = process_one_execution(
+        worker_id="worker-resume-session",
+        session_factory=session_factory,
+    )
+
+    assert processed == execution.id
+    db.expire_all()
+    attempts = (
+        db.query(ExecutionAttempt)
+        .filter_by(execution_id=execution.id)
+        .order_by(ExecutionAttempt.attempt_number.asc())
+        .all()
+    )
+    assert len(attempts) == 2
+    assert attempts[1].external_run_id == "sesn_shared_retry"
+    assert db.get(Execution, execution.id).result["usage"]["list_cost_minor"] == 15
