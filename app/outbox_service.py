@@ -334,8 +334,8 @@ def dispatch_outbox_batch(
         raise ValueError("lease_seconds must be between 15 and 3600")
     if heartbeat_interval_seconds is None:
         heartbeat_interval_seconds = min(30.0, lease_seconds / 3.0)
-    if not 0 < heartbeat_interval_seconds < lease_seconds:
-        raise ValueError("heartbeat_interval_seconds must be positive and shorter than the lease")
+    if not 0 < heartbeat_interval_seconds <= lease_seconds / 3.0:
+        raise ValueError("heartbeat_interval_seconds must be positive and no more than one-third of the lease")
 
     with session_factory() as db:
         messages = claim_outbox_batch(
