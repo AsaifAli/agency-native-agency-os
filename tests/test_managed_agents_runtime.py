@@ -37,7 +37,7 @@ def config(**overrides):
 def request(**overrides):
     values = {
         "org_id": "org-test", "workspace_id": "ws-test",
-        "task_id": "task-test", "agent_id": "agent-local",
+        "task_id": "task-test", "agent_id": "agent-local", "execution_id": "exec-test",
         "data_class": DataClass.synthetic, "client_authorized": False,
         "agent_name": "Research Analyst", "agent_department": "Business Development",
         "agent_instructions": "Research carefully.",
@@ -64,6 +64,7 @@ def test_managed_agents_uses_precreated_agent_and_persists_session_id():
             assert isinstance(body["agent"], str)
             assert "tools" not in body and "mcp_servers" not in body and "skills" not in body
             assert body["budget"]["max_list_cost"] == {"amount": "250", "currency": "USD"}
+            assert body["metadata"]["agency_os_execution_id"] == "exec-test"
             message = body["initial_events"][0]["content"][0]["text"]
             assert "Research target market" in message
             assert "Research Analyst" in message
