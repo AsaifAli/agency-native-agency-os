@@ -15,6 +15,7 @@ from app.models import (
 from app.domain_models import Project, Opportunity, Client
 from app.operations_models import ServicePlaybook, ServiceOffering, Proposal, ContractRecord, ClientOnboarding, OnboardingChecklistItem, InvoiceRecord, PaymentReceipt, ScopeChangeRequest, TimeEntry, ProjectCost, RetainerServicePeriod
 from app.operations_routes import router
+from app.outbox_observability_routes import router as outbox_observability_router
 from app.telephony.models import OutboxEvent
 
 
@@ -64,6 +65,7 @@ def client():
 
     app = FastAPI()
     app.include_router(router)
+    app.include_router(outbox_observability_router)
     principal = {"user": user}
 
     def override_db():
@@ -1606,3 +1608,58 @@ def test_retainer_period_usage_rollover_and_closed_period_guard(client):
         "started_at":"2026-01-20T00:00:00+00:00",
     })
     assert late_entry.status_code == 409
+
+
+
+def test_outbox_summary_is_founder_only_workspace_scoped_and_payload_free(client):
+    org, ws = client.org_id, client.ws_id
+    db = client.session_factory()
+    try:
+        db.add(OutboxEvent(
+            org_id=org, workspace_id=ws, event_type="test.synthetic",
+            schema_version=1, aggregate_type="test", aggregate_id="aggregate",
+            idempotency_key="ops-summary-safe-key", payload={"secret": "must-not-leak"},
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.get(
+        f"/v1/orgs/{org}/workspaces/{ws}/outbox/summary",
+        headers=headers(),
+    )
+    assert response.status_code == 200, response.text
+    summary = response.json()
+    assert summary["counts"]["pending"] == 1
+    assert summary["total"] == 1
+    assert "payload" not in summary
+    assert "secret" not in response.text
+    assert "ops-summary-safe-key" not in response.text
+    assert ws not in response.text
+
+
+def test_outbox_summary_rejects_non_founder_even_with_workspace_access(client):
+    db = client.session_factory()
+    try:
+        operator = User(email="outbox-operator@example.test", display_name="Operator")
+        db.add(operator)
+        db.flush()
+        db.add_all([
+            Membership(org_id=client.org_id, user_id=operator.id, role=Role.operator),
+            WorkspaceGrant(
+                org_id=client.org_id, workspace_id=client.ws_id,
+                user_id=operator.id, granted_by=client.user_id,
+            ),
+        ])
+        db.commit()
+        operator_id = operator.id
+        selected_operator = db.query(User).filter_by(id=operator_id).one()
+    finally:
+        db.close()
+
+    client.set_principal(selected_operator)
+    response = client.get(
+        f"/v1/orgs/{client.org_id}/workspaces/{client.ws_id}/outbox/summary",
+        headers=headers(),
+    )
+    assert response.status_code == 403, response.text
