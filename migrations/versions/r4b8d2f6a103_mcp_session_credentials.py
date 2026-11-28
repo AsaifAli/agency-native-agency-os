@@ -211,6 +211,10 @@ def upgrade() -> None:
         FROM PUBLIC
     """)
     op.execute("""
+        GRANT EXECUTE ON FUNCTION agency_os_private.authenticate_mcp_session_credential(text, text, integer)
+        TO agency_os_app
+    """)
+    op.execute("""
         CREATE OR REPLACE FUNCTION agency_os_private.is_mcp_session_credential_active(
             p_credential_id text,
             p_token_hash text,
