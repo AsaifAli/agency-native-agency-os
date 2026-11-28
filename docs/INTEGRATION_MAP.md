@@ -17,6 +17,14 @@ Their useful capabilities are represented by native OS modules:
 | Audit and event delivery | `app/audit.py`, `app/outbox_service.py` | OS-owned audit and transactional outbox |
 | Operator interface | `frontend/` | Next.js Founder Console; dashboards are read models |
 
+## Private AI business operations layer
+
+The article-derived workflows are implemented as Agency OS business capabilities, not as a separate private-agent product. The OS owns canonical knowledge records and versions, workspace ACLs, optional client linkage within a workspace, data classification, approval state, task/execution records, business workflows, source provenance and audit. Retention policy metadata is recorded; automated expiry and artifact cleanup still require lifecycle integration. Claude is an optional reasoning/runtime adapter: its agent definitions, prompts, sessions, provider events, subagent orchestration and model-specific tool protocol belong in the Claude integration layer. Claude may draft or recommend against OS-authorized context; it does not own canonical knowledge, CRM/invoice/proposal state, permissions, approvals or audit.
+
+Do not duplicate Claude runtime/session management in the OS business domain, and do not move OS authorization or durable business state into Claude. No local AI, local model serving, Ollama, hybrid local routing or local fallback is in scope. If no hosted runtime is eligible for a data class, fail closed and request human review.
+
+The article-derived sequence and current implementation evidence are tracked in [Private AI and Business Operations Layer](PRIVATE_AI_OPERATING_MODEL.md). The first backend/UI foundation is implemented on the feature branch: immutable version rows for governed knowledge, source-validated draft records for front desk/meeting-to-proposal/receivables follow-up, read-only receivables aging and founder brief endpoints, audit events, workspace RLS migration, and a Founder Console page. Model generation, meeting transcription ingestion, automatic source extraction, payment matching, reminder dispatch, and Claude tool wiring remain planned; no local AI is used.
+
 ## Command Center migration
 
 The standalone Command Center API, scheduler, demo storage, separate auth, independent worker configuration and legacy deployment files were removed. The OS retains its own workforce registry, task/execution APIs, durable workers, runtime adapters, approval policy, audit and Founder Console.
