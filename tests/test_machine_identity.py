@@ -136,7 +136,7 @@ def _revoke_identity(client, identity_id):
     ("agent_enabled", "member_status"),
     [(False, "active"), (True, "paused"), (True, "retired")],
 )
-def test_agent_machine_identity_authentication_requires_live_agent_and_member(
+def test_agent_machine_identity_and_session_require_live_agent_member_state(
     security_client, agent_enabled, member_status
 ):
     from fastapi import HTTPException
