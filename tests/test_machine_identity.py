@@ -1333,6 +1333,10 @@ def test_session_credential_authentication_rejects_wrong_token_and_revoked_sessi
         )
         assert context.session_id == session.id
         assert context.machine_identity_id == principal.identity.id
+        from app.session_credentials import load_active_session_context
+        reloaded_principal, reloaded_session = load_active_session_context(db, context)
+        assert reloaded_principal.identity.id == principal.identity.id
+        assert reloaded_session.id == session.id
         with pytest.raises(Exception):
             authenticate_session_credential(
                 db, "Bearer " + credential.token[:-1] + "x"
