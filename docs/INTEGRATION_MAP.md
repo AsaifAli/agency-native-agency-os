@@ -17,6 +17,10 @@ Their useful capabilities are represented by native OS modules:
 | Audit and event delivery | `app/audit.py`, `app/outbox_service.py` | OS-owned audit and transactional outbox |
 | Operator interface | `frontend/` | Next.js Founder Console; dashboards are read models |
 
+## Private AI business operations layer
+
+The first tranche adds workspace-scoped, versioned knowledge records and source-validated business drafts for front-desk lead response, meeting-to-proposal preparation and receivables follow-up. The OS owns the records, provenance, approvals, audit and workspace authorization; Claude remains an optional hosted reasoning/runtime adapter. The UI is a Founder Console page, and read-only receivables ageing and founder count snapshots do not perform external actions. Binary upload/index lifecycle, hosted model generation, transcript ingestion, payment matching and reminder dispatch remain out of scope until separately secured and tested. Local AI and local inference are explicitly excluded. Worker access to these tables is denied until a dedicated execution-capability path exists.
+
 ## Command Center migration
 
 The standalone Command Center API, scheduler, demo storage, separate auth, independent worker configuration and legacy deployment files were removed. The OS retains its own workforce registry, task/execution APIs, durable workers, runtime adapters, approval policy, audit and Founder Console.
