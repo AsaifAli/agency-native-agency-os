@@ -99,3 +99,12 @@ def test_artifact_cannot_be_available_without_verified_clean_scan():
     finally:
         db.close()
         engine.dispose()
+
+
+def test_base_metadata_registers_task_milestone_target_when_models_are_imported():
+    assert "milestones" in Base.metadata.tables
+    assert "tasks" in Base.metadata.tables
+    assert "fk_tasks_milestone_scope" in {
+        constraint.name
+        for constraint in Base.metadata.tables["tasks"].foreign_key_constraints
+    }
