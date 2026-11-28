@@ -248,6 +248,7 @@ def process_one_execution(
             db.query(ExecutionAttempt)
             .filter(
                 ExecutionAttempt.execution_id == execution.id,
+                ExecutionAttempt.runtime == execution.runtime,
                 ExecutionAttempt.external_run_id.is_not(None),
             )
             .order_by(ExecutionAttempt.attempt_number.desc())
@@ -361,6 +362,11 @@ def process_one_execution(
     data_protection_block_code: str | None = None
     try:
         runtime = get_runtime(runtime_name)
+        # A retry resumes the previous provider session. Persist that same
+        # correlation ID onto the new attempt before provider work so usage
+        # aggregation treats cumulative snapshots as one session, not deltas.
+        if request.external_run_id:
+            persist_provider_run(request.external_run_id)
         if runtime_name == "claude_managed_agents":
             request.execute_custom_tool = build_machine_tool_executor(
                 session_factory=session_factory,
