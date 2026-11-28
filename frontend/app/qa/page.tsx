@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { FormEvent } from "react";
 import Page from "@/components/page";
 import { api, orgId, type Workspace, type Task } from "@/lib/api";
 
@@ -145,7 +146,7 @@ export default function QAPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function createIssue(event: React.FormEvent) {
+  async function createIssue(event: FormEvent) {
     event.preventDefault();
     setBusy(true); setError(""); setNotice("");
     try {
@@ -221,7 +222,7 @@ export default function QAPage() {
         {notice && <div className="activity-meta" role="status">{notice}</div>}
       </div>
       <div style={{ height: 16 }} />
-      <div className="stack">
+      <div style={{ display: "grid", gap: 16 }}>
         {issues.map(issue => <QAIssueCard key={issue.id} issue={issue} evaluations={evaluations} onTransition={transition} />)}
         {!issues.length && <div className="panel empty">No QA issues recorded in this workspace.</div>}
       </div>
