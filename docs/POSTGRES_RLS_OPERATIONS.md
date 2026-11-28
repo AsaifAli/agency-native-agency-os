@@ -19,6 +19,10 @@ Human access requires both active organization membership and an explicit, audit
 
 The worker role is non-superuser `NOBYPASSRLS`. Its code enumerates workspace identifiers through the private scope function and processes one workspace at a time with transaction-local RLS context. The scope function and browser-session retention function are the only cross-workspace SECURITY DEFINER entry points granted to the worker. The worker still has operational authority to process every workspace; PostgreSQL custom GUC context is defense-in-depth against missing predicates, not a boundary against arbitrary SQL execution under the worker credential. For isolation against a compromised worker credential, use per-tenant worker credentials or move all tenant data operations behind narrowly scoped database functions. The API must never receive migrator or worker credentials.
 
+### Shared user identity directory
+
+`public.users` is intentionally excluded from tenant RLS because it stores only the agency's shared, pre-provisioned internal identities; it is not a client/contact directory. This is a deliberate global identity boundary, not a tenant-owned business-data exception to copy elsewhere. The API role may read identities for authentication and same-agency operational references, and may update only `oidc_issuer` and `oidc_subject` when linking a verified, pre-provisioned OIDC account. It cannot insert/delete users or update email, display name, active state or the primary key. The worker has no privileges on `users`. Provisioning and profile/activation changes remain trusted migrator/founder-admin operations. Client people belong in workspace-scoped `contacts`, never in `users`.
+
 ## Local Compose setup
 
 1. Copy `.env.example` to `.env` for Postgres bootstrap/role passwords.

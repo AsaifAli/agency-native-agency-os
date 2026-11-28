@@ -97,3 +97,42 @@ def test_oidc_rejects_email_mismatch_for_existing_subject(oidc_db):
     with pytest.raises(HTTPException) as error:
         link_provisioned_user(db, "https://auth.example/issuer", "subject-3", "changed@example.com")
     assert error.value.status_code == 403
+
+
+def test_oidc_link_establishes_verified_user_rls_context_before_returning(oidc_db):
+    db, user_id = oidc_db
+    user = link_provisioned_user(db, "https://auth.example/issuer", "subject-4", "founder@example.com")
+
+    assert user.id == user_id
+    assert db.info["agency_os_rls_context"]["user_id"] == user_id
+
+
+def test_oidc_rejects_existing_subject_without_active_org_membership(oidc_db):
+    db, user_id = oidc_db
+    user = db.get(User, user_id)
+    user.oidc_issuer = "https://auth.example/issuer"
+    user.oidc_subject = "subject-without-membership"
+    db.query(Membership).filter_by(user_id=user_id).delete()
+    db.commit()
+
+    with pytest.raises(HTTPException) as error:
+        link_provisioned_user(
+            db, "https://auth.example/issuer", "subject-without-membership", "founder@example.com"
+        )
+
+    assert error.value.status_code == 403
+
+
+def test_oidc_does_not_persist_new_identity_link_when_user_has_no_membership(oidc_db):
+    db, user_id = oidc_db
+    db.query(Membership).filter_by(user_id=user_id).delete()
+    db.commit()
+
+    with pytest.raises(HTTPException) as error:
+        link_provisioned_user(db, "https://auth.example/issuer", "unattached-subject", "founder@example.com")
+    assert error.value.status_code == 403
+
+    db.rollback()
+    user = db.get(User, user_id)
+    assert user.oidc_issuer is None
+    assert user.oidc_subject is None
