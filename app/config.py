@@ -73,6 +73,16 @@ class Settings(BaseSettings):
     claude_managed_poll_interval_seconds: float = Field(default=2.0, ge=0.2, le=30)
     anthropic_request_timeout_seconds: float = Field(default=20.0, ge=1, le=120)
 
+    # Claude Managed Agents MCP is opt-in and disabled until the public HTTPS
+    # endpoint, Vault and reviewed read-only tool allowlist are configured.
+    claude_managed_mcp_enabled: bool = False
+    claude_managed_mcp_public_base_url: str = ""
+    claude_managed_mcp_vault_id: str = ""
+    claude_managed_mcp_enabled_tool_keys: str = ""
+    claude_managed_mcp_requests_per_minute: int = Field(default=120, ge=1, le=1000)
+    claude_managed_mcp_max_concurrent_requests: int = Field(default=8, ge=1, le=64)
+    claude_managed_mcp_max_request_body_bytes: int = Field(default=1048576, ge=1024, le=4194304)
+
     # Optional signed server-to-server intake from the public agency website.
     # Disabled until a dedicated secret and fixed org/workspace mapping are configured.
     website_lead_intake_enabled: bool = False
@@ -159,6 +169,20 @@ class Settings(BaseSettings):
                 provider_url = urlparse(self.anthropic_api_base_url)
                 if provider_url.scheme != "https" or provider_url.hostname != "api.anthropic.com" or provider_url.username or provider_url.password or provider_url.port not in (None, 443):
                     errors.append("ANTHROPIC_API_BASE_URL must use the official HTTPS api.anthropic.com endpoint in production")
+            if self.claude_managed_mcp_enabled:
+                mcp_url = urlparse(self.claude_managed_mcp_public_base_url)
+                if not self.claude_managed_agents_enabled:
+                    errors.append("CLAUDE_MANAGED_AGENTS_ENABLED must be true when Claude Managed Agents MCP is enabled")
+                if (
+                    mcp_url.scheme != "https" or not mcp_url.hostname
+                    or mcp_url.username or mcp_url.password or mcp_url.query or mcp_url.fragment
+                    or mcp_url.path not in ("", "/") or mcp_url.port not in (None, 443)
+                ):
+                    errors.append("CLAUDE_MANAGED_MCP_PUBLIC_BASE_URL must be an HTTPS origin without credentials, path, query or non-standard port")
+                if not self.claude_managed_mcp_vault_id.startswith("vlt_"):
+                    errors.append("CLAUDE_MANAGED_MCP_VAULT_ID must identify the dedicated Anthropic Vault")
+                if not [key.strip() for key in self.claude_managed_mcp_enabled_tool_keys.split(",") if key.strip()]:
+                    errors.append("CLAUDE_MANAGED_MCP_ENABLED_TOOL_KEYS must contain an explicit read-only tool allowlist")
             if errors:
                 raise ValueError("; ".join(errors))
         return self
