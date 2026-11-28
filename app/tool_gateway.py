@@ -57,6 +57,7 @@ def _deny(
             "reason_code": reason_code,
             "redaction_counts": redaction_counts or {},
         },
+        trusted_internal_id_keys={"machine_identity_id"},
     )
     db.commit()
     raise HTTPException(status_code, message)
@@ -394,6 +395,7 @@ def invoke_registered_tool(
             "output_redaction_counts": output_report.redaction_counts,
             "result_resource_id": safe_result.get("draft_id"),
         },
+        trusted_internal_id_keys={"machine_identity_id", "session_id", "result_resource_id"},
     )
     db.commit()
     return {
