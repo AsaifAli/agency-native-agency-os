@@ -481,3 +481,9 @@ class EvaluationRun(Base):
     evidence_trust: Mapped[str] = mapped_column(String(32), default="self_reported", nullable=False)
     created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+# Task has a composite FK to the Delivery Milestone model. Register that
+# target even in test/tools that import app.models without importing the
+# Revenue/Delivery module explicitly.
+import app.domain_models  # noqa: F401
