@@ -352,6 +352,53 @@ def test_sender_activation_requires_matching_founder_approval(client):
         db.close()
 
 
+def test_consumed_sender_approval_cannot_be_reused_after_pause(client):
+    created = client.post(
+        "/v1/orgs/" + client.org_id + "/outreach/senders",
+        headers=auth(), json={
+            "workspace_id": client.ws_id, "display_name": "Single Use Sender",
+            "email_address": "single-use@example.test", "max_per_hour": 5, "max_per_day": 20,
+        },
+    )
+    assert created.status_code == 201, created.text
+    sender_id = created.json()["id"]
+    payload = {
+        "operation": "activate_outbound_sender", "sender_id": sender_id,
+        "max_per_hour": 5, "max_per_day": 20,
+    }
+    approval_id = _approved_outreach_action(client, sender_id, payload)
+    activated = client.patch(
+        "/v1/orgs/" + client.org_id + "/outreach/senders/" + sender_id + "/status",
+        params={"approval_id": approval_id}, headers=auth(), json={"status": "active"},
+    )
+    assert activated.status_code == 200, activated.text
+
+    db = client.session_factory()
+    try:
+        approval = db.query(Approval).filter_by(id=approval_id).one()
+        assert approval.consumed_at is not None
+        assert approval.consumed_by == client.user_id
+    finally:
+        db.close()
+
+    paused = client.patch(
+        "/v1/orgs/" + client.org_id + "/outreach/senders/" + sender_id + "/status",
+        headers=auth(), json={"status": "paused"},
+    )
+    assert paused.status_code == 200, paused.text
+    reused = client.patch(
+        "/v1/orgs/" + client.org_id + "/outreach/senders/" + sender_id + "/status",
+        params={"approval_id": approval_id}, headers=auth(), json={"status": "active"},
+    )
+    assert reused.status_code == 409
+
+    db = client.session_factory()
+    try:
+        assert db.query(OutboundSender).filter_by(id=sender_id).one().status == "paused"
+    finally:
+        db.close()
+
+
 def test_sender_rate_limit_workspace_isolation_and_founder_controls(client):
     sender_id = _create_sender(client, email="limited@example.test", max_per_hour=1)
     assert _record_consent(client).status_code == 201
