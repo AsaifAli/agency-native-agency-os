@@ -137,6 +137,30 @@ def test_workforce_links_are_workspace_scoped_at_database_boundary():
                 "'tasks-b', 'member-a', 'member-b')"
             ))
 
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(sa.text(
+                "INSERT INTO workforce_members (id, org_id, workspace_id, unit_id) "
+                "VALUES ('member-cross-unit', 'org-a', 'workspace-a', 'workforce_units-b')"
+            ))
+
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(sa.text(
+                "INSERT INTO workforce_members "
+                "(id, org_id, workspace_id, manager_member_id) "
+                "VALUES ('member-cross-manager', 'org-a', 'workspace-a', 'member-b')"
+            ))
+
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(sa.text(
+                "INSERT INTO delegations (id, org_id, workspace_id, parent_task_id, "
+                "child_task_id, delegated_by_member_id, assigned_to_member_id) "
+                "VALUES ('delegation-cross-creator', 'org-a', 'workspace-a', 'tasks-a', "
+                "'tasks-c', 'member-b', 'member-a')"
+            ))
+
 
 def test_workforce_link_migration_fails_closed_on_existing_cross_workspace_rows():
     engine = _engine()
