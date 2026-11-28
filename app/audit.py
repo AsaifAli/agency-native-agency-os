@@ -12,6 +12,7 @@ def record_event(
     resource_id: str,
     workspace_id: str | None = None,
     payload: dict | None = None,
+    trusted_internal_id_keys: set[str] | frozenset[str] | None = None,
 ):
     # Audit is a durable data surface. Apply the same bounded PII/secret
     # protection here as at provider boundaries so individual routes cannot
@@ -20,6 +21,7 @@ def record_event(
         raise DataProtectionBlocked("INVALID_UNTRUSTED_PAYLOAD")
     safe_payload, _report = protect_untrusted_payload(
         payload or {},
+        trusted_internal_id_keys=trusted_internal_id_keys or frozenset(),
     )
     event = AuditEvent(
         org_id=org_id,
