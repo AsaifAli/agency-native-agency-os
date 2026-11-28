@@ -975,3 +975,59 @@ def test_managed_agents_rejects_mcp_environment_with_unrestricted_server_network
         ("GET", "/v1/agents/agent_test"),
         ("GET", "/v1/environments/env_test"),
     ]
+
+
+def test_managed_agents_reconciles_orphaned_vault_credential_and_never_creates_second_session():
+    calls = []
+    os_session_id = "a1b2c3d4-e5f6-4789-9012-1234567890ab"
+    os_credential_id = "b1b2c3d4-e5f6-4789-9012-1234567890ab"
+    mcp_url = f"https://mcp.example.test/v1/integrations/claude/mcp/sessions/{os_session_id}"
+    metadata = {
+        "agency_os_execution_id": "exec-test",
+        "agency_os_session_id": os_session_id,
+        "agency_os_mcp_server_url": mcp_url,
+    }
+
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        if req.method == "GET" and req.url.path == "/v1/agents/agent_test":
+            return httpx.Response(200, json={"id": "agent_test", "archived_at": None, "tools": [], "mcp_servers": [], "skills": [], "multiagent": None})
+        if req.method == "GET" and req.url.path == "/v1/environments/env_test":
+            return httpx.Response(200, json={"config": {"type": "cloud", "networking": {
+                "type": "limited", "allow_mcp_servers": False, "allowed_hosts": ["mcp.example.test"],
+            }}})
+        if req.method == "GET" and req.url.path == "/v1/vaults/vlt_test/credentials":
+            return httpx.Response(200, json={"data": [{
+                "id": "vcrd_orphan", "archived_at": None,
+                "auth": {"type": "static_bearer", "mcp_server_url": mcp_url},
+                "metadata": metadata,
+            }], "next_page": None})
+        if req.method == "POST" and req.url.path == "/v1/vaults/vlt_test/credentials/vcrd_orphan/archive":
+            return httpx.Response(200, json={"id": "vcrd_orphan"})
+        return httpx.Response(404)
+
+    persisted = []
+    revoked = []
+    archived = []
+    runtime = ManagedAgentsRuntime(
+        _mcp_config(),
+        client_factory=lambda: httpx.Client(base_url="https://api.anthropic.com", transport=httpx.MockTransport(handler)),
+        sleep=lambda _seconds: None,
+    )
+    with pytest.raises(RuntimeManualReviewRequired, match="interrupted provider create"):
+        runtime.start(_mcp_request(
+            get_mcp_provider_credential=lambda: {
+                "credential_id": os_credential_id,
+                "session_id": os_session_id,
+                "vault_id": None,
+                "provider_credential_id": None,
+            },
+            persist_mcp_provider_credential=lambda *args: persisted.append(args),
+            revoke_mcp_session_credential=lambda *args: revoked.append(args),
+            mark_mcp_provider_credential_archived=lambda *args: archived.append(args),
+        ))
+    assert ("POST", "/v1/sessions") not in calls
+    assert ("POST", "/v1/vaults/vlt_test/credentials") not in calls
+    assert persisted == [(os_credential_id, "vlt_test", "vcrd_orphan")]
+    assert revoked == [(os_credential_id, "MCP_ORPHANED_CREDENTIAL")]
+    assert archived == [(os_credential_id, "vcrd_orphan")]
