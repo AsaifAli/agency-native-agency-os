@@ -215,7 +215,7 @@ def test_qa_issue_rejects_skipped_lifecycle_transitions(client):
     created = create_issue(client)
     assert created.status_code == 201, created.text
     response = client.patch(
-        f"/v1/orgs/{client.org_id}/qa/issues/{created.json()['id']}/transition",
+        f"/v1/orgs/{client.org_id}/qa/issues/{created.json()['id']}/transition?workspace_id={client.ws_id}",
         headers=headers(), json={"status": "closed", "retest_evaluation_run_id": client.passing_eval_id},
     )
     assert response.status_code == 409
