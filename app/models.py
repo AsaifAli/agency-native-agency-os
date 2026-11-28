@@ -235,7 +235,7 @@ class AgentVersion(Base):
         ForeignKeyConstraint(
             ["org_id", "workspace_id", "agent_id"],
             ["agents.org_id", "agents.workspace_id", "agents.id"],
-            ondelete="CASCADE",
+            ondelete="RESTRICT",
             name="fk_agent_version_agent_scope",
         ),
         CheckConstraint("version_number >= 1", name="ck_agent_version_number"),
@@ -307,6 +307,7 @@ class Execution(Base):
             "org_id", "workspace_id", "status", "created_at",
         ),
         Index("ix_execution_task_id", "task_id"),
+        Index("ix_execution_agent_version_id", "agent_version_id"),
         Index(
             "ix_execution_status_retry_queued",
             "status",
