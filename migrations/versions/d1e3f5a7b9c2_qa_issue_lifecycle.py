@@ -143,7 +143,7 @@ def upgrade() -> None:
                        OR eval_task_id IS DISTINCT FROM NEW.task_id
                        OR eval_passed IS NOT TRUE
                        OR NEW.fixed_at IS NULL
-                       OR eval_created_at < NEW.fixed_at
+                       OR eval_created_at <= NEW.fixed_at
                        OR NEW.retest_evidence_trust IS DISTINCT FROM eval_evidence_trust THEN
                         RAISE EXCEPTION 'QA issue closure requires a passing task-linked post-fix evaluation'
                             USING ERRCODE = '23514';
