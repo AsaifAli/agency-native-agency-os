@@ -235,11 +235,35 @@ def process_one_execution(
             db, execution_id=execution_id, attempt_id=attempt_id,
             worker_id=worker_id, lease_seconds=lease_seconds,
         )
-        from app.models import Agent, ExecutionAttempt, Task
+        from app.models import Agent, AgentVersion, ExecutionAttempt, Task
         agent = db.query(Agent).filter_by(
             id=execution.agent_id, org_id=execution.org_id,
             workspace_id=execution.workspace_id,
         ).one()
+        agent_version = None
+        if execution.agent_version_id:
+            agent_version = db.query(AgentVersion).filter_by(
+                id=execution.agent_version_id,
+                org_id=execution.org_id,
+                workspace_id=execution.workspace_id,
+                agent_id=execution.agent_id,
+            ).one_or_none()
+            if (
+                agent_version is None
+                or agent_version.runtime != execution.runtime
+                or agent_version.data_class != execution.data_class
+            ):
+                fail_execution(
+                    db,
+                    execution_id=execution.id,
+                    attempt_id=attempt.id,
+                    worker_id=worker_id,
+                    error_code="AGENT_VERSION_UNAVAILABLE",
+                    error_message="Pinned agent configuration is unavailable or inconsistent.",
+                    retryable=False,
+                )
+                db.commit()
+                return execution.id
         task = db.query(Task).filter_by(
             id=execution.task_id, org_id=execution.org_id,
             workspace_id=execution.workspace_id,
@@ -268,8 +292,11 @@ def process_one_execution(
             task_id=execution.task_id, agent_id=execution.agent_id,
             data_class=execution.data_class, execution_id=execution.id,
             client_authorized=execution.client_authorized,
-            agent_name=agent.name, agent_department=agent.department,
-            agent_instructions=agent.instructions, task_title=task.title,
+            agent_name=agent_version.name if agent_version else agent.name,
+            agent_department=agent_version.department if agent_version else agent.department,
+            agent_instructions=agent_version.instructions if agent_version else agent.instructions,
+            runtime_config=(agent_version.runtime_config or {}) if agent_version else {},
+            task_title=task.title,
             task_description=task.description,
             external_run_id=prior_attempt.external_run_id if prior_attempt else None,
             attempt_number=attempt_number,
