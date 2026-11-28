@@ -8,6 +8,7 @@ import { api, orgId, type Workspace } from "@/lib/api";
 
 type Project = { id: string; workspace_id: string; name: string; status: string };
 type Milestone = { id: string; title: string; status: string };
+type EvaluationRun = { id: string; pack_name: string; score: number; passed: boolean; evidence_trust: string; release_eligible: boolean; created_at: string };
 type Measurement = {
   id: string; outcome_id: string; value: string; measured_at: string; source_type: string;
   source_reference: string; evidence_summary: string; milestone_id: string | null;
@@ -37,10 +38,11 @@ const emptyDraft: OutcomeDraft = {
   target_date: "", measurement_method: "", acceptance_criteria: "",
 };
 
-function OutcomeCard({ outcome, milestones, onMeasure, onDecide }: {
+function OutcomeCard({ outcome, milestones, evaluations, onMeasure, onDecide }: {
   outcome: Outcome;
   milestones: Milestone[];
-  onMeasure: (id: string, data: { value: string; source_type: string; source_reference: string; evidence_summary: string; milestone_id: string | null }) => Promise<void>;
+  evaluations: EvaluationRun[];
+  onMeasure: (id: string, data: { value: string; source_type: string; source_reference: string; evidence_summary: string; milestone_id: string | null; supporting_evaluation_run_id: string | null }) => Promise<void>;
   onDecide: (id: string, decision: "accepted" | "rejected", results: Record<string, boolean>, note: string) => Promise<void>;
 }) {
   const [value, setValue] = useState("");
@@ -48,6 +50,7 @@ function OutcomeCard({ outcome, milestones, onMeasure, onDecide }: {
   const [sourceReference, setSourceReference] = useState("");
   const [evidence, setEvidence] = useState("");
   const [milestoneId, setMilestoneId] = useState("");
+  const [evaluationId, setEvaluationId] = useState("");
   const [criteria, setCriteria] = useState<Record<string, boolean>>(
     Object.fromEntries(outcome.acceptance_criteria.map(item => [item, outcome.acceptance_results[item] ?? false]))
   );
@@ -59,7 +62,7 @@ function OutcomeCard({ outcome, milestones, onMeasure, onDecide }: {
 
   async function measure(e: FormEvent) {
     e.preventDefault(); setBusy(true);
-    try { await onMeasure(outcome.id, { value, source_type: sourceType, source_reference: sourceReference, evidence_summary: evidence, milestone_id: milestoneId || null }); setValue(""); setSourceReference(""); setEvidence(""); setMilestoneId(""); }
+    try { await onMeasure(outcome.id, { value, source_type: sourceType, source_reference: sourceReference, evidence_summary: evidence, milestone_id: milestoneId || null, supporting_evaluation_run_id: evaluationId || null }); setValue(""); setSourceReference(""); setEvidence(""); setMilestoneId(""); setEvaluationId(""); }
     finally { setBusy(false); }
   }
   async function decide(decision: "accepted" | "rejected") {
@@ -102,7 +105,7 @@ function OutcomeCard({ outcome, milestones, onMeasure, onDecide }: {
           <div><div className="activity-title">{row.value} · {row.source_type.replaceAll("_", " ")}</div>
             <div className="activity-meta">{new Date(row.measured_at).toLocaleString()} · {row.source_reference}</div>
             {row.milestone_id && <div className="activity-meta">Milestone: {milestones.find(item => item.id === row.milestone_id)?.title || "Linked milestone"}</div>}
-            {row.supporting_evaluation_run_id && <div className="activity-meta">Evaluation run: {row.supporting_evaluation_run_id}</div>}
+            {row.supporting_evaluation_run_id && <div className="activity-meta">Evaluation run: {evaluations.find(item => item.id === row.supporting_evaluation_run_id)?.pack_name || "Linked evaluation"} · {row.supporting_evaluation_run_id}</div>}
             <div className="activity-meta">{row.evidence_summary}</div>
           </div>
         </div>
@@ -116,6 +119,7 @@ function OutcomeCard({ outcome, milestones, onMeasure, onDecide }: {
           <option value="client_reported">Client reported</option><option value="agency_measured">Agency measured</option><option value="system_measured">System measured</option>
         </select></label>
         <label className="field">Related milestone<select value={milestoneId} onChange={e => setMilestoneId(e.target.value)}><option value="">No milestone link</option>{milestones.map(item => <option key={item.id} value={item.id}>{item.title} · {item.status}</option>)}</select></label>
+        <label className="field">Supporting evaluation run<select value={evaluationId} onChange={e => setEvaluationId(e.target.value)}><option value="">No evaluation link</option>{evaluations.map(item => <option key={item.id} value={item.id}>{item.pack_name} · {item.passed ? "passed" : "failed"} · {Math.round(item.score * 100)}% · {item.evidence_trust}</option>)}</select><span className="activity-meta">Evaluation runs are supporting, self-reported evidence unless independently verified. They are not release approval.</span></label>
         <label className="field">Source reference<input required minLength={2} maxLength={240} value={sourceReference} onChange={e => setSourceReference(e.target.value)} placeholder="Report, dashboard, dataset or evidence ID" /></label>
         <label className="field">Evidence summary<textarea required minLength={10} value={evidence} onChange={e => setEvidence(e.target.value)} placeholder="What was measured, over what period, and how?" /></label>
         <button className="button" disabled={busy}>Save measurement</button>
@@ -131,6 +135,7 @@ export default function OutcomesPage() {
   const [projectId, setProjectId] = useState("");
   const [outcomes, setOutcomes] = useState<Outcome[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
+  const [evaluations, setEvaluations] = useState<EvaluationRun[]>([]);
   const [projectName, setProjectName] = useState("");
   const [draft, setDraft] = useState<OutcomeDraft>(emptyDraft);
   const [busy, setBusy] = useState(false);
@@ -142,8 +147,10 @@ export default function OutcomesPage() {
       api<OutcomeRecord[]>(`/v1/orgs/${orgId()}/projects/${selectedProject}/outcomes?workspace_id=${encodeURIComponent(selectedWorkspace)}`),
       api<Measurement[]>(`/v1/orgs/${orgId()}/projects/${selectedProject}/outcome-measurements?workspace_id=${encodeURIComponent(selectedWorkspace)}&limit=1000`),
       api<Milestone[]>(`/v1/orgs/${orgId()}/projects/${selectedProject}/milestones?workspace_id=${encodeURIComponent(selectedWorkspace)}`),
+      api<EvaluationRun[]>(`/v1/orgs/${orgId()}/evaluations?workspace_id=${encodeURIComponent(selectedWorkspace)}`),
     ]);
     setMilestones(projectMilestones);
+    setEvaluations(projectEvaluations);
     const byOutcome = new Map<string, Measurement[]>();
     for (const measurement of measurements) {
       const current = byOutcome.get(measurement.outcome_id) || [];
@@ -210,7 +217,7 @@ export default function OutcomesPage() {
     finally { setBusy(false); }
   }
 
-  async function recordMeasurement(id: string, data: { value: string; source_type: string; source_reference: string; evidence_summary: string; milestone_id: string | null }) {
+  async function recordMeasurement(id: string, data: { value: string; source_type: string; source_reference: string; evidence_summary: string; milestone_id: string | null; supporting_evaluation_run_id: string | null }) {
     setError(""); setNotice("");
     try {
       await api(`/v1/orgs/${orgId()}/outcomes/${id}/measurements`, { method: "POST", body: JSON.stringify({ workspace_id: workspaceId, ...data }) });
@@ -263,7 +270,7 @@ export default function OutcomesPage() {
     </section>}
     <section style={{ marginTop: 16 }}>
       <div className="panel-head"><div className="panel-title">Outcome scorecard</div><span className="panel-note">{outcomes.length} outcomes</span></div>
-      {outcomes.length ? <div className="stack">{outcomes.map(outcome => <OutcomeCard key={outcome.id} outcome={outcome} milestones={milestones} onMeasure={recordMeasurement} onDecide={decideAcceptance} />)}</div> : <div className="panel empty"><strong>No outcomes defined</strong>Select a project and record its first agreed business outcome.</div>}
+      {outcomes.length ? <div className="stack">{outcomes.map(outcome => <OutcomeCard key={outcome.id} outcome={outcome} milestones={milestones} evaluations={evaluations} onMeasure={recordMeasurement} onDecide={decideAcceptance} />)}</div> : <div className="panel empty"><strong>No outcomes defined</strong>Select a project and record its first agreed business outcome.</div>}
     </section>
   </Page>;
 }
