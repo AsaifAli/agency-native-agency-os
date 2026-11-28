@@ -84,7 +84,7 @@ def _persist_snapshot(
         )
         if (
             attempt is None
-            or attempt.status != ExecutionAttemptStatus.abandoned
+            or attempt.status not in (ExecutionAttemptStatus.abandoned, ExecutionAttemptStatus.failed)
             or attempt.runtime != "claude_managed_agents"
             or attempt.external_run_id != external_run_id
         ):
@@ -206,7 +206,7 @@ def reconcile_abandoned_managed_agent_usage(
                 Execution.runtime == "claude_managed_agents",
                 Execution.status.in_((ExecutionStatus.retry_wait, ExecutionStatus.failed)),
                 ExecutionAttempt.runtime == "claude_managed_agents",
-                ExecutionAttempt.status == ExecutionAttemptStatus.abandoned,
+                ExecutionAttempt.status.in_((ExecutionAttemptStatus.abandoned, ExecutionAttemptStatus.failed)),
                 ExecutionAttempt.external_run_id.is_not(None),
             )
             .order_by(ExecutionAttempt.finished_at.asc(), ExecutionAttempt.id.asc())
