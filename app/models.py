@@ -211,10 +211,21 @@ class Agent(Base):
 
 class Task(Base):
     __tablename__ = "tasks"
-    __table_args__ = (Index("ix_task_org_workspace_status", "org_id", "workspace_id", "status"),)
+    __table_args__ = (
+        UniqueConstraint("org_id", "workspace_id", "id", name="uq_tasks_scope_id"),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "milestone_id"],
+            ["milestones.org_id", "milestones.workspace_id", "milestones.id"],
+            ondelete="RESTRICT",
+            name="fk_tasks_milestone_scope",
+        ),
+        Index("ix_task_org_workspace_status", "org_id", "workspace_id", "status"),
+        Index("ix_task_org_workspace_milestone", "org_id", "workspace_id", "milestone_id"),
+    )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True, nullable=False)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), index=True, nullable=False)
+    milestone_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(40), default="queued")
