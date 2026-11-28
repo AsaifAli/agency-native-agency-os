@@ -40,6 +40,10 @@ class SessionCredentialContext:
     token_hash: str
 
 
+class MCPVaultCapacityError(Exception):
+    """The configured Anthropic Vault has no safe credential slot available."""
+
+
 def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
@@ -55,6 +59,8 @@ def issue_session_credential(
     session_id: str,
     ttl_seconds: int = 900,
     now: datetime | None = None,
+    provider_vault_id: str | None = None,
+    max_active_vault_credentials: int = 16,
 ) -> IssuedSessionCredential:
     """Create one short-lived credential under the caller's live execution transaction."""
     now = now or datetime.now(timezone.utc)
@@ -105,6 +111,26 @@ def issue_session_credential(
     if expires_at <= now:
         raise HTTPException(status_code=409, detail="Session or machine identity is expiring.")
 
+    if provider_vault_id is not None:
+        if not isinstance(provider_vault_id, str) or not provider_vault_id.startswith("vlt_"):
+            raise HTTPException(status_code=422, detail="A valid Anthropic Vault ID is required.")
+        if isinstance(max_active_vault_credentials, bool) or not isinstance(max_active_vault_credentials, int) or not 1 <= max_active_vault_credentials <= 20:
+            raise HTTPException(status_code=422, detail="MCP Vault active credential limit must be between 1 and 20.")
+        if db.get_bind().dialect.name != "postgresql":
+            raise RuntimeError("MCP Vault capacity reservations require PostgreSQL.")
+        reserved = db.execute(
+            text("""
+                SELECT agency_os_private.reserve_mcp_vault_credential_slot(
+                    :vault_id, :max_active
+                )
+            """),
+            {"vault_id": provider_vault_id, "max_active": max_active_vault_credentials},
+        ).scalar_one()
+        if not reserved:
+            raise MCPVaultCapacityError(
+                "The configured Anthropic Vault is at its active credential capacity."
+            )
+
     credential = MachineSessionCredential(
         id=credential_id,
         org_id=identity.org_id,
@@ -117,6 +143,7 @@ def issue_session_credential(
         expires_at=expires_at,
         request_window_started_at=now,
         request_count_window=0,
+        provider_vault_id=provider_vault_id,
     )
     db.add(credential)
     db.flush()
