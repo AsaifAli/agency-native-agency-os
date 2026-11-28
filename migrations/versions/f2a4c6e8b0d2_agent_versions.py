@@ -64,7 +64,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["org_id", "workspace_id", "agent_id"],
             ["agents.org_id", "agents.workspace_id", "agents.id"],
-            ondelete="CASCADE",
+            ondelete="RESTRICT",
             name="fk_agent_version_agent_scope",
         ),
         sa.ForeignKeyConstraint(["created_by"], ["users.id"], ondelete="SET NULL"),
@@ -82,6 +82,11 @@ def upgrade() -> None:
         "ix_agent_version_scope_created",
         "agent_versions",
         ["org_id", "workspace_id", "agent_id", "created_at"],
+    )
+    op.create_index(
+        "ix_execution_agent_version_id",
+        "executions",
+        ["agent_version_id"],
     )
 
     # Backfill a version 1 for every existing Agent before adding the
