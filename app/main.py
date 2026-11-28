@@ -59,6 +59,7 @@ from app.schemas import (
     ExecutionCreate,
     ExecutionOut,
 )
+from app.domain_models import Milestone
 from app.audit import record_event
 from app.browser_sessions import (
     issue_browser_session, authenticate_browser_session, revoke_browser_session,
@@ -689,9 +690,19 @@ def create_task(
 
     workspace_in_org(db, org_id, body.workspace_id)
 
+    if body.milestone_id:
+        milestone = db.query(Milestone).filter_by(
+            id=body.milestone_id,
+            org_id=org_id,
+            workspace_id=body.workspace_id,
+        ).first()
+        if milestone is None:
+            raise HTTPException(404, "Milestone not found in this workspace")
+
     task = Task(
         org_id=org_id,
         workspace_id=body.workspace_id,
+        milestone_id=body.milestone_id,
         title=body.title,
         description=body.description,
         created_by=p.user.id,
@@ -708,6 +719,7 @@ def create_task(
         "task",
         task.id,
         body.workspace_id,
+        {"milestone_id": task.milestone_id} if task.milestone_id else {},
     )
 
     db.commit()
