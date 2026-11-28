@@ -2437,3 +2437,46 @@ def test_processor_links_retried_attempt_to_existing_managed_agent_session(worke
     assert len(attempts) == 2
     assert attempts[1].external_run_id == "sesn_shared_retry"
     assert db.get(Execution, execution.id).result["usage"]["list_cost_minor"] == 15
+
+
+
+def test_provider_usage_snapshot_is_preserved_in_append_only_audit(worker_context):
+    ctx = worker_context
+    db = ctx["db"]
+    execution, attempt = claim_for_lifecycle_test(ctx, worker_id="usage-audit-worker")
+    start_execution(
+        db,
+        execution_id=execution.id,
+        attempt_id=attempt.id,
+        worker_id="usage-audit-worker",
+    )
+    attempt.external_run_id = "sesn_usage_audit"
+    db.commit()
+
+    usage = {
+        "input_tokens": 21,
+        "output_tokens": 8,
+        "list_cost_minor": 4,
+        "currency": "USD",
+    }
+    complete_execution(
+        db,
+        execution_id=execution.id,
+        attempt_id=attempt.id,
+        worker_id="usage-audit-worker",
+        result={"status": "succeeded", "usage": usage},
+    )
+    db.commit()
+
+    event = db.query(AuditEvent).filter_by(
+        org_id=ctx["org_id"],
+        workspace_id=ctx["workspace_id"],
+        event_type="execution.provider_usage_observed",
+        resource_type="execution_attempt",
+        resource_id=attempt.id,
+    ).one()
+    assert event.payload["provider"] == "claude_managed_agents"
+    assert event.payload["provider_session_id"] == "sesn_usage_audit"
+    assert event.payload["source"] == "runtime_result"
+    assert event.payload["usage"] == usage
+    assert len(event.payload["snapshot_sha256"]) == 64
