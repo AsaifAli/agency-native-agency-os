@@ -264,3 +264,99 @@ def load_active_session_context(
     ):
         raise _unauthorized()
     return MachinePrincipal(identity=identity), session
+
+
+
+def persist_provider_credential(
+    db: Session,
+    *,
+    credential_id: str,
+    vault_id: str,
+    provider_credential_id: str,
+    org_id: str,
+    workspace_id: str,
+) -> None:
+    if db.get_bind().dialect.name != "postgresql":
+        raise RuntimeError("Provider credential persistence requires the PostgreSQL worker capability.")
+    attached = db.execute(
+        text("""
+            SELECT agency_os_private.attach_mcp_provider_credential(
+                :credential_id, :vault_id, :provider_credential_id
+            )
+        """),
+        {
+            "credential_id": credential_id,
+            "vault_id": vault_id,
+            "provider_credential_id": provider_credential_id,
+        },
+    ).scalar_one()
+    if attached is not True:
+        db.rollback()
+        raise RuntimeError("OS rejected the provider credential attachment.")
+    from app.audit import record_event
+    record_event(
+        db, org_id, None, "machine_session_credential.provider_attached",
+        "machine_session_credential", credential_id, workspace_id,
+    )
+    db.commit()
+
+
+def revoke_session_credential(
+    db: Session,
+    *,
+    credential_id: str,
+    reason: str,
+    org_id: str,
+    workspace_id: str,
+) -> None:
+    if db.get_bind().dialect.name != "postgresql":
+        raise RuntimeError("Provider credential revocation requires the PostgreSQL worker capability.")
+    revoked = db.execute(
+        text("""
+            SELECT agency_os_private.revoke_mcp_session_credential(
+                :credential_id, :reason
+            )
+        """),
+        {"credential_id": credential_id, "reason": reason},
+    ).scalar_one()
+    if revoked is not True:
+        db.rollback()
+        raise RuntimeError("OS rejected the MCP session credential revocation.")
+    from app.audit import record_event
+    record_event(
+        db, org_id, None, "machine_session_credential.revoked",
+        "machine_session_credential", credential_id, workspace_id,
+    )
+    db.commit()
+
+
+def mark_provider_credential_archived(
+    db: Session,
+    *,
+    credential_id: str,
+    provider_credential_id: str,
+    org_id: str,
+    workspace_id: str,
+) -> None:
+    if db.get_bind().dialect.name != "postgresql":
+        raise RuntimeError("Provider credential archival requires the PostgreSQL worker capability.")
+    archived = db.execute(
+        text("""
+            SELECT agency_os_private.mark_mcp_provider_credential_archived(
+                :credential_id, :provider_credential_id
+            )
+        """),
+        {
+            "credential_id": credential_id,
+            "provider_credential_id": provider_credential_id,
+        },
+    ).scalar_one()
+    if archived is not True:
+        db.rollback()
+        raise RuntimeError("OS rejected the provider credential archival update.")
+    from app.audit import record_event
+    record_event(
+        db, org_id, None, "machine_session_credential.provider_archived",
+        "machine_session_credential", credential_id, workspace_id,
+    )
+    db.commit()
