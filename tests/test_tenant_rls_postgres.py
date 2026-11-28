@@ -200,3 +200,17 @@ def test_postgres_workspace_grant_functions_require_authority_and_audit_changes(
                 db.commit()
         app_engine.dispose()
         admin_engine.dispose()
+
+
+def test_app_runtime_role_cannot_create_objects_in_public_schema():
+    engine = create_engine(APP_URL, pool_pre_ping=True)
+    try:
+        with engine.connect() as connection:
+            can_create, can_use = connection.execute(text(
+                "SELECT has_schema_privilege(current_user, 'public', 'CREATE'), "
+                "has_schema_privilege(current_user, 'public', 'USAGE')"
+            )).one()
+        assert can_create is False
+        assert can_use is True
+    finally:
+        engine.dispose()
