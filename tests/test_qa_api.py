@@ -94,7 +94,7 @@ def client():
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_principal] = lambda: Principal(user=principal["user"])
     tc = TestClient(app)
-    tc.org_id, tc.ws_id = org.id, ws.id
+    tc.org_id, tc.ws_id, tc.other_ws_id = org.id, ws.id, other_ws.id
     tc.project_id, tc.task_id = project.id, task.id
     tc.foreign_project_id, tc.foreign_task_id = foreign_project.id, foreign_task.id
     tc.passing_eval_id, tc.failing_eval_id = passing.id, failing.id
