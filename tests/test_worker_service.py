@@ -2555,3 +2555,64 @@ def test_worker_uses_execution_pinned_agent_version_after_new_version_activates(
     assert runtime.request.runtime_config == {}
     assert execution.agent_version_id == original_version_id
     assert agent.current_version_id == new_version.id
+
+
+
+def test_worker_stops_queued_execution_when_capability_is_revoked(worker_context, monkeypatch):
+    ctx = worker_context
+    db = ctx["db"]
+    member = WorkforceMember(
+        org_id=ctx["org_id"],
+        workspace_id=ctx["workspace_id"],
+        agent_id=ctx["agent_id"],
+        member_type="agent",
+        name="Worker Test Member",
+        title="Research Specialist",
+        department_key="research",
+        responsibilities=["research"],
+        autonomy_level=1,
+        status="active",
+        is_founder_reserved=False,
+    )
+    db.add(member)
+    db.flush()
+    capability = WorkforceCapability(
+        org_id=ctx["org_id"],
+        workspace_id=ctx["workspace_id"],
+        member_id=member.id,
+        capability_key="research.execute",
+        scope="workspace",
+        allowed_data_classes=["synthetic"],
+        allowed_actions=["research.execute"],
+        tool_allowlist=[],
+        budget_minor=1000,
+        currency="USD",
+        enabled=True,
+    )
+    db.add(capability)
+    db.flush()
+
+    execution = create_worker_execution(
+        ctx, required_capability_action="research.execute",
+    )
+    db.commit()
+    assert execution.workforce_member_id == member.id
+    assert execution.required_capability_action == "research.execute"
+
+    capability.enabled = False
+    db.commit()
+
+    def runtime_must_not_start(_name):
+        raise AssertionError("Provider runtime must not start after capability revocation")
+
+    monkeypatch.setattr(processor_module, "get_runtime", runtime_must_not_start)
+    session_factory = sessionmaker(bind=db.get_bind(), autoflush=False, autocommit=False)
+    processed = process_one_execution(
+        worker_id="worker-capability-revoked",
+        session_factory=session_factory,
+    )
+
+    assert processed == execution.id
+    db.refresh(execution)
+    assert execution.status == ExecutionStatus.failed
+    assert execution.error_code == "WORKFORCE_CAPABILITY_REVOKED"
