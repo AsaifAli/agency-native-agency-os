@@ -2332,3 +2332,44 @@ def test_provider_usage_snapshot_is_not_written_after_execution_resumes(worker_c
     db.expire_all()
     persisted = db.get(ExecutionAttempt, attempt.id)
     assert persisted.result is None
+
+
+
+def test_failed_managed_agent_attempt_usage_is_reconciled(worker_context):
+    from sqlalchemy.orm import sessionmaker
+    from app.provider_usage_reconciliation import reconcile_abandoned_managed_agent_usage
+
+    ctx = worker_context
+    db = ctx["db"]
+    execution = create_worker_execution(ctx)
+    execution.runtime = "claude_managed_agents"
+    execution.status = ExecutionStatus.failed
+    attempt = ExecutionAttempt(
+        execution_id=execution.id,
+        attempt_number=1,
+        runtime="claude_managed_agents",
+        status=ExecutionAttemptStatus.failed,
+        external_run_id="sesn_failed_attempt",
+        result=None,
+        finished_at=datetime.now(timezone.utc),
+    )
+    db.add(attempt)
+    db.commit()
+
+    class Runtime:
+        def fetch_idle_session_usage(self, session_id):
+            assert session_id == "sesn_failed_attempt"
+            return {"input_tokens": 8, "output_tokens": 3}
+
+    session_factory = sessionmaker(bind=db.get_bind(), autoflush=False, autocommit=False)
+    result = reconcile_abandoned_managed_agent_usage(
+        session_factory, runtime=Runtime(), limit=5,
+    )
+
+    assert result == {"reconciled": 1, "pending": 0, "skipped": 0}
+    db.expire_all()
+    assert db.get(ExecutionAttempt, attempt.id).result["usage"] == {
+        "input_tokens": 8,
+        "output_tokens": 3,
+    }
+    assert db.get(Execution, execution.id).result["usage"]["output_tokens"] == 3
