@@ -245,7 +245,7 @@ def test_ci_runs_human_rls_tests_with_a_dedicated_least_privilege_app_login():
 
     # The test login inherits only the app role's grants; it remains a distinct
     # NOBYPASSRLS login so verify_postgres_role checks the actual session role.
-    assert "GRANT agency_os_app TO agency_os_test_app" in test_roles
+    assert "GRANT agency_os_app TO agency_os_test_app WITH INHERIT TRUE" in test_roles
     assert "ALTER ROLE agency_os_test_app INHERIT" in test_roles
     assert "NOBYPASSRLS" in test_roles
 
