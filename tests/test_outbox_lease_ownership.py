@@ -86,7 +86,7 @@ def test_expired_owner_cannot_ack_even_if_worker_id_was_reused(lease_context):
 def test_expired_owner_cannot_record_failure_even_if_worker_id_was_reused(lease_context):
     Session, db, event_id, message = lease_context
 
-    _record_failure(
+    recorded = _record_failure(
         Session,
         message=message,
         worker_id="reused-worker-id",
@@ -94,6 +94,7 @@ def test_expired_owner_cannot_record_failure_even_if_worker_id_was_reused(lease_
         base_retry_seconds=1,
         max_retry_seconds=2,
     )
+    assert recorded is False
 
     db.expire_all()
     row = db.query(OutboxEvent).filter_by(id=event_id).one()
