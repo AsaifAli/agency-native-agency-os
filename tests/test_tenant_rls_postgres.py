@@ -170,10 +170,30 @@ def test_postgres_workspace_grant_functions_require_authority_and_audit_changes(
                  "target": member.id, "actor": founder.id},
             ).scalar_one()
             assert creator_grant_id and member_grant_id
+            # SECURITY DEFINER predicates may answer only for the authenticated
+            # transaction identity, never for an arbitrary actor argument.
+            assert db.execute(text(
+                "SELECT agency_os_private.user_has_org_access(:org, :actor)"
+            ), {"org": org.id, "actor": founder.id}).scalar_one() is True
+            assert db.execute(text(
+                "SELECT agency_os_private.user_has_org_access(:org, :actor)"
+            ), {"org": org.id, "actor": member.id}).scalar_one() is False
+            assert db.execute(text(
+                "SELECT agency_os_private.user_has_workspace_access(:org, :workspace, :actor)"
+            ), {"org": org.id, "workspace": workspace.id, "actor": founder.id}).scalar_one() is True
+            assert db.execute(text(
+                "SELECT agency_os_private.user_has_workspace_access(:org, :workspace, :actor)"
+            ), {"org": org.id, "workspace": workspace.id, "actor": member.id}).scalar_one() is False
             db.commit()
 
         with App() as db:
             set_rls_context(db, user_id=outsider.id)
+            assert db.execute(text(
+                "SELECT agency_os_private.user_has_org_access(:org, :actor)"
+            ), {"org": org.id, "actor": founder.id}).scalar_one() is False
+            assert db.execute(text(
+                "SELECT agency_os_private.user_has_workspace_access(:org, :workspace, :actor)"
+            ), {"org": org.id, "workspace": workspace.id, "actor": founder.id}).scalar_one() is False
             with pytest.raises(DBAPIError):
                 db.execute(
                     text("SELECT agency_os_private.grant_workspace_access(:org, :workspace, :target, :actor)"),

@@ -324,3 +324,10 @@ def test_mcp_vault_capacity_migration_is_bounded_and_fails_closed_on_ambiguous_c
     assert "TO agency_os_worker" in source
     assert "FROM PUBLIC, agency_os_app" in source
     assert "'MCP_VAULT_CREATE_AMBIGUOUS', 'MCP_ORPHANED_CREDENTIAL'" in source
+
+
+def test_security_definer_access_predicates_bind_actor_to_transaction_identity():
+    source = (Path(__file__).parents[1] / "migrations/versions/d4e5f6a7b8c9_bind_rls_access_predicates.py").read_text()
+    assert source.count("actor_user_id = nullif(current_setting('agency_os.user_id', true), '')") >= 2
+    assert source.count("SECURITY DEFINER") >= 2
+    assert source.count("OWNER TO agency_os_migrator") >= 2
