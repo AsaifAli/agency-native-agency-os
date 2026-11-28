@@ -27,5 +27,8 @@ SELECT format('CREATE ROLE agency_os_worker LOGIN PASSWORD %L NOSUPERUSER NOCREA
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='agency_os_worker') \gexec
 ALTER ROLE agency_os_worker LOGIN PASSWORD :'worker_password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
 
+REVOKE CREATE ON SCHEMA public FROM PUBLIC, agency_os_app, agency_os_worker;
+GRANT USAGE ON SCHEMA public TO agency_os_app, agency_os_worker;
+
 GRANT CONNECT ON DATABASE agency_os TO agency_os, agency_os_app, agency_os_worker, agency_os_migrator;
 SQL
