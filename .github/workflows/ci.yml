@@ -10,6 +10,12 @@ on:
 permissions:
   contents: read
 
+# Push and pull_request events for the same head branch share one CI slot.
+# New commits cancel stale runs instead of letting obsolete suites pile up.
+concurrency:
+  group: agency-os-ci-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
     runs-on: ubuntu-latest
