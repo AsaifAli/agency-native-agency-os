@@ -68,8 +68,9 @@ External calls occur outside database transactions. Persist intent and reference
 
 ## 5. MCP transport and Tool Gateway contract
 
-- Use the official Python MCP SDK's Streamable HTTP transport, mounted into the existing FastAPI process. Do not add a separate service unless operational evidence requires it.
-- Use stateless HTTP so any API replica can handle each request; the URL path and OS credential resolve the persisted session context.
+- Use the official Python MCP SDK 2.x Streamable HTTP transport, mounted into the existing FastAPI process. The tested 2.3.0 SDK serves modern MCP 2026-07-28 and legacy MCP 2025-11-25 on the same endpoint. Do not add a separate service or Cloudflare Worker MCP implementation unless operational evidence requires it.
+- Use the 2026-07-28 stateless request/response protocol and `stateless_http=True`; do not depend on MCP `initialize` or `Mcp-Session-Id` for modern clients. Legacy clients retain compatibility.
+- The `{agent_session_id}` path is an explicit Agency OS application-session handle, not an MCP transport session. The OS `AgentSession`, MachineIdentity, credential digest, workspace and execution remain durable and are revalidated on every request. Stateless transport does not remove OS state, authorization, idempotency or audit.
 - Apply exact Host and Origin allowlists, DNS-rebinding protection, HTTPS-only public URL validation, bounded request bodies, timeouts and concurrency limits.
 - Tool discovery returns only tools that are simultaneously:
   - registered and enabled by OS configuration;
@@ -163,6 +164,7 @@ External calls occur outside database transactions. Persist intent and reference
 - Keep approval-bearing tools, client-data tools and external side effects disabled until an OS approval adapter consumes approval and action atomically and passes negative tests. The only current write-draft tool is public-source research capture, which remains `pending_review`.
 - Workforce `budget_minor` is not yet a fully enforced runtime spend cap; provider spend reservation/settlement remains a separate gap.
 - The initial transport concurrency semaphore is per API process; database request-rate limiting is shared. A global in-flight concurrency cap across multiple API replicas is not yet implemented.
+- Modern MCP 2026-07-28 discovery/list/call is covered by a local integration test, including the absence of `Mcp-Session-Id`; actual Anthropic Managed Agents and Cowork client interoperability remains unverified until staging smoke tests. Native Skills over MCP, Tasks extension, Elicitation and MCP File Uploads are not implemented in this server yet.
 
 ### Current external setup
 

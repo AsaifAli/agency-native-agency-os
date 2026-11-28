@@ -103,6 +103,19 @@ Cowork capabilities vary by plan, platform, rollout and settings. Local-file acc
 This document defines our intended operating model. It does not install Cowork plugins/connectors, provision Cowork Projects, synchronize OS memory, create an OS-Cowork integration or authorize client-data processing. Those require separate configuration, review and evidence.
 
 
+## MCP protocol evolution and adoption
+
+The Agency OS MCP gateway uses the official MCP Python SDK 2.x and is tested against both MCP 2026-07-28 stateless requests and the 2025-11-25 compatibility handshake. Do not fork MCP or replace the FastAPI gateway with a second Cloudflare implementation. Cloudflare's Agents SDK and Workers support the same open protocol; Cloudflare may provide edge routing/WAF/private ingress where useful, while the OS remains the authorization and execution authority.
+
+Adopt Anthropic's newer MCP capabilities in this order:
+
+1. **Skills over MCP:** publish reviewed, versioned OS skills as expertise alongside tools. Skill content is guidance, never authorization.
+2. **Tasks:** expose long-running work only by mapping MCP task handles to persisted OS execution/outbox records; do not keep task state solely in the MCP server or provider.
+3. **Elicitation:** use it to ask for missing inputs or present an approval prompt, but the actual approval must be persisted and consumed by the OS's atomic approval/action path.
+4. **File uploads:** accept files only through the OS artifact gateway, with workspace and conversation scope, malware/type/size checks, retention and deletion. Do not accept provider file paths or direct object-store credentials.
+
+The November 24, 2026 Anthropic update makes Skills over MCP public beta and Tasks/Elicitation generally available; File Uploads are rolling out. Our current server has verified stateless tool discovery and invocation, not these newer extensions yet. Add them through the official SDK when its server support and client interoperability are verified.
+
 ## Shared OS integration boundary
 
 Claude Code and Cowork must connect through the founder-provisioned, workspace-scoped Agency OS integration contract. See [Agent Integration Contract](AGENT_INTEGRATION_CONTRACT.md) for machine identities, short-lived session credentials, MCP/API scopes, public knowledge access, draft handoffs and verification gates. Cowork native connectors and local files remain separate trust boundaries and are not governed automatically by Agency OS RLS.
