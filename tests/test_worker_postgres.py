@@ -980,8 +980,14 @@ def test_postgres_outbox_claim_survives_worker_process_crash_and_reclaims():
     idempotency_key = f"outbox-process-crash-{suffix}"
     worker_id = f"crashed-outbox-worker-{suffix}"
     process = None
+    effect_table = f"agency_os_test_outbox_effect_{suffix}"
 
     try:
+        with engine.begin() as connection:
+            connection.execute(text(
+                f'CREATE TABLE "{effect_table}" (idempotency_key TEXT PRIMARY KEY)'
+            ))
+
         setup = Session()
         try:
             org = Organization(name=f"Outbox Process Crash Test {suffix}")
@@ -1020,7 +1026,7 @@ def test_postgres_outbox_claim_survives_worker_process_crash_and_reclaims():
 import json
 import os
 import time
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from app.outbox_service import claim_outbox_batch
 
@@ -1038,8 +1044,14 @@ try:
         db.commit()
     if len(messages) != 1:
         raise RuntimeError("Expected exactly one synthetic outbox event")
+    with engine.begin() as connection:
+        connection.execute(
+            text('INSERT INTO "' + os.environ["AGENCY_OS_TEST_EFFECT_TABLE"] +
+                 '" (idempotency_key) VALUES (:key) ON CONFLICT DO NOTHING'),
+            {"key": messages[0].idempotency_key},
+        )
     print(json.dumps({
-        "stage": "claim_committed",
+        "stage": "consumer_effect_committed_before_ack",
         "id": messages[0].id,
         "idempotency_key": messages[0].idempotency_key,
         "attempts": messages[0].attempts,
@@ -1051,6 +1063,7 @@ finally:
         child_env = os.environ.copy()
         child_env["AGENCY_OS_TEST_WORKER_ID"] = worker_id
         child_env["AGENCY_OS_TEST_EVENT_TYPE"] = event_type
+        child_env["AGENCY_OS_TEST_EFFECT_TABLE"] = effect_table
         process = subprocess.Popen(
             [sys.executable, "-c", child_code],
             cwd=os.getcwd(),
@@ -1078,7 +1091,7 @@ finally:
             )
         claimed = json.loads(marker)
         assert claimed == {
-            "stage": "claim_committed",
+            "stage": "consumer_effect_committed_before_ack",
             "id": event_id,
             "idempotency_key": idempotency_key,
             "attempts": 1,
@@ -1100,9 +1113,10 @@ finally:
             row.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=5)
             recovery.commit()
 
+            recovery_worker_id = f"recovery-worker-{suffix}"
             reclaimed = claim_outbox_batch(
                 recovery,
-                worker_id=f"recovery-worker-{suffix}",
+                worker_id=recovery_worker_id,
                 event_types={event_type},
                 limit=1,
                 lease_seconds=60,
@@ -1112,8 +1126,35 @@ finally:
             assert reclaimed[0].idempotency_key == idempotency_key
             assert reclaimed[0].attempts == 2
             recovery.commit()
+
+            # Replay the consumer's idempotent side effect after redelivery.
+            # The unique idempotency key makes the second insert a no-op.
+            recovery.execute(
+                text(f'INSERT INTO "{effect_table}" (idempotency_key) '
+                     'VALUES (:key) ON CONFLICT DO NOTHING'),
+                {"key": idempotency_key},
+            )
+            recovery.commit()
+            _acknowledge(
+                Session,
+                message=reclaimed[0],
+                worker_id=recovery_worker_id,
+            )
         finally:
             recovery.close()
+
+        with engine.connect() as connection:
+            effect_count = connection.execute(
+                text(f'SELECT count(*) FROM "{effect_table}" WHERE idempotency_key = :key'),
+                {"key": idempotency_key},
+            ).scalar_one()
+            assert effect_count == 1
+
+        with Session() as verification:
+            published = verification.query(OutboxEvent).filter_by(id=event_id).one()
+            assert published.status == "published"
+            assert published.claimed_by is None
+            assert published.lease_expires_at is None
     finally:
         if process is not None and process.poll() is None:
             process.kill()
@@ -1143,6 +1184,8 @@ finally:
                 raise
             finally:
                 cleanup.close()
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP TABLE IF EXISTS "{effect_table}"'))
         engine.dispose()
 
 
