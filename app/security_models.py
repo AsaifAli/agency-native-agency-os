@@ -130,6 +130,7 @@ class MachineSessionCredential(Base):
         ),
         CheckConstraint("credential_version >= 1", name="ck_machine_session_credential_version"),
         CheckConstraint("request_count_window >= 0", name="ck_machine_session_credential_request_count"),
+        CheckConstraint("provider_credential_status IN ('not_created','active','delete_pending','deleted','failed')", name="ck_machine_session_credential_provider_status"),
         Index(
             "ix_machine_session_credential_session_revoked",
             "org_id", "workspace_id", "session_id", "revoked_at",
