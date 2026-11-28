@@ -13,7 +13,7 @@ permissions:
 # Push and pull_request events for the same head branch share one CI slot.
 # New commits cancel stale runs instead of letting obsolete suites pile up.
 concurrency:
-  group: agency-os-ci-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref }}
+  group: agency-os-ci-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
