@@ -2,7 +2,7 @@
 
 ## Implementation status
 
-Migration `t0a1b2c3d4e5` enables and FORCEs RLS for organization-scoped model tables, `organizations` and `browser_sessions`. Follow-up migration `u1b2c3d4e5f6` adds RLS to `execution_attempts`, scopes org-level outbox events and adds two private SECURITY DEFINER worker operations. The worker role is changed to non-superuser `NOBYPASSRLS`; it enumerates org/workspace identifiers through a narrowly granted function, then runs normal queue, execution, session and outbox queries with a transaction-local exact workspace context. Browser-session retention runs through a bounded, audited SECURITY DEFINER function. Direct worker privileges on users, browser sessions, memberships, founder authorities and machine identities are revoked. API and worker startup verify their PostgreSQL role attributes and fail closed unless every expected tenant table (49 organization-scoped tables plus `organizations`, `browser_sessions` and `execution_attempts`: 52 total) exists, has both ENABLE and FORCE ROW LEVEL SECURITY, and has at least one policy. The inventory is kept in `app/db.py` and a regression test compares it with the migration's `ORG_TABLES` definition.
+The PostgreSQL security model uses additive migrations to enable and FORCE RLS across the tenant-owned schema, including organization-scoped records, workspace-owned records, `organizations`, `browser_sessions`, `execution_attempts`, outcome evidence, orchestration links and Private Operations records. The current startup inventory is maintained in `app/db.py` (`REQUIRED_RLS_TABLES`, currently 58 tables) and startup fails closed if an expected table is missing RLS, FORCE RLS or a policy. Dedicated runtime roles are non-superusers and `NOBYPASSRLS`; the migrator is the only role with `BYPASSRLS` and owns migrated objects. Worker scope discovery is an atomic bounded claim. Execution work uses a PID/transaction-bound lease capability; maintenance uses a separate short-lived workspace capability. The legacy global workspace enumerator is not an authorized worker entry point. Browser-session retention runs through a bounded, audited SECURITY DEFINER function, and direct worker privileges on sensitive tables are revoked. PostgreSQL integration tests verify role grants, worker capabilities, human workspace grants, machine identity lookup, append-only audit and outcome evidence.
 
 **Validation status:** the user applied migration `u1b2c3d4e5f6` and completed the worker role grant/bootstrap step against the isolated PostgreSQL Compose test database. The configured `postgres-tests` image then passed **22 tests (22 passed, 0 failed)**, including the worker-role RLS integration tests. This is isolated local test evidence, not a production migration rehearsal or production approval. The assistant-side development environment has no Docker daemon or live PostgreSQL service.
 
@@ -56,7 +56,7 @@ Custom PostgreSQL GUCs are defense-in-depth against missing tenant predicates, n
 
 ## Live test
 
-Apply migrations to a disposable PostgreSQL 16 database and create the four roles. Then run:
+Apply migrations to a disposable PostgreSQL 16 database and create the bootstrap, migrator, app, test-app and worker roles using `docker/postgres/test-init.sql`. The `agency_os_test_app` login inherits `agency_os_app` grants but remains a separate `NOBYPASSRLS` session identity. Then run:
 
 ```bash
 AGENCY_OS_TEST_RLS_ADMIN_DATABASE_URL='postgresql+psycopg://agency_os_migrator:...@localhost:5432/agency_os_test' \
