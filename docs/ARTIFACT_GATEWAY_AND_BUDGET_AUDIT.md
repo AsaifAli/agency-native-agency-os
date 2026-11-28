@@ -11,7 +11,7 @@ This audit records the current code evidence and the implementation boundary for
 ### Verified in source
 
 - No FastAPI `UploadFile`/`File()` endpoint or frontend upload flow exists in the authored application source.
-- No artifact/file metadata ORM model, object-storage client, signed-URL flow, quarantine pipeline, malware scanner, or artifact cleanup worker exists.
+- The additive `Artifact` metadata ORM model and tenant RLS migration have since been implemented (see section 3/4 below). No object-storage client, signed-URL flow, quarantine persistence, malware scanner, or artifact cleanup worker exists.
 - `.env.runtime.example` contains generic `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_BUCKET`, `OBJECT_STORAGE_ACCESS_KEY`, and `OBJECT_STORAGE_SECRET_KEY` placeholders. They are not wired into `app/config.py` or a storage adapter. These placeholders are not evidence of a configured provider.
 - `app/data_protection.py` currently sanitizes bounded structured execution payloads and provider results. It is not a binary-document classifier, parser, malware scanner, or upload gateway.
 - `app/retention.py` scrubs selected old session and tool-invocation payloads. It does not delete object-store artifacts or maintain artifact lifecycle state.
@@ -86,8 +86,8 @@ Do not add a local-disk fallback, public bucket, direct-to-provider client uploa
 | Capability | Status | Boundary |
 |---|---|---|
 | Structured execution payload protection | Implemented; bounded | Not a file scanner/classifier |
-| Workspace RLS for existing tenant tables | Implemented; CI-tested | Artifact table does not exist yet |
-| File upload/download gateway | Not implemented | No upload surface should be enabled |
+| Artifact metadata model and workspace RLS | Implemented; PostgreSQL CI migration/role-tested | No object bytes, storage adapter or upload route |
+| File upload/download gateway | Not implemented; bounded validation primitives exist | No upload surface should be enabled |
 | Private object storage | Not implemented/unconfigured | Example env placeholders only |
 | Malware/quarantine pipeline | Not implemented | Fail closed; no untrusted upload parsing |
 | Artifact retention/deletion/reconciliation | Not implemented | Existing session/tool scrub is not artifact cleanup |
@@ -113,3 +113,25 @@ Implemented in `app/artifact_gateway.py` (not wired to an HTTP route or worker):
 Tests: `tests/test_artifact_gateway.py` covers content-type/signature mismatch, path traversal, size limits, empty/archive rejection, binary text, digest/size, opaque keys and scanner fail-closed behavior.
 
 **Still deliberately not implemented/enabled:** provider adapter, credentials, private bucket verification, quarantine persistence, scanner integration, lifecycle transactions, upload/download endpoints, worker permissions, cleanup/reconciliation. The inspected bytes are currently bounded in memory; do not expose this helper to large or untrusted traffic until a streaming-to-private-quarantine adapter and scanner are selected and integrated. PDF/image signature checks are not malware scanning and do not make files safe for parsing or runtime execution.
+
+## 5. External storage provider checkpoint — 2026-11-28
+
+Cloudflare R2 was evaluated as the preferred candidate because the agency already uses Cloudflare infrastructure and R2 exposes an S3-compatible API. A read-only check against the connected Cloudflare account returned API error `10042`: **“Please enable R2 through the Cloudflare Dashboard.”** No bucket exists or was provisioned through this work; no paid service was enabled and no account settings were changed.
+
+Official provider constraints reviewed:
+
+- R2 supports S3-compatible clients; the endpoint is account-specific: `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`.
+- R2 Object Read & Write credentials can be scoped to specific buckets, but those object-level credentials are supported by the S3-compatible API, not Cloudflare's general REST API.
+- The future adapter should use a dedicated bucket-only Object Read & Write credential stored in the server secret manager. It must not expose credentials to the browser, Cowork, Claude Code or agents. The OS remains responsible for authorization and object-key selection.
+
+References: [R2 S3 API](https://developers.cloudflare.com/r2/get-started/s3/), [R2 authentication and token permissions](https://developers.cloudflare.com/r2/api/tokens/), [object-token API limitation](https://developers.cloudflare.com/r2/platform/troubleshooting/).
+
+**External gate:** founder enables R2 in Cloudflare Dashboard, provisions a private bucket, and creates a bucket-scoped Object Read & Write token. Until then, no provider adapter is configured and uploads remain disabled. Do not substitute a public bucket or a local-disk fallback.
+
+## 6. Cumulative spend policy decision — not silently assumed
+
+The code confirms `WorkforceCapability.budget_minor` is a per-member/per-capability configuration field with `scope` values `self`, `team` or `workspace`; its default currency is INR. That `scope` describes authorization scope, not a budget period. Existing project budgets are also commercial delivery budgets. Neither is a valid provider-spend account.
+
+A safe implementation recommendation is a **separate workspace provider-spend account denominated in USD cents**, because current Anthropic list-cost usage is USD. A future ledger should reserve the configured maximum session cost before dispatch, settle each provider attempt from validated usage, keep ambiguous outcomes reserved pending reconciliation, and use a PostgreSQL-serialized reservation so concurrent workers cannot overspend. Member/capability sublimits can be layered later without converting or reinterpreting INR capability metadata.
+
+Before enforcement is implemented, the founder must choose whether the workspace account is a hard cumulative lifetime cap or a calendar-month cap (UTC), and set its USD-cent limit. No default limit or FX conversion is inferred. The existing per-session provider cap remains the only enforced monetary ceiling today.
