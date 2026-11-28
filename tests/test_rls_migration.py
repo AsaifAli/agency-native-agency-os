@@ -9,6 +9,7 @@ import app.security_models  # noqa: F401
 import app.telephony.models  # noqa: F401
 import app.outreach.models  # noqa: F401
 import app.workforce_models  # noqa: F401
+import app.private_ops_models  # noqa: F401
 
 PATH = Path(__file__).parents[1] / "migrations/versions/t0a1b2c3d4e5_postgresql_tenant_row_level_security.py"
 SPEC = importlib.util.spec_from_file_location("tenant_rls_migration", PATH)
@@ -26,6 +27,9 @@ def test_rls_migration_covers_every_model_table_with_org_id():
     # original tenant-RLS revision immutable.
     expected.pop("project_outcomes", None)
     expected.pop("outcome_measurements", None)
+    expected.pop("orchestration_plan_delegations", None)
+    expected.pop("knowledge_items", None)
+    expected.pop("business_drafts", None)
     # Orchestration plan links receive tenant scope in a later additive
     # migration; keep the original tenant-RLS revision immutable.
     expected.pop("orchestration_plan_delegations", None)
@@ -122,7 +126,7 @@ def test_workspace_authorization_migration_covers_every_workspace_owned_table():
     }
     expected.difference_update({
         "project_outcomes", "outcome_measurements",
-        "orchestration_plan_delegations",
+        "orchestration_plan_delegations", "knowledge_items", "business_drafts",
     })
     assert set(migration.WORKSPACE_TABLES) == expected
 
@@ -220,3 +224,15 @@ def test_worker_machine_identity_rls_is_execution_scoped_not_disabled():
     assert "e.machine_session_id" in migration
     assert "agency_os.machine_identity_lookup_id" in migration
     assert "CREATE POLICY tenant_isolation ON public.machine_identities" in migration
+
+
+def test_private_operations_migration_enforces_workspace_rls_and_denies_worker_role():
+    path = PATH.with_name("a7b2c9d4e1f6_private_operations_knowledge.py")
+    source = path.read_text()
+    assert '"knowledge_items"' in source and '"business_drafts"' in source
+    assert "ENABLE ROW LEVEL SECURITY" in source
+    assert "FORCE ROW LEVEL SECURITY" in source
+    assert "user_has_workspace_access" in source
+    assert "session_user <> 'agency_os_worker'" in source
+    assert "TO agency_os_app" in source
+    assert "REVOKE ALL ON public." in source and "FROM agency_os_worker" in source
