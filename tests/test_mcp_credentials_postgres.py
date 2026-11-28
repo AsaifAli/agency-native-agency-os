@@ -87,6 +87,9 @@ def test_mcp_credential_hash_is_not_readable_and_auth_is_database_owned():
                 token_hash=token_hash, token_prefix="aos_ms_test.",
                 credential_version=1, expires_at=now + timedelta(minutes=30),
                 request_window_started_at=now, request_count_window=0,
+                provider_vault_id="vlt_capacity_test",
+                provider_credential_id="vcrd_capacity_test",
+                provider_credential_status="active",
             )
             db.add(credential)
             db.commit()
@@ -201,9 +204,22 @@ def test_mcp_credential_hash_is_not_readable_and_auth_is_database_owned():
                     has_function_privilege(current_user,
                       'agency_os_private.revoke_mcp_session_credential(text,text)', 'EXECUTE'),
                     has_function_privilege(current_user,
-                      'agency_os_private.mark_mcp_provider_credential_archived(text,text)', 'EXECUTE')
+                      'agency_os_private.mark_mcp_provider_credential_archived(text,text)', 'EXECUTE'),
+                    has_function_privilege(current_user,
+                      'agency_os_private.reserve_mcp_vault_credential_slot(text,integer)', 'EXECUTE')
             """)).one()
-            assert tuple(worker_function_privileges) == (True, True, True, True)
+            assert tuple(worker_function_privileges) == (True, True, True, True, True)
+            assert connection.execute(text("""
+                SELECT agency_os_private.reserve_mcp_vault_credential_slot(
+                    'vlt_capacity_test', 1
+                )
+            """)).scalar_one() is False
+            assert connection.execute(text("""
+                SELECT agency_os_private.reserve_mcp_vault_credential_slot(
+                    'vlt_capacity_test', 2
+                )
+            """)).scalar_one() is True
+            connection.commit()
 
             # Caller-forged tenant GUCs cannot satisfy the execution-bound INSERT policy.
             connection.execute(
