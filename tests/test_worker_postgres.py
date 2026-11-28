@@ -35,6 +35,8 @@ from app.outbox_service import (
     OutboxOwnershipError,
     _acknowledge,
     _record_failure,
+    _renew_lease,
+    dispatch_outbox_batch,
     reconcile_outbox_events,
     claim_outbox_batch,
 )
@@ -904,6 +906,14 @@ def test_postgres_outbox_claim_generation_fences_reused_worker_id():
         finally:
             second_claim.close()
 
+        renewed = _renew_lease(
+            Session,
+            message=old_message,
+            worker_id=worker_id,
+            lease_seconds=60,
+        )
+        assert renewed is False
+
         with pytest.raises(OutboxOwnershipError):
             _acknowledge(Session, message=old_message, worker_id=worker_id)
 
@@ -947,3 +957,337 @@ def test_postgres_outbox_claim_generation_fences_reused_worker_id():
                 cleanup.close()
         engine.dispose()
 
+
+def test_postgres_outbox_claim_survives_worker_process_crash_and_reclaims():
+    """Kill a process after claim commit, then recover and reclaim its event."""
+    database_url = os.getenv("AGENCY_OS_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("Set AGENCY_OS_TEST_DATABASE_URL to run PostgreSQL outbox process recovery test")
+
+    parsed_url = make_url(database_url)
+    assert parsed_url.get_backend_name() == "postgresql"
+    assert parsed_url.database == "agency_os_worker_test", (
+        "Safety check: this test may only use agency_os_worker_test"
+    )
+
+    engine = create_engine(database_url, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    suffix = uuid.uuid4().hex[:12]
+    org_id = workspace_id = event_id = None
+    event_type = f"test.postgres.outbox.process-crash.{suffix}"
+    idempotency_key = f"outbox-process-crash-{suffix}"
+    worker_id = f"crashed-outbox-worker-{suffix}"
+    process = None
+    effect_table = f"agency_os_test_outbox_effect_{suffix}"
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(text(
+                f'CREATE TABLE "{effect_table}" (idempotency_key TEXT PRIMARY KEY)'
+            ))
+
+        setup = Session()
+        try:
+            org = Organization(name=f"Outbox Process Crash Test {suffix}")
+            setup.add(org)
+            setup.flush()
+            workspace = Workspace(
+                id=f"outbox-process-crash-{suffix}",
+                org_id=org.id,
+                name="Outbox Process Crash Workspace",
+            )
+            setup.add(workspace)
+            setup.flush()
+            org_id, workspace_id = org.id, workspace.id
+
+            event = OutboxEvent(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                event_type=event_type,
+                schema_version=1,
+                aggregate_type="test",
+                aggregate_id=f"aggregate-{suffix}",
+                idempotency_key=idempotency_key,
+                payload={"synthetic": True},
+                status="pending",
+                attempts=0,
+                max_attempts=5,
+            )
+            setup.add(event)
+            setup.flush()
+            event_id = event.id
+            setup.commit()
+        finally:
+            setup.close()
+
+        child_code = r"""
+import json
+import os
+import time
+import app.models  # register Organization and Workspace metadata
+import app.security_models  # register security FK metadata
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
+from app.outbox_service import claim_outbox_batch
+
+engine = create_engine(os.environ["AGENCY_OS_TEST_DATABASE_URL"], pool_pre_ping=True)
+Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+try:
+    with Session() as db:
+        messages = claim_outbox_batch(
+            db,
+            worker_id=os.environ["AGENCY_OS_TEST_WORKER_ID"],
+            event_types={os.environ["AGENCY_OS_TEST_EVENT_TYPE"]},
+            limit=1,
+            lease_seconds=15,
+        )
+        db.commit()
+    if len(messages) != 1:
+        raise RuntimeError("Expected exactly one synthetic outbox event")
+    with engine.begin() as connection:
+        connection.execute(
+            text('INSERT INTO "' + os.environ["AGENCY_OS_TEST_EFFECT_TABLE"] +
+                 '" (idempotency_key) VALUES (:key) ON CONFLICT DO NOTHING'),
+            {"key": messages[0].idempotency_key},
+        )
+    print(json.dumps({
+        "stage": "consumer_effect_committed_before_ack",
+        "id": messages[0].id,
+        "idempotency_key": messages[0].idempotency_key,
+        "attempts": messages[0].attempts,
+    }), flush=True)
+    time.sleep(300)
+finally:
+    engine.dispose()
+"""
+        child_env = os.environ.copy()
+        child_env["AGENCY_OS_TEST_WORKER_ID"] = worker_id
+        child_env["AGENCY_OS_TEST_EVENT_TYPE"] = event_type
+        child_env["AGENCY_OS_TEST_EFFECT_TABLE"] = effect_table
+        process = subprocess.Popen(
+            [sys.executable, "-c", child_code],
+            cwd=os.getcwd(),
+            env=child_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+
+        ready, _, _ = select.select([process.stdout], [], [], 20)
+        if not ready:
+            process.kill()
+            stdout, stderr = process.communicate(timeout=10)
+            pytest.fail(
+                "Outbox child did not commit its claim before timeout. "
+                f"stdout={stdout!r}; stderr={stderr!r}"
+            )
+        marker = process.stdout.readline()
+        if not marker:
+            stdout_tail, stderr = process.communicate(timeout=10)
+            pytest.fail(
+                "Outbox child exited before confirming claim commit. "
+                f"stdout_tail={stdout_tail!r}; stderr={stderr!r}"
+            )
+        claimed = json.loads(marker)
+        assert claimed == {
+            "stage": "consumer_effect_committed_before_ack",
+            "id": event_id,
+            "idempotency_key": idempotency_key,
+            "attempts": 1,
+        }
+
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=10)
+        assert process.returncode is not None and process.returncode != 0
+
+        recovery = Session()
+        try:
+            row = recovery.query(OutboxEvent).filter_by(id=event_id).one()
+            assert row.status == "processing"
+            assert row.claimed_by == worker_id
+            row.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=5)
+            recovery.commit()
+
+            recovery_worker_id = f"recovery-worker-{suffix}"
+            reclaimed = claim_outbox_batch(
+                recovery,
+                worker_id=recovery_worker_id,
+                event_types={event_type},
+                limit=1,
+                lease_seconds=60,
+            )
+            assert len(reclaimed) == 1
+            assert reclaimed[0].id == event_id
+            assert reclaimed[0].idempotency_key == idempotency_key
+            assert reclaimed[0].attempts == 2
+            recovery.commit()
+
+            # Replay the consumer's idempotent side effect after redelivery.
+            # The unique idempotency key makes the second insert a no-op.
+            recovery.execute(
+                text(f'INSERT INTO "{effect_table}" (idempotency_key) '
+                     'VALUES (:key) ON CONFLICT DO NOTHING'),
+                {"key": idempotency_key},
+            )
+            recovery.commit()
+            _acknowledge(
+                Session,
+                message=reclaimed[0],
+                worker_id=recovery_worker_id,
+            )
+        finally:
+            recovery.close()
+
+        with engine.connect() as connection:
+            effect_count = connection.execute(
+                text(f'SELECT count(*) FROM "{effect_table}" WHERE idempotency_key = :key'),
+                {"key": idempotency_key},
+            ).scalar_one()
+            assert effect_count == 1
+
+        with Session() as verification:
+            published = verification.query(OutboxEvent).filter_by(id=event_id).one()
+            assert published.status == "published"
+            assert published.claimed_by is None
+            assert published.lease_expires_at is None
+    finally:
+        if process is not None and process.poll() is None:
+            process.kill()
+            process.wait(timeout=10)
+        if process is not None:
+            if process.stdout:
+                process.stdout.close()
+            if process.stderr:
+                process.stderr.close()
+        if org_id is not None:
+            cleanup = Session()
+            try:
+                if event_id:
+                    cleanup.query(OutboxEvent).filter_by(id=event_id).delete(
+                        synchronize_session=False
+                    )
+                if workspace_id:
+                    cleanup.query(Workspace).filter_by(id=workspace_id).delete(
+                        synchronize_session=False
+                    )
+                cleanup.query(Organization).filter_by(id=org_id).delete(
+                    synchronize_session=False
+                )
+                cleanup.commit()
+            except Exception:
+                cleanup.rollback()
+                raise
+            finally:
+                cleanup.close()
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP TABLE IF EXISTS "{effect_table}"'))
+        engine.dispose()
+
+
+def test_postgres_outbox_heartbeat_renews_lease_during_long_handler():
+    """A live handler retains its lease through conditional PostgreSQL heartbeats."""
+    import time
+    database_url = os.getenv("AGENCY_OS_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("Set AGENCY_OS_TEST_DATABASE_URL to run PostgreSQL outbox heartbeat test")
+
+    parsed_url = make_url(database_url)
+    assert parsed_url.get_backend_name() == "postgresql"
+    assert parsed_url.database == "agency_os_worker_test", (
+        "Safety check: this test may only use agency_os_worker_test"
+    )
+
+    engine = create_engine(database_url, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    suffix = uuid.uuid4().hex[:12]
+    org_id = workspace_id = event_id = None
+    event_type = f"test.postgres.outbox.heartbeat.{suffix}"
+
+    try:
+        setup = Session()
+        try:
+            org = Organization(name=f"Outbox Heartbeat Test {suffix}")
+            setup.add(org)
+            setup.flush()
+            workspace = Workspace(
+                id=f"outbox-heartbeat-{suffix}",
+                org_id=org.id,
+                name="Outbox Heartbeat Test Workspace",
+            )
+            setup.add(workspace)
+            setup.flush()
+            org_id, workspace_id = org.id, workspace.id
+            event = OutboxEvent(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                event_type=event_type,
+                schema_version=1,
+                aggregate_type="test",
+                aggregate_id=f"aggregate-{suffix}",
+                idempotency_key=f"outbox-heartbeat-{suffix}",
+                payload={"synthetic": True},
+                status="pending",
+                attempts=0,
+                max_attempts=5,
+            )
+            setup.add(event)
+            setup.flush()
+            event_id = event.id
+            setup.commit()
+        finally:
+            setup.close()
+
+        def long_handler(_message):
+            # Force a short but still-live lease, then keep the handler active
+            # long enough that the heartbeat must extend it several times.
+            with Session() as db:
+                row = db.query(OutboxEvent).filter_by(id=event_id).one()
+                row.lease_expires_at = datetime.now(timezone.utc) + timedelta(seconds=0.2)
+                db.commit()
+            time.sleep(0.6)
+            with Session() as db:
+                row = db.query(OutboxEvent).filter_by(id=event_id).one()
+                assert row.lease_expires_at > datetime.now(timezone.utc) + timedelta(seconds=5)
+
+        result = dispatch_outbox_batch(
+            Session,
+            worker_id=f"heartbeat-worker-{suffix}",
+            handlers={event_type: long_handler},
+            limit=1,
+            lease_seconds=15,
+            heartbeat_interval_seconds=0.05,
+        )
+        assert result == (1, 0, 0)
+
+        with Session() as verification:
+            row = verification.query(OutboxEvent).filter_by(id=event_id).one()
+            assert row.status == "published"
+            assert row.claimed_by is None
+            assert row.lease_expires_at is None
+    finally:
+        if org_id is not None:
+            cleanup = Session()
+            try:
+                if event_id:
+                    cleanup.query(OutboxEvent).filter_by(id=event_id).delete(
+                        synchronize_session=False
+                    )
+                if workspace_id:
+                    cleanup.query(Workspace).filter_by(id=workspace_id).delete(
+                        synchronize_session=False
+                    )
+                cleanup.query(Organization).filter_by(id=org_id).delete(
+                    synchronize_session=False
+                )
+                cleanup.commit()
+            except Exception:
+                cleanup.rollback()
+                raise
+            finally:
+                cleanup.close()
+        engine.dispose()
