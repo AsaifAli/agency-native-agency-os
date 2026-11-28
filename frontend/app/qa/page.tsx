@@ -6,6 +6,7 @@ import Page from "@/components/page";
 import { api, orgId, type Workspace, type Task } from "@/lib/api";
 
 type Project = { id: string; name: string; status: string };
+type Milestone = { id: string; project_id: string; title: string; status: string };
 type EvaluationRun = {
   id: string; task_id: string | null; pack_name: string; score: number;
   passed: boolean; evidence_trust: string; release_eligible: boolean; created_at: string;
@@ -152,6 +153,7 @@ export default function QAPage() {
   const [workspaceId, setWorkspaceId] = useState("");
   const [projects, setProjects] = useState<Project[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [evaluations, setEvaluations] = useState<EvaluationRun[]>([]);
   const [issues, setIssues] = useState<QAIssue[]>([]);
   const [projectId, setProjectId] = useState("");
@@ -175,12 +177,20 @@ export default function QAPage() {
       api<EvaluationRun[]>(`/v1/orgs/${orgId()}/evaluations?workspace_id=${encodeURIComponent(selectedWorkspace)}`),
       api<QAIssue[]>(`/v1/orgs/${orgId()}/qa/issues?workspace_id=${encodeURIComponent(selectedWorkspace)}`),
     ]);
+    const milestoneGroups = await Promise.all(projectRows.map(project =>
+      api<Milestone[]>(`/v1/orgs/${orgId()}/projects/${project.id}/milestones?workspace_id=${encodeURIComponent(selectedWorkspace)}`)
+    ));
+    const milestoneRows = milestoneGroups.flat();
+    const selectedProject = projectRows.some(row => row.id === projectId) ? projectId : projectRows[0]?.id || "";
+    const validMilestoneIds = new Set(milestoneRows.filter(item => item.project_id === selectedProject).map(item => item.id));
+    const eligibleTasks = taskRows.filter(task => !task.milestone_id || validMilestoneIds.has(task.milestone_id));
     setProjects(projectRows);
     setTasks(taskRows);
+    setMilestones(milestoneRows);
     setEvaluations(evalRows);
     setIssues(issueRows);
-    setProjectId(current => projectRows.some(row => row.id === current) ? current : projectRows[0]?.id || "");
-    setTaskId(current => taskRows.some(row => row.id === current) ? current : taskRows[0]?.id || "");
+    setProjectId(selectedProject);
+    setTaskId(current => eligibleTasks.some(row => row.id === current) ? current : eligibleTasks[0]?.id || "");
   }
 
   useEffect(() => {
@@ -236,7 +246,7 @@ export default function QAPage() {
         <label className="field">Workspace
           <select className="field" value={workspaceId} onChange={event => {
             const selected = event.target.value; setWorkspaceId(selected);
-            setIssues([]); setProjects([]); setTasks([]); setEvaluations([]);
+            setIssues([]); setProjects([]); setTasks([]); setMilestones([]); setEvaluations([]);
             load(selected).catch(error => setError(error.message));
           }}>
             {workspaces.map(workspace => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
@@ -252,11 +262,17 @@ export default function QAPage() {
       <div className="panel">
         <div className="panel-head"><div className="panel-title">Record a QA issue</div></div>
         <form className="form-grid" onSubmit={createIssue}>
-          <label className="field">Project<select className="field" required value={projectId} onChange={event => setProjectId(event.target.value)}>
+          <label className="field">Project<select className="field" required value={projectId} onChange={event => {
+            const selected = event.target.value;
+            setProjectId(selected);
+            const milestoneIds = new Set(milestones.filter(item => item.project_id === selected).map(item => item.id));
+            const eligible = tasks.filter(task => !task.milestone_id || milestoneIds.has(task.milestone_id));
+            setTaskId(eligible[0]?.id || "");
+          }}>
             <option value="">Select project</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
           </select></label>
           <label className="field">Related task<select className="field" required value={taskId} onChange={event => setTaskId(event.target.value)}>
-            <option value="">Select task</option>{tasks.map(task => <option key={task.id} value={task.id}>{task.title}</option>)}
+            <option value="">Select task</option>{tasks.filter(task => !task.milestone_id || milestones.some(item => item.id === task.milestone_id && item.project_id === projectId)).map(task => <option key={task.id} value={task.id}>{task.title}</option>)}
           </select></label>
           <label className="field wide">Issue title<input className="field" required minLength={3} maxLength={240} value={title} onChange={event => setTitle(event.target.value)} /></label>
           <label className="field wide">Description<textarea className="field" required minLength={3} value={description} onChange={event => setDescription(event.target.value)} rows={3} /></label>
