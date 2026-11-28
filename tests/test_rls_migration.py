@@ -30,6 +30,9 @@ def test_rls_migration_covers_every_model_table_with_org_id():
     expected.pop("orchestration_plan_delegations", None)
     expected.pop("knowledge_items", None)
     expected.pop("business_drafts", None)
+    # Session credentials are protected by a dedicated execution-bound insert policy
+    # and a SECURITY DEFINER authentication function, not the general tenant policy.
+    expected.pop("machine_session_credentials", None)
     # Orchestration plan links receive tenant scope in a later additive
     # migration; keep the original tenant-RLS revision immutable.
     expected.pop("orchestration_plan_delegations", None)
@@ -94,6 +97,7 @@ def test_startup_rls_inventory_matches_all_migration_tables():
         "organizations", "browser_sessions", "execution_attempts",
         "project_outcomes", "outcome_measurements",
         "orchestration_plan_delegations", "knowledge_items", "business_drafts",
+        "machine_session_credentials",
     }
     assert REQUIRED_RLS_TABLES == expected | {"workspace_grants"}
 
@@ -270,3 +274,25 @@ def test_agent_session_credential_migration_is_execution_bound_and_private():
     assert "revoke all on table public.agent_session_credentials" in source
     assert "agency_os_app" in source
     assert "agency_os_worker" in source
+
+
+
+def test_mcp_session_credential_migration_is_execution_bound_and_hash_only():
+    source = (PATH.parent / "r4b8d2f6a103_mcp_session_credentials.py").read_text()
+    assert "FORCE ROW LEVEL SECURITY" in source
+    assert "worker_mcp_credential_insert" in source
+    assert "worker_has_execution_context" in source
+    assert "e.machine_session_id" in source
+    assert "e.agent_id" in source
+    assert "REVOKE ALL ON public.machine_session_credentials" in source
+    assert "GRANT INSERT ON public.machine_session_credentials TO agency_os_worker" in source
+    assert "SECURITY DEFINER" in source
+    assert "authenticate_mcp_session_credential" in source
+    assert "is_mcp_session_credential_active" in source
+    assert "GRANT EXECUTE" in source
+    assert "agency_os_migrator" in source
+
+
+def test_mcp_session_credentials_are_in_the_runtime_rls_inventory():
+    from app.db import REQUIRED_RLS_TABLES
+    assert "machine_session_credentials" in REQUIRED_RLS_TABLES
