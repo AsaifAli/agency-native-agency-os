@@ -97,6 +97,7 @@ class SessionPathAuthMiddleware:
         public_base_url: str,
         session_factory=SessionLocal,
         semaphore: asyncio.Semaphore | None = None,
+        requests_per_minute: int = 120,
     ) -> None:
         self.app = app
         parsed = urlparse(public_base_url)
@@ -109,6 +110,7 @@ class SessionPathAuthMiddleware:
         self.origin = f"https://{parsed.netloc}"
         self.host = parsed.netloc.lower()
         self.session_factory = session_factory
+        self.requests_per_minute = requests_per_minute
         self.semaphore = semaphore or asyncio.Semaphore(
             settings.claude_managed_mcp_max_concurrent_requests
         )
@@ -138,7 +140,9 @@ class SessionPathAuthMiddleware:
         authorization = headers.get("authorization")
         db = self.session_factory()
         try:
-            context = authenticate_session_credential(db, authorization)
+            context = authenticate_session_credential(
+                db, authorization, requests_per_minute=self.requests_per_minute
+            )
         except HTTPException as exc:
             db.close()
             await PlainTextResponse(
@@ -176,6 +180,14 @@ def create_mcp_gateway(config=settings, session_factory=SessionLocal):
     enabled_tool_keys = _configured_tool_keys(config)
     if not enabled_tool_keys:
         raise RuntimeError("Claude Managed Agents MCP requires an explicit tool allowlist")
+    registry = {spec.key: spec for spec in list_tools()}
+    unknown = enabled_tool_keys.difference(registry)
+    unsafe = {
+        key for key in enabled_tool_keys.intersection(registry)
+        if registry[key].risk_level != "read_only" or registry[key].requires_approval
+    }
+    if unknown or unsafe:
+        raise ValueError("Claude MCP allowlist may contain only registered read-only tools")
 
     parsed = urlparse(config.claude_managed_mcp_public_base_url)
     if (
@@ -292,5 +304,7 @@ def create_mcp_gateway(config=settings, session_factory=SessionLocal):
         mcp_app,
         public_base_url=config.claude_managed_mcp_public_base_url,
         session_factory=session_factory,
+        requests_per_minute=config.claude_managed_mcp_requests_per_minute,
+        semaphore=asyncio.Semaphore(config.claude_managed_mcp_max_concurrent_requests),
     )
     return server, mcp_app, wrapped
