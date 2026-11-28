@@ -4,6 +4,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.models import Agent, Workspace
+from app.agent_registry_service import ensure_initial_agent_version
 from app.workforce_models import WorkforceUnit, WorkforceMember, WorkforcePosition
 from app.workforce_catalog import (
     DEPARTMENT_TEAMS,
