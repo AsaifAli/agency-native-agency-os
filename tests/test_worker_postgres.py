@@ -1320,7 +1320,7 @@ def test_postgres_outbox_process_crash_after_claim_before_handler():
             setup.add(org)
             setup.flush()
             workspace = Workspace(
-                id=f"outbox-pre-handler-crash-{suffix}",
+                id=f"precrash-{suffix}",
                 org_id=org.id,
                 name="Outbox Pre-handler Crash Workspace",
             )
