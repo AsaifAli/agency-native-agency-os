@@ -124,7 +124,6 @@ def issue_session_credential(
     record_event(
         db, identity.org_id, None, "machine_session_credential.issued",
         "machine_session_credential", credential.id, identity.workspace_id,
-        {"credential_version": 1},
     )
     return IssuedSessionCredential(
         credential_id=credential.id, token=token, expires_at=expires_at, credential_version=1,
