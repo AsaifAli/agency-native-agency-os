@@ -116,6 +116,8 @@ Adopt Anthropic's newer MCP capabilities in this order:
 
 The November 24, 2026 Anthropic update makes Skills over MCP public beta and Tasks/Elicitation generally available; File Uploads are rolling out. Our current server has verified stateless tool discovery and invocation, not these newer extensions yet. Add them through the official SDK when its server support and client interoperability are verified.
 
+Anthropic's built-in tool-search feature is not available in Claude Managed Agents (it is documented for the Messages API). Managed Agents should therefore receive a small role/workspace-specific tool allowlist, not depend on deferred tool search. Managed Agents has its own native Skills mechanism (Agent `skills` or a GitHub skill repository); our adapter currently rejects provider skills until the OS has a versioned, founder-reviewed mapping.
+
 ## Shared OS integration boundary
 
 Claude Code and Cowork must connect through the founder-provisioned, workspace-scoped Agency OS integration contract. See [Agent Integration Contract](AGENT_INTEGRATION_CONTRACT.md) for machine identities, short-lived session credentials, MCP/API scopes, public knowledge access, draft handoffs and verification gates. Cowork native connectors and local files remain separate trust boundaries and are not governed automatically by Agency OS RLS.
