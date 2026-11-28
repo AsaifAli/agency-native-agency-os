@@ -1,4 +1,5 @@
 import pytest
+import uuid
 from datetime import datetime, timezone
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -14,7 +15,7 @@ import app.domain_models  # noqa: F401
 import app.operations_models  # noqa: F401
 import app.telephony.models  # noqa: F401
 import app.workforce_models  # noqa: F401
-from app.outreach.models import OutboundMessage, CommunicationBlock, CommunicationConsent
+from app.outreach.models import OutboundMessage, OutboundSender, CommunicationBlock, CommunicationConsent
 import app.outreach.models  # noqa: F401
 from app.outreach.routes import router
 
@@ -97,6 +98,50 @@ def auth():
     return {"Authorization": "Bearer test"}
 
 
+def _approved_outreach_action(client, resource_id, request_payload):
+    db = client.session_factory()
+    try:
+        approval = Approval(
+            org_id=client.org_id, workspace_id=client.ws_id,
+            action_type="external_communication.sensitive", resource_id=resource_id,
+            idempotency_key=f"outreach-approval-{uuid.uuid4().hex}",
+            request_payload=request_payload, status=ApprovalStatus.approved,
+            requested_by=client.founder.id, decided_by=client.founder.id,
+        )
+        db.add(approval)
+        db.commit()
+        return approval.id
+    finally:
+        db.close()
+
+
+def _release_block(client, block_id, note):
+    db = client.session_factory()
+    try:
+        block = db.query(CommunicationBlock).filter_by(
+            id=block_id, org_id=client.org_id, workspace_id=client.ws_id,
+        ).one()
+        latest = db.query(CommunicationConsent).filter_by(
+            org_id=client.org_id, workspace_id=client.ws_id,
+            contact_id=block.contact_id, channel=block.channel,
+        ).order_by(CommunicationConsent.recorded_at.desc()).first()
+        payload = {
+            "operation": "release_communication_block", "block_id": block.id,
+            "contact_id": block.contact_id, "channel": block.channel,
+            "reason": block.reason, "consent_id": latest.id,
+            "consent_status": latest.status,
+            "consent_recorded_at": latest.recorded_at.isoformat(),
+            "note": note.strip(),
+        }
+    finally:
+        db.close()
+    approval_id = _approved_outreach_action(client, block_id, payload)
+    return client.post(
+        "/v1/orgs/" + client.org_id + "/outreach/blocks/" + block_id + "/release",
+        params={"approval_id": approval_id}, headers=auth(), json={"note": note},
+    )
+
+
 def _create_sender(client, email="hello@example.test", max_per_hour=10):
     response = client.post(
         "/v1/orgs/" + client.org_id + "/outreach/senders",
@@ -107,9 +152,20 @@ def _create_sender(client, email="hello@example.test", max_per_hour=10):
     )
     assert response.status_code == 201, response.text
     sender_id = response.json()["id"]
+    db = client.session_factory()
+    try:
+        sender = db.query(OutboundSender).filter_by(id=sender_id).one()
+        payload = {
+            "operation": "activate_outbound_sender", "sender_id": sender.id,
+            "display_name": sender.display_name, "email_address": sender.email_address,
+            "max_per_hour": sender.max_per_hour, "max_per_day": sender.max_per_day,
+        }
+    finally:
+        db.close()
+    approval_id = _approved_outreach_action(client, sender_id, payload)
     active = client.patch(
         "/v1/orgs/" + client.org_id + "/outreach/senders/" + sender_id + "/status",
-        headers=auth(), json={"status": "active"},
+        params={"approval_id": approval_id}, headers=auth(), json={"status": "active"},
     )
     assert active.status_code == 200, active.text
     return sender_id
@@ -219,9 +275,8 @@ def test_founder_approved_outreach_queue_and_reply_stop(client):
     )
     assert blocked.status_code == 403
 
-    released = client.post(
-        "/v1/orgs/" + client.org_id + "/outreach/blocks/" + block.id + "/release",
-        headers=auth(), json={"note": "Founder reviewed the reply and approved a new conversation."},
+    released = _release_block(
+        client, block.id, "Founder reviewed the reply and approved a new conversation."
     )
     assert released.status_code == 200, released.text
     assert released.json()["status"] == "released"
@@ -265,11 +320,37 @@ def test_opt_out_creates_persistent_block_until_new_consent(client):
 
     new_consent = _record_consent(client, status="granted", evidence="new-consent-after-optout")
     assert new_consent.status_code == 201, new_consent.text
-    released = client.post(
+    missing_approval = client.post(
         "/v1/orgs/" + client.org_id + "/outreach/blocks/" + block.id + "/release",
-        headers=auth(), json={"note": "Fresh consent evidence reviewed by founder."},
+        headers=auth(), json={"note": "Fresh consent but no approval record."},
+    )
+    assert missing_approval.status_code == 403
+    released = _release_block(
+        client, block.id, "Fresh consent evidence reviewed by founder."
     )
     assert released.status_code == 200, released.text
+
+
+def test_sender_activation_requires_matching_founder_approval(client):
+    created = client.post(
+        "/v1/orgs/" + client.org_id + "/outreach/senders",
+        headers=auth(), json={
+            "workspace_id": client.ws_id, "display_name": "Draft Sender",
+            "email_address": "draft-sender@example.test", "max_per_hour": 5, "max_per_day": 20,
+        },
+    )
+    assert created.status_code == 201, created.text
+    sender_id = created.json()["id"]
+    denied = client.patch(
+        "/v1/orgs/" + client.org_id + "/outreach/senders/" + sender_id + "/status",
+        headers=auth(), json={"status": "active"},
+    )
+    assert denied.status_code == 403
+    db = client.session_factory()
+    try:
+        assert db.query(OutboundSender).filter_by(id=sender_id).one().status == "draft"
+    finally:
+        db.close()
 
 
 def test_sender_rate_limit_workspace_isolation_and_founder_controls(client):
