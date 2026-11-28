@@ -30,15 +30,17 @@ Regression coverage now proves both behaviors: later cumulative snapshots replac
 
 Remaining accounting work:
 
-- Persist provider observation identity/timestamp and reconcile session snapshots idempotently if a background reconciliation job is added.
-- Reconcile ambiguous/abandoned sessions by fetching the authoritative session object after idle; do not infer cost deltas from cumulative snapshots.
+- Persist provider observation identity/timestamp and reconcile session snapshots idempotently if a background reconciliation job is added. The current bounded recovery pass now persists a snapshot hash and OS observation timestamp inside the abandoned attempt result; it does not yet maintain a separate append-only observation table.
+- Reconcile ambiguous/abandoned sessions by fetching the authoritative session object after idle; do not infer cost deltas from cumulative snapshots. The workspace-scoped worker maintenance pass now performs this read for abandoned Managed Agents attempts belonging to retry-wait or failed executions.
 - If a latest attempt has no usage because the worker died before persisting it, the last known snapshot remains a lower bound until provider reconciliation. Missing usage must never be treated as zero.
 
 ## Recovery accounting gap
 
 A worker can die after provider work has incurred cost but before the adapter returns and persists usage. Lease recovery currently records an abandoned attempt and retries/resumes the provider session when a durable session ID exists, but it cannot recover usage merely from the abandoned attempt row. This leaves a temporary or permanent gap in OS-side usage reporting until provider-session reconciliation is implemented. The provider-side session budget still constrains that individual session, but it does not solve workspace cumulative spend accounting.
 
-Before a workspace spend ledger is enforced, add a reconciliation state for ambiguous provider outcomes. Keep amounts reserved/unknown until a provider session snapshot or an authorized manual reconciliation resolves them. Do not treat missing usage as zero and do not release a reservation merely because a worker lease expired.
+Recovery reconciliation now works as follows: a bounded maintenance pass selects abandoned Managed Agents attempts with durable provider session IDs, closes its DB read transaction, fetches the provider session object, and accepts usage only when the provider reports `idle`. The persistence transaction then locks the execution followed by the attempt and rechecks that the execution is still `retry_wait` or `failed` and the attempt is still `abandoned` with the same session ID. A canonical SHA-256 snapshot hash, observation timestamp and audit event make persistence idempotent. Provider read errors and non-idle/missing usage are recorded as pending without persisting a zero; retries are cooled down for five minutes. The pass is capped at ten provider reads per workspace per maintenance cycle. Provider HTTP calls never run inside a DB transaction.
+
+This closes the immediate abandoned-attempt usage gap when Anthropic returns an idle session with a usage snapshot. It does not create workspace spend reservations or an append-only usage ledger. Before a workspace spend ledger is enforced, keep amounts reserved/unknown until a provider session snapshot or an authorized manual reconciliation resolves them. Do not treat missing usage as zero and do not release a reservation merely because a worker lease expired.
 
 ## Existing safety boundaries to preserve
 
@@ -62,5 +64,6 @@ Before a workspace spend ledger is enforced, add a reconciliation state for ambi
 - Provider session ID persistence/resume safeguards: implemented in the adapter; external provider behavior remains dependent on current Anthropic contract and account configuration.
 - Per-session provider budget: implemented in the adapter; not a workspace cumulative limit.
 - Managed Agents usage aggregation: implemented with latest cumulative snapshot per provider session; regression tests cover resumed and distinct sessions.
-- Recovery-time provider usage reconciliation: planned, not implemented; an abandoned attempt can have unobserved usage until its provider session is fetched.
-- Workspace cumulative spend ledger and ambiguous-outcome reconciliation: planned, not implemented.
+- Recovery-time provider usage reconciliation: implemented in bounded workspace-scoped maintenance; covered by unit tests for idle snapshots, non-idle deferral, retry cooldown, idempotency and execution-state fencing. CI verification is pending for the latest implementation commit.
+- Separate append-only provider observation ledger: planned, not implemented.
+- Workspace cumulative spend ledger and ambiguous-outcome reservation/settlement: planned, not implemented.
