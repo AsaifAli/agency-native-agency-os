@@ -116,7 +116,7 @@ Tests: `tests/test_artifact_gateway.py` covers content-type/signature mismatch, 
 
 ## 5. External storage provider checkpoint — 2026-11-28
 
-Cloudflare R2 was evaluated as the preferred candidate because the agency already uses Cloudflare infrastructure and R2 exposes an S3-compatible API. A read-only check against the connected Cloudflare account returned API error `10042`: **“Please enable R2 through the Cloudflare Dashboard.”** No bucket exists or was provisioned through this work; no paid service was enabled and no account settings were changed.
+Cloudflare R2 was evaluated as the preferred candidate because the agency already uses Cloudflare infrastructure and R2 exposes an S3-compatible API. A read-only check against the connected Cloudflare account returned API error `10042`: **“Please enable R2 through the Cloudflare Dashboard.”** Because R2 is not enabled, bucket inventory could not be read. No bucket was provisioned through this work; no paid service was enabled and no account settings were changed.
 
 Official provider constraints reviewed:
 
