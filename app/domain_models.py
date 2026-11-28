@@ -425,3 +425,67 @@ class LeadResearchDraft(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     promoted_lead_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class QAIssue(Base):
+    """Workspace-scoped QA defect; lifecycle changes are recorded in audit_events."""
+    __tablename__ = "qa_issues"
+    __table_args__ = (
+        UniqueConstraint("org_id", "workspace_id", "id", name="uq_qa_issues_scope_id"),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id"], ["workspaces.org_id", "workspaces.id"],
+            ondelete="CASCADE", name="fk_qa_issues_workspace_scope",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "project_id"],
+            ["projects.org_id", "projects.workspace_id", "projects.id"],
+            ondelete="CASCADE", name="fk_qa_issues_project_scope",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "task_id"],
+            ["tasks.org_id", "tasks.workspace_id", "tasks.id"],
+            ondelete="RESTRICT", name="fk_qa_issues_task_scope",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "retest_evaluation_run_id"],
+            ["evaluation_runs.org_id", "evaluation_runs.workspace_id", "evaluation_runs.id"],
+            ondelete="RESTRICT", name="fk_qa_issues_retest_evaluation_scope",
+        ),
+        Index("ix_qa_issues_scope_status_severity", "org_id", "workspace_id", "status", "severity"),
+        Index("ix_qa_issues_scope_project", "org_id", "workspace_id", "project_id"),
+        CheckConstraint(
+            "severity IN ('blocker','critical','major','minor','cosmetic')",
+            name="ck_qa_issue_severity",
+        ),
+        CheckConstraint(
+            "status IN ('open','triaged','in_progress','fixed','retest','closed')",
+            name="ck_qa_issue_status",
+        ),
+        CheckConstraint(
+            "status != 'closed' OR (retest_evaluation_run_id IS NOT NULL AND retest_evidence_trust IS NOT NULL)",
+            name="ck_qa_issue_closed_requires_retest",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    task_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    severity: Mapped[str] = mapped_column(String(16), default="major", server_default="major", nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="open", server_default="open", nullable=False)
+    reproducible_steps: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    expected_result: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
+    actual_result: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
+    evidence_references: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    assigned_to_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    retest_evaluation_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    retest_evidence_trust: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    fixed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    closed_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
