@@ -22,6 +22,7 @@ class WorkforceUnit(Base):
     __table_args__ = (
         CheckConstraint("unit_type IN ('office','group','department','team')", name="ck_workforce_unit_type"),
         UniqueConstraint("org_id", "workspace_id", "department_key", "name", name="uq_workforce_unit_name"),
+        Index("uq_workforce_unit_scope_id", "org_id", "workspace_id", "id", unique=True),
         Index("ix_workforce_unit_scope_parent", "org_id", "workspace_id", "parent_unit_id"),
     )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
@@ -42,6 +43,22 @@ class WorkforceMember(Base):
         CheckConstraint("autonomy_level BETWEEN 0 AND 3", name="ck_workforce_autonomy_level"),
         CheckConstraint("status IN ('planned','active','paused','retired')", name="ck_workforce_member_status"),
         UniqueConstraint("org_id", "workspace_id", "name", "title", name="uq_workforce_member_name_title"),
+        Index("uq_workforce_member_scope_id", "org_id", "workspace_id", "id", unique=True),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "unit_id"],
+            ["workforce_units.org_id", "workforce_units.workspace_id", "workforce_units.id"],
+            ondelete="RESTRICT", name="fk_workforce_member_unit_workspace",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "manager_member_id"],
+            ["workforce_members.org_id", "workforce_members.workspace_id", "workforce_members.id"],
+            ondelete="RESTRICT", name="fk_workforce_member_manager_workspace",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "agent_id"],
+            ["agents.org_id", "agents.workspace_id", "agents.id"],
+            ondelete="RESTRICT", name="fk_workforce_member_agent_workspace",
+        ),
         Index("ix_workforce_member_scope_manager", "org_id", "workspace_id", "manager_member_id"),
         Index("ix_workforce_member_scope_unit", "org_id", "workspace_id", "unit_id"),
     )
@@ -69,6 +86,11 @@ class WorkforceCapability(Base):
         CheckConstraint("scope IN ('self','team','workspace')", name="ck_workforce_capability_scope"),
         CheckConstraint("budget_minor >= 0", name="ck_workforce_capability_budget"),
         UniqueConstraint("member_id", "capability_key", name="uq_workforce_member_capability"),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "member_id"],
+            ["workforce_members.org_id", "workforce_members.workspace_id", "workforce_members.id"],
+            ondelete="RESTRICT", name="fk_workforce_capability_member_workspace",
+        ),
         Index("ix_workforce_capability_scope", "org_id", "workspace_id", "member_id"),
     )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
@@ -93,6 +115,31 @@ class Delegation(Base):
         CheckConstraint("review_status IN ('pending','approved','changes_requested','waived')", name="ck_delegation_review_status"),
         CheckConstraint("status IN ('blocked','ready','queued','running','awaiting_review','succeeded','failed','cancelled')", name="ck_delegation_status"),
         UniqueConstraint("parent_task_id", "child_task_id", name="uq_delegation_parent_child"),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "parent_task_id"],
+            ["tasks.org_id", "tasks.workspace_id", "tasks.id"],
+            ondelete="RESTRICT", name="fk_delegation_parent_task_workspace",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "child_task_id"],
+            ["tasks.org_id", "tasks.workspace_id", "tasks.id"],
+            ondelete="RESTRICT", name="fk_delegation_child_task_workspace",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "dependency_task_id"],
+            ["tasks.org_id", "tasks.workspace_id", "tasks.id"],
+            ondelete="RESTRICT", name="fk_delegation_dependency_task_workspace",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "delegated_by_member_id"],
+            ["workforce_members.org_id", "workforce_members.workspace_id", "workforce_members.id"],
+            ondelete="RESTRICT", name="fk_delegation_delegated_by_workspace",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "assigned_to_member_id"],
+            ["workforce_members.org_id", "workforce_members.workspace_id", "workforce_members.id"],
+            ondelete="RESTRICT", name="fk_delegation_assignee_workspace",
+        ),
         Index("uq_delegation_scope_id", "org_id", "workspace_id", "id", unique=True),
         Index("ix_delegation_scope_parent", "org_id", "workspace_id", "parent_task_id"),
         Index("ix_delegation_scope_assignee", "org_id", "workspace_id", "assigned_to_member_id"),
