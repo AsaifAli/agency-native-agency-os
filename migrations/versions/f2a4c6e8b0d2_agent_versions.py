@@ -48,6 +48,10 @@ def upgrade() -> None:
         "executions",
         sa.Column("required_capability_action", sa.String(120), nullable=True),
     )
+    op.add_column(
+        "executions",
+        sa.Column("workforce_member_id", sa.String(36), nullable=True),
+    )
     op.create_table(
         "agent_versions",
         sa.Column("id", sa.String(36), primary_key=True),
@@ -91,6 +95,11 @@ def upgrade() -> None:
         "ix_execution_agent_version_id",
         "executions",
         ["agent_version_id"],
+    )
+    op.create_index(
+        "ix_execution_workforce_member_id",
+        "executions",
+        ["workforce_member_id"],
     )
 
     # Backfill a version 1 for every existing Agent before adding the
@@ -176,6 +185,22 @@ def upgrade() -> None:
     """))
 
     if bind.dialect.name == "postgresql":
+        op.execute("""
+            UPDATE public.executions AS e
+            SET workforce_member_id = wm.id
+            FROM public.workforce_members AS wm
+            WHERE e.org_id = wm.org_id
+              AND e.workspace_id = wm.workspace_id
+              AND e.agent_id = wm.agent_id
+              AND e.workforce_member_id IS NULL
+        """)
+        op.create_foreign_key(
+            "fk_execution_workforce_member_scope",
+            "executions", "workforce_members",
+            ["org_id", "workspace_id", "workforce_member_id"],
+            ["org_id", "workspace_id", "id"],
+            ondelete="RESTRICT",
+        )
         op.create_foreign_key(
             "fk_agents_current_version_scope",
             "agents", "agent_versions",
