@@ -708,6 +708,48 @@ class ManagedAgentsRuntime(AgentRuntime):
 
             if not session_id:
                 if self.config.claude_managed_mcp_enabled:
+                    # A previous worker may have crashed after issuing the OS
+                    # credential or creating the Vault credential but before
+                    # persisting the provider session ID. Never blindly create
+                    # a second provider session in that ambiguous state.
+                    if request.get_mcp_provider_credential is not None:
+                        orphan = request.get_mcp_provider_credential()
+                    else:
+                        orphan = None
+                    if isinstance(orphan, dict):
+                        mcp_state = orphan
+                        orphan_provider_id = orphan.get("provider_credential_id")
+                        if not isinstance(orphan_provider_id, str) or not orphan_provider_id:
+                            try:
+                                orphan_provider_id = self._reconcile_mcp_vault_credential(
+                                    client,
+                                    vault_id=self.config.claude_managed_mcp_vault_id,
+                                    session_id=orphan["session_id"],
+                                    execution_id=request.execution_id or "",
+                                    mcp_url=self._mcp_session_url(orphan["session_id"]),
+                                )
+                                mcp_state["provider_credential_id"] = orphan_provider_id
+                                if request.persist_mcp_provider_credential is None:
+                                    raise RuntimeManualReviewRequired(
+                                        "The orphaned Vault credential cannot be attached to OS state."
+                                    )
+                                request.persist_mcp_provider_credential(
+                                    orphan["credential_id"],
+                                    self.config.claude_managed_mcp_vault_id,
+                                    orphan_provider_id,
+                                )
+                            except Exception:
+                                cleanup_mcp("MCP_ORPHANED_CREDENTIAL")
+                                raise RuntimeManualReviewRequired(
+                                    "An orphaned MCP session credential was found; its provider state "
+                                    "requires manual reconciliation before another session can be created."
+                                ) from None
+                        cleanup_mcp("MCP_ORPHANED_CREDENTIAL")
+                        raise RuntimeManualReviewRequired(
+                            "An MCP credential from an interrupted provider create was revoked and archived. "
+                            "Reconcile the provider session before retrying."
+                        )
+
                     if request.prepare_mcp_session is None:
                         raise RuntimeManualReviewRequired(
                             "No execution-scoped MCP session preparation callback is available."
