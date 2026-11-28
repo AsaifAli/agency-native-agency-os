@@ -568,6 +568,24 @@ def test_worker_public_table_grants_are_least_privilege():
             assert actual_update == expected_update
             assert actual_delete == set()
 
+            # Worker jobs use application-generated identifiers; they do not
+            # need sequence access. Keep both current and future sequence
+            # privileges outside the worker's capability boundary.
+            sequence_rows = connection.execute(text("""
+                SELECT
+                    c.relname,
+                    has_sequence_privilege(current_user, c.oid, 'USAGE') AS can_use,
+                    has_sequence_privilege(current_user, c.oid, 'SELECT') AS can_select,
+                    has_sequence_privilege(current_user, c.oid, 'UPDATE') AS can_update
+                FROM pg_class AS c
+                JOIN pg_namespace AS n ON n.oid = c.relnamespace
+                WHERE n.nspname = 'public' AND c.relkind = 'S'
+            """)).mappings().all()
+            assert all(
+                not row["can_use"] and not row["can_select"] and not row["can_update"]
+                for row in sequence_rows
+            )
+
             assert connection.execute(text("""
                 SELECT has_column_privilege(
                     current_user, 'public.machine_identities',
