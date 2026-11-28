@@ -28,6 +28,12 @@ The application image now declares a dedicated UID/GID 10001 runtime user. The A
 
 **Therefore: per-execution sandboxing is currently an implementation gap. Do not run untrusted generated code, arbitrary shell commands, or hostile file-processing workloads in the API or ordinary worker.**
 
+## Current execution decision — avoid a duplicate sandbox runtime
+
+The active Agency OS runtime contract does not execute generated code, arbitrary shell commands or untrusted file parsers in the API or ordinary worker. Claude Managed Agents is the single hosted autonomous runtime; its current OS integration exposes only execution-bound registered custom-tool callbacks. Provider built-in Bash, file and browser toolsets remain rejected. Claude Code remains the engineering workbench in its separately governed repository/workstation boundary.
+
+Accordingly, a second in-house per-execution sandbox broker is **not part of the current release**. Building it now would duplicate the selected hosted runtime and introduce a privileged container-control surface without a current supported workload. This is a deliberate scope decision, not a claim that sandboxing exists. If the agency later needs untrusted code execution outside Managed Agents, Phase 2 becomes a hard prerequisite: implement a separately isolated broker and complete all acceptance gates before enabling that workload. Otherwise use the provider sandbox only after its isolation, egress, retention and tenant boundaries have been verified.
+
 ## Target architecture
 
 1. **Control plane (Agency OS):** authenticates the requester; resolves organization/workspace; checks data classification, client policy, capability grant, runtime eligibility and approval; creates a durable execution record and outbox event.
