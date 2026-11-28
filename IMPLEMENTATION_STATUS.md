@@ -1,7 +1,7 @@
 # Agency OS — authoritative implementation status
 
 **Last reconciled:** 2026-11-28  
-**Candidate source of truth:** `integration/agency-os-consolidated-2026-11` at `4052212c28a125a46dc2f727d726ebfef7048eec`.  
+**Candidate source of truth:** the current head of `integration/agency-os-consolidated-2026-11` tracked by [PR #71](https://github.com/AsaifAli/agency-native-agency-os/pull/71).  
 **Review PR:** [#71 — Consolidated Agency OS integration](https://github.com/AsaifAli/agency-native-agency-os/pull/71), open and mergeable against `main`.  
 **Current main:** `c5ec7b462835f592edb0db1a31564401423e3467`; PR #71 has not been merged.  
 **Included work:** PR #68 security hardening and worker/RLS capability changes, PR #69 hosted-provider-only operating model, and PR #70 Private Operations foundation are reconciled into the PR #71 candidate.  
@@ -186,7 +186,7 @@ Founder-reported test results on the exact PR head after fast-forwarding to `41f
 - Isolated PostgreSQL 16 Compose suite: **107 passed, 2 warnings**, exit code 0. Migration and app-role grant jobs completed in the disposable test stack.
 - The earlier resume audit-token and unregistered-tool test failures are resolved in these reruns.
 - Remaining warnings are Starlette/httpx and Authlib/httpx deprecations; they did not fail the runs.
-- GitHub Actions remain intentionally not run per founder direction. No production database, deployment, provider activation or production data operation was performed. PR #68 remains draft pending independent security review and final founder/maintainer merge decision.
+- At that pre-consolidation checkpoint, GitHub Actions had intentionally not been run. No production database, deployment, provider activation or production data operation was performed; PR #68 was still draft at that time.
 
 
 ## Additional independent-review finding — 2026-11-27
