@@ -268,3 +268,67 @@ def test_create_execution_pins_immutable_agent_version(execution_context):
     assert version.runtime == execution.runtime
     assert version.data_class == execution.data_class
     assert len(version.config_sha256) == 64
+
+
+
+def test_agent_version_activation_and_rollback_are_append_only(execution_context):
+    from app.agent_registry_service import (
+        activate_agent_version,
+        create_agent_version,
+        rollback_agent_version,
+    )
+    from app.models import AgentVersion
+
+    ctx = execution_context
+    execution = create_test_execution(ctx)
+    db = ctx["db"]
+    db.commit()
+    agent = db.get(Agent, ctx["agent_id"])
+    version_one = db.get(AgentVersion, execution.agent_version_id)
+
+    draft = create_agent_version(
+        db,
+        org_id=ctx["org_id"],
+        workspace_id=ctx["workspace_id"],
+        agent_id=agent.id,
+        name="Version Two",
+        department="Solutions",
+        instructions="Updated instructions.",
+        runtime="mock",
+        data_class=DataClass.synthetic,
+        runtime_config={},
+        change_reason="Improve instructions",
+        created_by=ctx["user_id"],
+    )
+    assert draft.version_number == 2
+    assert agent.current_version_id == version_one.id
+
+    activate_agent_version(
+        db,
+        org_id=ctx["org_id"],
+        workspace_id=ctx["workspace_id"],
+        agent_id=agent.id,
+        version_id=draft.id,
+        actor_user_id=ctx["user_id"],
+    )
+    db.commit()
+    assert agent.current_version_id == draft.id
+    assert agent.instructions == "Updated instructions."
+
+    rollback = rollback_agent_version(
+        db,
+        org_id=ctx["org_id"],
+        workspace_id=ctx["workspace_id"],
+        agent_id=agent.id,
+        source_version_id=version_one.id,
+        actor_user_id=ctx["user_id"],
+        change_reason="Restore version one behavior",
+    )
+    db.commit()
+
+    assert rollback.version_number == 3
+    assert rollback.config_sha256 == version_one.config_sha256
+    assert rollback.id != version_one.id
+    assert agent.current_version_id == rollback.id
+    versions = db.query(AgentVersion).filter_by(agent_id=agent.id).all()
+    assert {row.version_number for row in versions} == {1, 2, 3}
