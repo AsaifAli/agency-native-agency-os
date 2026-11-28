@@ -57,6 +57,7 @@ def _persist_snapshot(
     external_run_id: str,
     usage: dict | None,
     observed_at: datetime,
+    pending_reason: str = "provider_session_not_idle_or_usage_unavailable",
 ) -> str:
     with session_factory() as db:
         # Keep the same lock order as worker lifecycle operations.
@@ -98,7 +99,7 @@ def _persist_snapshot(
             result["usage_reconciliation"] = {
                 "status": "pending",
                 "checked_at": checked_at,
-                "reason": "provider_session_not_idle_or_usage_unavailable",
+                "reason": pending_reason,
             }
             attempt.result = result
             db.commit()
@@ -209,13 +210,22 @@ def reconcile_abandoned_managed_agent_usage(
             usage = runtime.fetch_idle_session_usage(external_run_id)
         except Exception as exc:
             # Do not persist exception text: provider errors can contain
-            # request metadata. The next maintenance pass may retry safely.
+            # request metadata. Persist a cooldown marker to bound retries.
             logger.warning(
                 "Provider usage reconciliation read failed for attempt %s (%s)",
                 attempt_id,
                 type(exc).__name__,
             )
-            counts["skipped"] += 1
+            outcome = _persist_snapshot(
+                session_factory,
+                execution_id=execution_id,
+                attempt_id=attempt_id,
+                external_run_id=external_run_id,
+                usage=None,
+                observed_at=observed_at,
+                pending_reason="provider_read_failed",
+            )
+            counts[outcome] += 1
             continue
 
         try:
@@ -232,7 +242,16 @@ def reconcile_abandoned_managed_agent_usage(
                 "Provider usage reconciliation rejected invalid usage for attempt %s",
                 attempt_id,
             )
-            counts["skipped"] += 1
+            outcome = _persist_snapshot(
+                session_factory,
+                execution_id=execution_id,
+                attempt_id=attempt_id,
+                external_run_id=external_run_id,
+                usage=None,
+                observed_at=observed_at,
+                pending_reason="invalid_usage_snapshot",
+            )
+            counts[outcome] += 1
             continue
         counts[outcome] += 1
 
