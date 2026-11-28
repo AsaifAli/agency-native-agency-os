@@ -9,6 +9,8 @@ turn reaches end_turn.
 from __future__ import annotations
 
 import json
+import math
+import re
 import time
 from typing import Callable
 from urllib.parse import urlparse
@@ -592,18 +594,87 @@ class ManagedAgentsRuntime(AgentRuntime):
                 open_runs.discard(run_id)
         return open_runs
 
-    def _extract_result(self, events: list[dict], session_id: str) -> ExecutionResult:
+    @staticmethod
+    def _normalize_usage(usage: object) -> dict | None:
+        """Keep only bounded, numeric usage fields from the provider session."""
+        if usage is None:
+            return None
+        if not isinstance(usage, dict):
+            raise RuntimeManualReviewRequired("Claude Managed Agents returned malformed session usage.")
+        normalized: dict = {}
+        for key in ("input_tokens", "output_tokens", "cache_read_input_tokens"):
+            value = usage.get(key)
+            if value is None:
+                continue
+            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 10**12:
+                raise RuntimeManualReviewRequired("Claude Managed Agents returned invalid token usage.")
+            normalized[key] = value
+        cache_creation = usage.get("cache_creation")
+        if cache_creation is not None:
+            if not isinstance(cache_creation, dict):
+                raise RuntimeManualReviewRequired("Claude Managed Agents returned invalid cache usage.")
+            cache_total = 0
+            for key in ("ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens"):
+                value = cache_creation.get(key, 0)
+                if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 10**12:
+                    raise RuntimeManualReviewRequired("Claude Managed Agents returned invalid cache usage.")
+                cache_total += value
+            normalized["cache_creation_input_tokens"] = cache_total
+        list_cost = usage.get("list_cost")
+        if list_cost is not None:
+            if (
+                not isinstance(list_cost, dict)
+                or list_cost.get("currency") != "USD"
+                or not isinstance(list_cost.get("amount"), str)
+                or re.fullmatch(r"(?:0|[1-9][0-9]{0,11})", list_cost["amount"]) is None
+            ):
+                raise RuntimeManualReviewRequired("Claude Managed Agents returned invalid or unsupported list-cost usage.")
+            normalized["list_cost_minor"] = int(list_cost["amount"])
+            normalized["currency"] = "USD"
+        active_seconds = usage.get("active_seconds")
+        if active_seconds is not None:
+            if (
+                isinstance(active_seconds, bool)
+                or not isinstance(active_seconds, (int, float))
+                or not math.isfinite(active_seconds)
+                or not 0 <= active_seconds <= 31_536_000
+            ):
+                raise RuntimeManualReviewRequired("Claude Managed Agents returned invalid active-time usage.")
+            normalized["active_seconds"] = float(active_seconds)
+        server_tool_use = usage.get("server_tool_use")
+        if server_tool_use is not None:
+            if not isinstance(server_tool_use, dict):
+                raise RuntimeManualReviewRequired("Claude Managed Agents returned invalid server-tool usage.")
+            counts = {}
+            for key in ("web_search_requests", "web_fetch_requests"):
+                value = server_tool_use.get(key, 0)
+                if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 10**9:
+                    raise RuntimeManualReviewRequired("Claude Managed Agents returned invalid server-tool usage.")
+                counts[key] = value
+            normalized["server_tool_use"] = counts
+        return normalized or None
+
+    def _extract_result(
+        self, events: list[dict], session_id: str, session_usage: object = None,
+    ) -> ExecutionResult:
+        if session_usage is None:
+            usage_events = [event for event in events if event.get("type") == "session.usage"]
+            if usage_events:
+                session_usage = usage_events[-1].get("usage")
+        normalized_usage = self._normalize_usage(session_usage)
         idle_events = [event for event in events if event.get("type") == "session.status_idle"]
         stop_reason = idle_events[-1].get("stop_reason", {}) if idle_events else {}
         stop_type = stop_reason.get("type") if isinstance(stop_reason, dict) else None
 
         if self._open_workflow_runs(events):
             raise RuntimeManualReviewRequired(
-                "Managed Agent session became idle while a workflow run was still open."
+                "Managed Agent session became idle while a workflow run was still open.",
+                usage=normalized_usage,
             )
         if stop_type in {"requires_action", "budget_reached", "refusal", "retries_exhausted"}:
             raise RuntimeManualReviewRequired(
-                f"Managed Agent stopped for a review-required reason: {stop_type}."
+                f"Managed Agent stopped for a review-required reason: {stop_type}.",
+                usage=normalized_usage,
             )
         if stop_type != "end_turn":
             raise RuntimeManualReviewRequired(
@@ -638,6 +709,7 @@ class ManagedAgentsRuntime(AgentRuntime):
             external_run_id=session_id,
             status="succeeded",
             detail=detail[:16000],
+            usage=normalized_usage,
         )
 
     def start(self, request: ExecutionRequest) -> ExecutionResult:
@@ -1027,7 +1099,7 @@ class ManagedAgentsRuntime(AgentRuntime):
                     stop_type = stop_reason.get("type") if isinstance(stop_reason, dict) else None
                     if stop_type == "end_turn":
                         try:
-                            result = self._extract_result(events, session_id)
+                            result = self._extract_result(events, session_id, session.get("usage"))
                         finally:
                             cleanup_mcp("MCP_SESSION_COMPLETED")
                         return result
@@ -1039,7 +1111,7 @@ class ManagedAgentsRuntime(AgentRuntime):
                         continue
                     if stop_type in {"requires_action", "budget_reached", "refusal", "retries_exhausted"}:
                         try:
-                            result = self._extract_result(events, session_id)
+                            result = self._extract_result(events, session_id, session.get("usage"))
                         finally:
                             if stop_type != "requires_action":
                                 cleanup_mcp("MCP_SESSION_TERMINAL_RESULT")

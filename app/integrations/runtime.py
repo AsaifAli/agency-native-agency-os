@@ -40,6 +40,7 @@ class ExecutionResult:
     external_run_id: str | None
     status: str
     detail: str = ""
+    usage: dict | None = None
 
 
 class RuntimeExecutionError(Exception):
@@ -56,6 +57,10 @@ class RuntimeTransientError(RuntimeExecutionError):
 
 class RuntimeManualReviewRequired(RuntimeExecutionError):
     """The provider paused for a tool approval or other human decision."""
+
+    def __init__(self, message: str, *, usage: dict | None = None):
+        super().__init__(message)
+        self.usage = usage
 
 
 class RuntimeCancelled(RuntimeExecutionError):

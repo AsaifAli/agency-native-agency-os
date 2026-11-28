@@ -287,7 +287,9 @@ A checkbox is complete only when code/infrastructure, tests, operational evidenc
 - [ ] Complete Revenue provenance/deduplication/merge review, attribution and client-safe proposal delivery.
 - [ ] Complete Delivery requirement-to-test traceability, independent QA/rework, release approval, handover, support/SLA and renewal workflows.
 - [ ] Add trusted Evaluation Harness runner attestation, immutable test/commit/environment manifests and a release-blocking decision path; caller-supplied evidence is not proof.
-- [ ] Add provider routing/resilience, per-execution cost/usage accounting, enforceable budgets and founder emergency controls.
+- [x] Persist normalized Managed Agents token/runtime/list-cost usage in execution results and expose only the usage summary through the workspace-scoped execution history API.
+- [ ] Add cumulative provider/agent budget reservation, settlement and release; the current Managed Agents cap is per session, not an aggregate cap across concurrent executions.
+- [ ] Add provider routing/resilience and founder emergency spend controls.
 - [ ] Add operational metrics, alert routing, dashboards, SBOM/scans, incident runbooks and periodic access review.
 - [ ] Complete encrypted backup/object-artifact backup and isolated restore drill; measure and document RPO/RTO.
 - [ ] Complete staging synthetic end-to-end acceptance, external provider/webhook/storage configuration and explicit founder production go/no-go.

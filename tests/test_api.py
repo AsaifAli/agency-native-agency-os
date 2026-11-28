@@ -512,3 +512,33 @@ def test_outbox_summary_founder_response_is_scoped_and_payload_free():
     assert "payload" not in body
     assert "secret" not in str(body)
     assert "other_workspace" not in str(body)
+
+
+def test_execution_history_exposes_normalized_usage_without_transcript():
+    org_id, workspace_id, task_id, agent_id = _seed_execution_records("mock")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer dev:owner@test.local"}
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(email="owner@test.local").one()
+        execution = Execution(
+            org_id=org_id, workspace_id=workspace_id, task_id=task_id, agent_id=agent_id,
+            requested_by=user.id, idempotency_key=f"usage-api-{uuid.uuid4().hex}",
+            runtime="mock", data_class=DataClass.synthetic, status=ExecutionStatus.succeeded,
+        )
+        db.add(execution); db.flush(); execution_id = execution.id
+        execution.result = {
+            "provider": "claude_managed_agents", "external_run_id": "sesn_usage",
+            "status": "succeeded", "detail": "private transcript must not be exposed",
+            "usage": {"input_tokens": 120, "output_tokens": 45,
+                      "list_cost_minor": 7, "currency": "USD"},
+        }
+        db.commit()
+    finally:
+        db.close()
+    listed = client.get(f"/v1/orgs/{org_id}/executions", params={"workspace_id": workspace_id}, headers=headers)
+    assert listed.status_code == 200
+    item = next(row for row in listed.json() if row["id"] == execution_id)
+    assert item["provider_usage"] == {"input_tokens": 120, "output_tokens": 45,
+                                      "list_cost_minor": 7, "currency": "USD"}
+    assert "result" not in item and "detail" not in item

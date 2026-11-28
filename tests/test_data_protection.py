@@ -562,3 +562,25 @@ def test_aadhaar_redaction_does_not_corrupt_uuid_identifiers():
     aadhaar, aadhaar_counts = sanitize_text("1234 5678 9012")
     assert aadhaar == "[REDACTED_GOVERNMENT_ID]"
     assert aadhaar_counts == {"GOVERNMENT_ID": 1}
+
+
+def test_protect_execution_result_preserves_only_validated_provider_usage():
+    result = ExecutionResult(
+        provider="claude_managed_agents", external_run_id="sesn_123", status="succeeded",
+        detail="Completed", usage={
+            "input_tokens": 120, "output_tokens": 45, "cache_read_input_tokens": 20,
+            "cache_creation_input_tokens": 10, "list_cost_minor": 7,
+            "currency": "USD", "active_seconds": 12.5,
+            "server_tool_use": {"web_search_requests": 1, "web_fetch_requests": 0},
+        },
+    )
+    protected, _ = protect_execution_result(result)
+    assert protected.usage == result.usage
+
+    unsafe = ExecutionResult(
+        provider="claude_managed_agents", external_run_id="sesn_124", status="succeeded",
+        detail="Completed", usage={"list_cost_minor": 7, "currency": "USD", "raw": "secret@example.com"},
+    )
+    with pytest.raises(DataProtectionBlocked) as error:
+        protect_execution_result(unsafe)
+    assert error.value.code == "INVALID_RUNTIME_USAGE"

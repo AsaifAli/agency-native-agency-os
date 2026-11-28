@@ -342,9 +342,45 @@ def protect_execution_result(
         raise DataProtectionBlocked("INVALID_RUNTIME_RESULT")
     provider = _validate_runtime_identifier(result.provider)
     external_run_id = _validate_runtime_identifier(result.external_run_id)
+    usage = result.usage
+    if usage is not None:
+        allowed_usage_keys = {
+            "input_tokens", "output_tokens", "cache_read_input_tokens",
+            "cache_creation_input_tokens", "list_cost_minor", "currency",
+            "active_seconds", "server_tool_use",
+        }
+        if not isinstance(usage, dict) or set(usage) - allowed_usage_keys:
+            raise DataProtectionBlocked("INVALID_RUNTIME_USAGE")
+        for key in (
+            "input_tokens", "output_tokens", "cache_read_input_tokens",
+            "cache_creation_input_tokens", "list_cost_minor",
+        ):
+            value = usage.get(key)
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 10**12
+            ):
+                raise DataProtectionBlocked("INVALID_RUNTIME_USAGE")
+        if ("list_cost_minor" in usage) != (usage.get("currency") == "USD"):
+            raise DataProtectionBlocked("INVALID_RUNTIME_USAGE")
+        if "currency" in usage and usage["currency"] != "USD":
+            raise DataProtectionBlocked("INVALID_RUNTIME_USAGE")
+        active_seconds = usage.get("active_seconds")
+        if active_seconds is not None and (
+            isinstance(active_seconds, bool) or not isinstance(active_seconds, (int, float))
+            or not math.isfinite(active_seconds) or not 0 <= active_seconds <= 31_536_000
+        ):
+            raise DataProtectionBlocked("INVALID_RUNTIME_USAGE")
+        tool_usage = usage.get("server_tool_use")
+        if tool_usage is not None and (
+            not isinstance(tool_usage, dict)
+            or set(tool_usage) - {"web_search_requests", "web_fetch_requests"}
+            or any(isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 10**9
+                   for value in tool_usage.values())
+        ):
+            raise DataProtectionBlocked("INVALID_RUNTIME_USAGE")
     cleaned, counts = sanitize_text(result.detail)
     return (
-        replace(result, provider=provider, external_run_id=external_run_id, detail=cleaned),
+        replace(result, provider=provider, external_run_id=external_run_id, detail=cleaned, usage=dict(usage) if usage is not None else None),
         DataProtectionReport(redaction_counts=counts),
     )
 

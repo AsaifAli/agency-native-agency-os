@@ -8,6 +8,7 @@ from app.integrations.managed_agents import ManagedAgentsRuntime
 from app.integrations.runtime import (
     ExecutionRequest,
     RuntimeCancelled,
+    RuntimeExecutionError,
     RuntimeManualReviewRequired,
     RuntimeNotConfiguredError,
     RuntimePaused,
@@ -1031,3 +1032,50 @@ def test_managed_agents_reconciles_orphaned_vault_credential_and_never_creates_s
     assert persisted == [(os_credential_id, "vlt_test", "vcrd_orphan")]
     assert revoked == [(os_credential_id, "MCP_ORPHANED_CREDENTIAL")]
     assert archived == [(os_credential_id, "vcrd_orphan")]
+
+
+def test_managed_agents_extracts_normalized_session_usage():
+    runtime = ManagedAgentsRuntime(config(), client_factory=lambda: None, sleep=lambda _seconds: None)
+    events = [
+        {"type": "agent.message", "content": [{"type": "text", "text": "Completed."}]},
+        {"type": "session.usage", "usage": {
+            "input_tokens": 120, "output_tokens": 45, "cache_read_input_tokens": 20,
+            "cache_creation": {"ephemeral_5m_input_tokens": 6, "ephemeral_1h_input_tokens": 4},
+            "list_cost": {"amount": "7", "currency": "USD"},
+            "active_seconds": 12.5,
+            "server_tool_use": {"web_search_requests": 1, "web_fetch_requests": 0},
+        }},
+        {"type": "session.status_idle", "stop_reason": {"type": "end_turn"}},
+    ]
+    result = runtime._extract_result(events, "sesn_usage")
+    assert result.usage == {
+        "input_tokens": 120, "output_tokens": 45, "cache_read_input_tokens": 20,
+        "cache_creation_input_tokens": 10, "list_cost_minor": 7, "currency": "USD",
+        "active_seconds": 12.5, "server_tool_use": {"web_search_requests": 1, "web_fetch_requests": 0},
+    }
+
+
+def test_managed_agents_preserves_usage_when_session_reaches_budget():
+    runtime = ManagedAgentsRuntime(config(), client_factory=lambda: None, sleep=lambda _seconds: None)
+    usage = {"input_tokens": 100, "output_tokens": 50, "list_cost": {"amount": "251", "currency": "USD"}}
+    events = [
+        {"type": "agent.message", "content": [{"type": "text", "text": "Budget reached."}]},
+        {"type": "session.usage", "usage": usage},
+        {"type": "session.status_idle", "stop_reason": {"type": "budget_reached"}},
+    ]
+    with pytest.raises(RuntimeManualReviewRequired) as error:
+        runtime._extract_result(events, "sesn_budget")
+    assert error.value.usage == {
+        "input_tokens": 100, "output_tokens": 50, "list_cost_minor": 251, "currency": "USD",
+    }
+
+
+def test_managed_agents_rejects_malformed_or_non_usd_usage():
+    runtime = ManagedAgentsRuntime(config(), client_factory=lambda: None, sleep=lambda _seconds: None)
+    events = [
+        {"type": "agent.message", "content": [{"type": "text", "text": "Completed."}]},
+        {"type": "session.usage", "usage": {"list_cost": {"amount": "1.5", "currency": "USD"}}},
+        {"type": "session.status_idle", "stop_reason": {"type": "end_turn"}},
+    ]
+    with pytest.raises(RuntimeManualReviewRequired):
+        runtime._extract_result(events, "sesn_bad_usage")

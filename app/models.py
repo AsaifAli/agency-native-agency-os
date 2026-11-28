@@ -254,6 +254,14 @@ class Execution(Base):
         DateTime(timezone=True), default=now, onupdate=now, nullable=False
     )
 
+    @property
+    def provider_usage(self) -> dict | None:
+        """Expose normalized provider usage without exposing the execution transcript."""
+        if not isinstance(self.result, dict):
+            return None
+        usage = self.result.get("usage")
+        return usage if isinstance(usage, dict) else None
+
 
 class ExecutionAttempt(Base):
     __tablename__ = "execution_attempts"

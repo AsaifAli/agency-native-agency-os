@@ -1554,6 +1554,16 @@ def test_runtime_result_rejects_non_string_detail():
         processor_module._serialize_result(result)
 
 
+def test_runtime_result_preserves_normalized_provider_usage():
+    result = ExecutionResult(
+        provider="claude_managed_agents", external_run_id="sesn-usage",
+        status="succeeded", detail="Synthetic result",
+        usage={"input_tokens": 12, "output_tokens": 8, "list_cost_minor": 3, "currency": "USD"},
+    )
+    payload = processor_module._serialize_result(result)
+    assert payload["usage"] == result.usage
+
+
 def test_runtime_result_preserves_valid_unicode():
     result = ExecutionResult(
         provider="mock",
@@ -1632,9 +1642,12 @@ def test_fail_execution_redacts_and_bounds_error_message(worker_context):
         error_code="PROVIDER_ERROR",
         error_message=raw_message,
         retryable=False,
+        provider_usage={"list_cost_minor": 251, "currency": "USD"},
     )
     ctx["db"].commit()
 
+    assert failed_execution.result == {"usage": {"list_cost_minor": 251, "currency": "USD"}}
+    assert failed_attempt.result == failed_execution.result
     assert len(failed_execution.error_message) <= 1000
     assert len(failed_attempt.error_message) <= 1000
     assert "super-secret" not in failed_execution.error_message
@@ -2000,3 +2013,29 @@ def test_processor_injects_attempt_scoped_os_tool_executor_for_managed_agents(wo
 
     ctx["db"].expire_all()
     assert ctx["db"].get(Execution, execution.id).status == ExecutionStatus.succeeded
+
+
+def test_processor_persists_usage_when_provider_budget_requires_review(worker_context, monkeypatch):
+    from app.integrations.runtime import RuntimeManualReviewRequired
+    ctx = worker_context
+    execution, session_factory = mock_worker_context(ctx)
+
+    class BudgetReachedRuntime:
+        def start(self, request):
+            raise RuntimeManualReviewRequired(
+                "Provider session budget reached.",
+                usage={"input_tokens": 100, "output_tokens": 40,
+                       "list_cost_minor": 251, "currency": "USD"},
+            )
+
+    monkeypatch.setattr("app.worker.processor.get_runtime", lambda _name: BudgetReachedRuntime())
+    processed_id = process_one_execution(worker_id="provider-budget-review", session_factory=session_factory)
+    assert processed_id == execution.id
+    ctx["db"].expire_all()
+    saved = ctx["db"].get(Execution, execution.id)
+    attempt = ctx["db"].query(ExecutionAttempt).filter_by(execution_id=execution.id).one()
+    assert saved.status == ExecutionStatus.failed
+    assert saved.error_code == "RUNTIME_REQUIRES_REVIEW"
+    assert saved.provider_usage == {"input_tokens": 100, "output_tokens": 40,
+                                    "list_cost_minor": 251, "currency": "USD"}
+    assert attempt.result == saved.result

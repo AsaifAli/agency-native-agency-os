@@ -44,6 +44,38 @@ def _sanitize_error_message(value: str) -> str:
 
 
 
+def _validate_provider_usage(value: dict | None) -> dict | None:
+    """Accept only the normalized numeric usage contract emitted by the runtime adapter."""
+    if value is None:
+        return None
+    allowed = {
+        "input_tokens", "output_tokens", "cache_read_input_tokens",
+        "cache_creation_input_tokens", "list_cost_minor", "currency",
+        "active_seconds", "server_tool_use",
+    }
+    if not isinstance(value, dict) or set(value) - allowed:
+        raise ValueError("provider_usage must match the normalized usage contract")
+    for key in ("input_tokens", "output_tokens", "cache_read_input_tokens",
+                "cache_creation_input_tokens", "list_cost_minor"):
+        item = value.get(key)
+        if item is not None and (isinstance(item, bool) or not isinstance(item, int) or not 0 <= item <= 10**12):
+            raise ValueError("provider_usage contains an invalid counter")
+    if ("list_cost_minor" in value) != (value.get("currency") == "USD"):
+        raise ValueError("provider_usage list cost must be denominated in USD")
+    if "currency" in value and value["currency"] != "USD":
+        raise ValueError("provider_usage currency is unsupported")
+    active = value.get("active_seconds")
+    if active is not None and (isinstance(active, bool) or not isinstance(active, (int, float)) or not 0 <= active <= 31_536_000):
+        raise ValueError("provider_usage contains invalid active time")
+    tools = value.get("server_tool_use")
+    if tools is not None and (
+        not isinstance(tools, dict) or set(tools) - {"web_search_requests", "web_fetch_requests"}
+        or any(isinstance(item, bool) or not isinstance(item, int) or not 0 <= item <= 10**9 for item in tools.values())
+    ):
+        raise ValueError("provider_usage contains invalid server-tool counts")
+    return dict(value)
+
+
 def _sync_plan_draft_execution(
     db: Session,
     execution: Execution,
@@ -650,6 +682,7 @@ def fail_execution(
     error_code: str,
     error_message: str,
     retryable: bool = True,
+    provider_usage: dict | None = None,
     base_delay_seconds: int = 30,
     max_delay_seconds: int = 3600,
 ) -> tuple[Execution, ExecutionAttempt]:
@@ -670,6 +703,7 @@ def fail_execution(
 
     if not isinstance(retryable, bool):
         raise ValueError("retryable must be a boolean")
+    provider_usage = _validate_provider_usage(provider_usage)
     if (
         not isinstance(error_code, str)
         or not error_code.strip()
@@ -704,6 +738,10 @@ def fail_execution(
 
     execution.error_code = error_code
     execution.error_message = error_message
+    if provider_usage is not None:
+        usage_result = {"usage": provider_usage}
+        execution.result = usage_result
+        attempt.result = usage_result
 
     attempt.status = ExecutionAttemptStatus.failed
     attempt.finished_at = now

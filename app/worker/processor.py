@@ -120,12 +120,14 @@ class LeaseHeartbeat:
 def _record_failure(
     session_factory: SessionFactory, *, execution_id: str, attempt_id: str,
     worker_id: str, error_code: str, error_message: str, retryable: bool,
+    provider_usage: dict | None = None,
 ) -> None:
     """Persist a sanitized failure in its own transaction."""
     with session_factory() as db:
         fail_execution(
             db, execution_id=execution_id, attempt_id=attempt_id, worker_id=worker_id,
             error_code=error_code, error_message=error_message, retryable=retryable,
+            provider_usage=provider_usage,
         )
         db.commit()
 
@@ -154,6 +156,8 @@ def _serialize_result(result: ExecutionResult) -> dict:
         "provider": result.provider, "external_run_id": result.external_run_id,
         "status": "succeeded", "detail": result.detail,
     }
+    if result.usage is not None:
+        payload["usage"] = result.usage
     serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     if len(serialized) > MAX_RUNTIME_RESULT_BYTES:
         raise ValueError("Runtime result exceeds the permitted size")
@@ -350,6 +354,7 @@ def process_one_execution(
     )
     heartbeat.start()
     runtime_error: tuple[str, str, bool] | None = None
+    runtime_failure_usage: dict | None = None
     serialized_result: dict | None = None
     cancellation_requested = False
     pause_requested = False
@@ -471,7 +476,9 @@ def process_one_execution(
         runtime_error = (
             "RUNTIME_NOT_CONFIGURED", "The requested runtime is unavailable.", False,
         )
-    except RuntimeManualReviewRequired:
+    except RuntimeManualReviewRequired as exc:
+        if isinstance(exc.usage, dict):
+            runtime_failure_usage = exc.usage
         runtime_error = (
             "RUNTIME_REQUIRES_REVIEW",
             "The runtime requires human review before this execution can be treated as complete.",
@@ -550,6 +557,7 @@ def process_one_execution(
             session_factory, execution_id=execution_id, attempt_id=attempt_id,
             worker_id=worker_id, error_code=error_code,
             error_message=error_message, retryable=retryable,
+            provider_usage=runtime_failure_usage,
         )
         return execution_id
 
