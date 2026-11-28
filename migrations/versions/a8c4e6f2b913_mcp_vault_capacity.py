@@ -8,7 +8,7 @@ reconciliation instead of silently freeing a potentially occupied slot.
 from alembic import op
 
 revision = "a8c4e6f2b913"
-down_revision = "z6f1b3d8a2c5"
+down_revision = "r4b8d2f6a103"
 branch_labels = None
 depends_on = None
 
