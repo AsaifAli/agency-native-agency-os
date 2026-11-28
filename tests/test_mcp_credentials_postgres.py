@@ -409,6 +409,13 @@ def test_service_identity_mcp_credential_uses_narrow_database_capabilities():
                 db.execute(text("SELECT token_hash FROM public.machine_session_credentials")).all()
             db.rollback()
 
+            # Revocation is a separate machine-authenticated request. Session
+            # credential validation intentionally replaces the prior context,
+            # so re-authenticate the machine bearer before calling its revoke RPC.
+            principal = authenticate_machine_token(
+                f"Bearer aos_mi_{identity_id}.{raw_secret}", db
+            )
+            assert db.info["agency_os_rls_context"]["machine_identity_lookup_id"] == identity_id
             revoked_session = db.query(AgentSession).filter_by(
                 id=session_id, org_id=org_id, workspace_id=workspace_id,
                 machine_identity_id=identity_id,
@@ -456,3 +463,4 @@ def test_service_identity_mcp_credential_uses_narrow_database_capabilities():
         # fixture rather than violating the audit retention boundary in cleanup.
         app_engine.dispose()
         admin_engine.dispose()
+
