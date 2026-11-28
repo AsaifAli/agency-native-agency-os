@@ -1,6 +1,7 @@
 
 import re
 import hashlib
+import json
 import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -607,6 +608,52 @@ def heartbeat_execution(
     return execution, attempt
 
 
+
+def _record_provider_usage_observation(
+    db: Session,
+    execution: Execution,
+    attempt: ExecutionAttempt,
+    usage: dict | None,
+    *,
+    source: str,
+) -> str | None:
+    """Append a tamper-evident, normalized provider usage snapshot to the audit stream."""
+    normalized = _validate_provider_usage(usage)
+    if normalized is None:
+        return None
+    if source not in {
+        "runtime_result",
+        "failure_result",
+        "provider_session_reconciliation",
+    }:
+        raise ValueError("Unsupported provider usage observation source")
+
+    canonical = json.dumps(
+        normalized, sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
+    snapshot_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    record_event(
+        db,
+        execution.org_id,
+        None,
+        "execution.provider_usage_observed",
+        "execution_attempt",
+        attempt.id,
+        execution.workspace_id,
+        {
+            "execution_id": execution.id,
+            "attempt_number": attempt.attempt_number,
+            "provider": attempt.runtime,
+            "provider_session_id": attempt.external_run_id,
+            "source": source,
+            "snapshot_sha256": snapshot_hash,
+            "usage": normalized,
+        },
+    )
+    return snapshot_hash
+
+
+
 def _aggregate_provider_usage(db: Session, execution_id: str) -> dict | None:
     """Aggregate attempt deltas and one latest cumulative snapshot per Managed Agents session.
 
@@ -708,6 +755,9 @@ def complete_execution(
     attempt.error_code = None
     attempt.error_message = None
     db.flush()
+    _record_provider_usage_observation(
+        db, execution, attempt, result.get("usage"), source="runtime_result",
+    )
     aggregated_usage = _aggregate_provider_usage(db, execution.id)
     if aggregated_usage is not None:
         execution.result = dict(result)
@@ -812,6 +862,10 @@ def fail_execution(
     attempt.error_code = error_code
     attempt.error_message = error_message
     db.flush()
+    if provider_usage is not None:
+        _record_provider_usage_observation(
+            db, execution, attempt, provider_usage, source="failure_result",
+        )
     aggregated_usage = _aggregate_provider_usage(db, execution.id)
     if aggregated_usage is not None:
         execution.result = {"usage": aggregated_usage}
