@@ -957,3 +957,192 @@ def test_postgres_outbox_claim_generation_fences_reused_worker_id():
             finally:
                 cleanup.close()
         engine.dispose()
+
+
+def test_postgres_outbox_claim_survives_worker_process_crash_and_reclaims():
+    """Kill a process after claim commit, then recover and reclaim its event."""
+    database_url = os.getenv("AGENCY_OS_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("Set AGENCY_OS_TEST_DATABASE_URL to run PostgreSQL outbox process recovery test")
+
+    parsed_url = make_url(database_url)
+    assert parsed_url.get_backend_name() == "postgresql"
+    assert parsed_url.database == "agency_os_worker_test", (
+        "Safety check: this test may only use agency_os_worker_test"
+    )
+
+    engine = create_engine(database_url, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    suffix = uuid.uuid4().hex[:12]
+    org_id = workspace_id = event_id = None
+    event_type = f"test.postgres.outbox.process-crash.{suffix}"
+    idempotency_key = f"outbox-process-crash-{suffix}"
+    worker_id = f"crashed-outbox-worker-{suffix}"
+    process = None
+
+    try:
+        setup = Session()
+        try:
+            org = Organization(name=f"Outbox Process Crash Test {suffix}")
+            setup.add(org)
+            setup.flush()
+            workspace = Workspace(
+                id=f"outbox-process-crash-{suffix}",
+                org_id=org.id,
+                name="Outbox Process Crash Workspace",
+            )
+            setup.add(workspace)
+            setup.flush()
+            org_id, workspace_id = org.id, workspace.id
+
+            event = OutboxEvent(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                event_type=event_type,
+                schema_version=1,
+                aggregate_type="test",
+                aggregate_id=f"aggregate-{suffix}",
+                idempotency_key=idempotency_key,
+                payload={"synthetic": True},
+                status="pending",
+                attempts=0,
+                max_attempts=5,
+            )
+            setup.add(event)
+            setup.flush()
+            event_id = event.id
+            setup.commit()
+        finally:
+            setup.close()
+
+        child_code = r"""
+import json
+import os
+import time
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from app.outbox_service import claim_outbox_batch
+
+engine = create_engine(os.environ["AGENCY_OS_TEST_DATABASE_URL"], pool_pre_ping=True)
+Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+try:
+    with Session() as db:
+        messages = claim_outbox_batch(
+            db,
+            worker_id=os.environ["AGENCY_OS_TEST_WORKER_ID"],
+            event_types={os.environ["AGENCY_OS_TEST_EVENT_TYPE"]},
+            limit=1,
+            lease_seconds=15,
+        )
+        db.commit()
+    if len(messages) != 1:
+        raise RuntimeError("Expected exactly one synthetic outbox event")
+    print(json.dumps({
+        "stage": "claim_committed",
+        "id": messages[0].id,
+        "idempotency_key": messages[0].idempotency_key,
+        "attempts": messages[0].attempts,
+    }), flush=True)
+    time.sleep(300)
+finally:
+    engine.dispose()
+"""
+        child_env = os.environ.copy()
+        child_env["AGENCY_OS_TEST_WORKER_ID"] = worker_id
+        child_env["AGENCY_OS_TEST_EVENT_TYPE"] = event_type
+        process = subprocess.Popen(
+            [sys.executable, "-c", child_code],
+            cwd=os.getcwd(),
+            env=child_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+
+        ready, _, _ = select.select([process.stdout], [], [], 20)
+        if not ready:
+            process.kill()
+            stdout, stderr = process.communicate(timeout=10)
+            pytest.fail(
+                "Outbox child did not commit its claim before timeout. "
+                f"stdout={stdout!r}; stderr={stderr!r}"
+            )
+        marker = process.stdout.readline()
+        if not marker:
+            stdout_tail, stderr = process.communicate(timeout=10)
+            pytest.fail(
+                "Outbox child exited before confirming claim commit. "
+                f"stdout_tail={stdout_tail!r}; stderr={stderr!r}"
+            )
+        claimed = json.loads(marker)
+        assert claimed == {
+            "stage": "claim_committed",
+            "id": event_id,
+            "idempotency_key": idempotency_key,
+            "attempts": 1,
+        }
+
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=10)
+        assert process.returncode is not None and process.returncode != 0
+
+        recovery = Session()
+        try:
+            row = recovery.query(OutboxEvent).filter_by(id=event_id).one()
+            assert row.status == "processing"
+            assert row.claimed_by == worker_id
+            row.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=5)
+            recovery.commit()
+
+            assert reconcile_outbox_events(recovery, limit=10) == (1, 0)
+            recovery.commit()
+
+            reclaimed = claim_outbox_batch(
+                recovery,
+                worker_id=f"recovery-worker-{suffix}",
+                event_types={event_type},
+                limit=1,
+                lease_seconds=60,
+            )
+            assert len(reclaimed) == 1
+            assert reclaimed[0].id == event_id
+            assert reclaimed[0].idempotency_key == idempotency_key
+            assert reclaimed[0].attempts == 2
+            recovery.commit()
+        finally:
+            recovery.close()
+    finally:
+        if process is not None and process.poll() is None:
+            process.kill()
+            process.wait(timeout=10)
+        if process is not None:
+            if process.stdout:
+                process.stdout.close()
+            if process.stderr:
+                process.stderr.close()
+        if org_id is not None:
+            cleanup = Session()
+            try:
+                if event_id:
+                    cleanup.query(OutboxEvent).filter_by(id=event_id).delete(
+                        synchronize_session=False
+                    )
+                if workspace_id:
+                    cleanup.query(Workspace).filter_by(id=workspace_id).delete(
+                        synchronize_session=False
+                    )
+                cleanup.query(Organization).filter_by(id=org_id).delete(
+                    synchronize_session=False
+                )
+                cleanup.commit()
+            except Exception:
+                cleanup.rollback()
+                raise
+            finally:
+                cleanup.close()
+        engine.dispose()
