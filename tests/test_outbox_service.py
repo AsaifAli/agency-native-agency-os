@@ -274,6 +274,7 @@ def test_outbox_summary_evaluates_configurable_warning_thresholds(outbox_context
         "pending_age_warning_seconds": 60,
         "expired_lease_warning_count": 1,
         "dead_letter_warning_count": 1,
+        "exhausted_pending_warning_count": 1,
     }
 
 
