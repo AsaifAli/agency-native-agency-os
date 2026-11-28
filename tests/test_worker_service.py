@@ -2039,3 +2039,47 @@ def test_processor_persists_usage_when_provider_budget_requires_review(worker_co
     assert saved.provider_usage == {"input_tokens": 100, "output_tokens": 40,
                                     "list_cost_minor": 251, "currency": "USD"}
     assert attempt.result == saved.result
+
+
+def test_provider_usage_aggregates_across_execution_attempts(worker_context):
+    ctx = worker_context
+    db = ctx["db"]
+    execution, first_attempt, worker_id = start_running_attempt(ctx)
+    first_usage = {
+        "input_tokens": 100, "output_tokens": 20, "list_cost_minor": 10,
+        "currency": "USD", "active_seconds": 1.5,
+        "server_tool_use": {"web_search_requests": 1, "web_fetch_requests": 0},
+    }
+    fail_execution(
+        db, execution_id=execution.id, attempt_id=first_attempt.id, worker_id=worker_id,
+        error_code="RUNTIME_REQUIRES_REVIEW", error_message="First attempt paused.",
+        retryable=True, provider_usage=first_usage,
+    )
+    now = datetime.now(timezone.utc)
+    execution.status = ExecutionStatus.running
+    execution.attempt_count = 2
+    execution.next_retry_at = None
+    second_attempt = ExecutionAttempt(
+        execution_id=execution.id, attempt_number=2, worker_id=worker_id,
+        runtime=execution.runtime, status=ExecutionAttemptStatus.running,
+        lease_expires_at=now + timedelta(seconds=120), heartbeat_at=now, started_at=now,
+    )
+    db.add(second_attempt); db.flush()
+    second_usage = {
+        "input_tokens": 50, "output_tokens": 30, "list_cost_minor": 7,
+        "currency": "USD", "active_seconds": 2.5,
+        "server_tool_use": {"web_search_requests": 0, "web_fetch_requests": 1},
+    }
+    complete_execution(
+        db, execution_id=execution.id, attempt_id=second_attempt.id, worker_id=worker_id,
+        result={"provider": "claude_managed_agents", "external_run_id": "sesn-second",
+                "status": "succeeded", "detail": "Completed.", "usage": second_usage},
+    )
+    db.commit()
+    assert execution.provider_usage == {
+        "input_tokens": 150, "output_tokens": 50, "list_cost_minor": 17,
+        "currency": "USD", "active_seconds": 4.0,
+        "server_tool_use": {"web_search_requests": 1, "web_fetch_requests": 1},
+    }
+    assert first_attempt.result["usage"] == first_usage
+    assert second_attempt.result["usage"] == second_usage

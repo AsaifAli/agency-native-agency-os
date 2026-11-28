@@ -607,6 +607,36 @@ def heartbeat_execution(
     return execution, attempt
 
 
+def _aggregate_provider_usage(db: Session, execution_id: str) -> dict | None:
+    """Sum provider-reported usage across every persisted attempt for an execution."""
+    rows = db.query(ExecutionAttempt.result).filter_by(execution_id=execution_id).all()
+    usage_rows = []
+    for (result,) in rows:
+        usage = result.get("usage") if isinstance(result, dict) else None
+        if usage is not None:
+            usage_rows.append(_validate_provider_usage(usage))
+    if not usage_rows:
+        return None
+    totals: dict = {}
+    for key in ("input_tokens", "output_tokens", "cache_read_input_tokens",
+                "cache_creation_input_tokens", "list_cost_minor"):
+        values = [item[key] for item in usage_rows if key in item]
+        if values:
+            totals[key] = sum(values)
+    active_values = [item["active_seconds"] for item in usage_rows if "active_seconds" in item]
+    if active_values:
+        totals["active_seconds"] = sum(active_values)
+    tool_rows = [item["server_tool_use"] for item in usage_rows if "server_tool_use" in item]
+    if tool_rows:
+        totals["server_tool_use"] = {
+            key: sum(row.get(key, 0) for row in tool_rows)
+            for key in ("web_search_requests", "web_fetch_requests")
+        }
+    if "list_cost_minor" in totals:
+        totals["currency"] = "USD"
+    return totals or None
+
+
 def complete_execution(
     db: Session,
     *,
@@ -650,6 +680,11 @@ def complete_execution(
     attempt.heartbeat_at = now
     attempt.error_code = None
     attempt.error_message = None
+    db.flush()
+    aggregated_usage = _aggregate_provider_usage(db, execution.id)
+    if aggregated_usage is not None:
+        execution.result = dict(result)
+        execution.result["usage"] = aggregated_usage
     _sync_task_delegation(db, execution, "succeeded")
     _sync_plan_draft_execution(db, execution, "succeeded")
 
@@ -749,6 +784,10 @@ def fail_execution(
     attempt.heartbeat_at = now
     attempt.error_code = error_code
     attempt.error_message = error_message
+    db.flush()
+    aggregated_usage = _aggregate_provider_usage(db, execution.id)
+    if aggregated_usage is not None:
+        execution.result = {"usage": aggregated_usage}
 
     retry_scheduled = (
         retryable and execution.attempt_count < execution.max_attempts
