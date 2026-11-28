@@ -22,6 +22,7 @@ from app.workforce_schemas import (
     PlanDraftCreate, PlanDraftApprove, PlanDraftReject, PlanDraftOut,
 )
 from app.workforce_service import initialize_workforce
+from app.security_models import AgentSession, MachineIdentity
 
 router = APIRouter(prefix="/v1/orgs/{org_id}/workforce", tags=["workforce"])
 WRITERS = {Role.owner, Role.admin, Role.operator}
@@ -338,6 +339,28 @@ def pause_member(org_id: str, member_id: str,
         ).with_for_update().first()
         if agent:
             agent.enabled = False
+    cancelled_sessions = 0
+    if member.agent_id:
+        identities = db.query(MachineIdentity).filter_by(
+            org_id=org_id, workspace_id=workspace_id,
+            subject_type="agent", subject_id=member.agent_id,
+        ).with_for_update().all()
+        now = datetime.now(timezone.utc)
+        for identity in identities:
+            cancelled = db.query(AgentSession).filter_by(
+                org_id=org_id, workspace_id=workspace_id,
+                machine_identity_id=identity.id, status="active",
+            ).update(
+                {"status": "cancelled", "ended_at": now},
+                synchronize_session=False,
+            )
+            cancelled_sessions += cancelled
+            if cancelled:
+                record_event(
+                    db, org_id, p.user.id, "machine_identity.sessions_cancelled",
+                    "machine_identity", identity.id, workspace_id,
+                    {"reason_code": "WORKFORCE_MEMBER_PAUSED", "count": cancelled},
+                )
     db.query(WorkforceCapability).filter_by(
         org_id=org_id, workspace_id=workspace_id, member_id=member.id
     ).update({"enabled": False})
@@ -347,7 +370,8 @@ def pause_member(org_id: str, member_id: str,
     record_event(db, org_id, p.user.id, "workforce.member_paused", "workforce_member",
                  member.id, workspace_id, {"agent_id": member.agent_id})
     db.commit()
-    return {"member_id": member.id, "status": member.status, "agent_enabled": False}
+    return {"member_id": member.id, "status": member.status, "agent_enabled": False,
+            "active_agent_sessions_cancelled": cancelled_sessions}
 
 
 
