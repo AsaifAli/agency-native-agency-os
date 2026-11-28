@@ -210,3 +210,29 @@ def test_outbox_summary_reports_expired_and_exhausted_work(outbox_context):
     )
     assert summary["expired_leases"] == 1
     assert summary["exhausted_pending"] == 1
+
+def test_dispatch_renews_lease_during_long_running_handler(outbox_context):
+    import time
+
+    ctx = outbox_context
+    event_id = add_event(ctx)
+
+    def long_handler(_message):
+        # Force the lease close to expiry while the handler is still active.
+        with ctx["Session"]() as db:
+            row = db.query(OutboxEvent).filter_by(id=event_id).one()
+            row.lease_expires_at = datetime.now(timezone.utc) + timedelta(seconds=0.1)
+            db.commit()
+        time.sleep(0.25)
+
+    result = dispatch_outbox_batch(
+        ctx["Session"],
+        worker_id="worker-long-handler",
+        handlers={"test.event": long_handler},
+        lease_seconds=15,
+        heartbeat_interval_seconds=0.02,
+    )
+
+    row = ctx["db"].query(OutboxEvent).filter_by(id=event_id).one()
+    assert result == (1, 0, 0)
+    assert row.status == "published"
