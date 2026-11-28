@@ -2491,3 +2491,67 @@ def test_provider_usage_snapshot_is_preserved_in_append_only_audit(worker_contex
     assert event.payload["source"] == "runtime_result"
     assert event.payload["usage"] == usage
     assert len(event.payload["snapshot_sha256"]) == 64
+
+
+
+def test_worker_uses_execution_pinned_agent_version_after_new_version_activates(worker_context, monkeypatch):
+    from app.agent_registry_service import activate_agent_version, create_agent_version
+
+    ctx = worker_context
+    db = ctx["db"]
+    execution = create_worker_execution(ctx)
+    db.commit()
+    original_version_id = execution.agent_version_id
+
+    agent = db.get(Agent, ctx["agent_id"])
+    new_version = create_agent_version(
+        db,
+        org_id=ctx["org_id"],
+        workspace_id=ctx["workspace_id"],
+        agent_id=agent.id,
+        name="Updated Worker Agent",
+        department="Solutions",
+        instructions="New version instructions.",
+        runtime="mock",
+        data_class=DataClass.synthetic,
+        runtime_config={},
+        change_reason="Test version pinning",
+        created_by=ctx["user_id"],
+    )
+    activate_agent_version(
+        db,
+        org_id=ctx["org_id"],
+        workspace_id=ctx["workspace_id"],
+        agent_id=agent.id,
+        version_id=new_version.id,
+        actor_user_id=ctx["user_id"],
+    )
+    db.commit()
+
+    class Runtime:
+        request = None
+
+        def start(self, request):
+            self.request = request
+            return ExecutionResult(
+                provider="mock",
+                external_run_id=None,
+                status="succeeded",
+                detail="Pinned version executed.",
+            )
+
+    runtime = Runtime()
+    monkeypatch.setattr(processor_module, "get_runtime", lambda _name: runtime)
+    session_factory = sessionmaker(bind=db.get_bind(), autoflush=False, autocommit=False)
+    processed = process_one_execution(
+        worker_id="worker-agent-version-pin",
+        session_factory=session_factory,
+    )
+
+    assert processed == execution.id
+    assert runtime.request is not None
+    assert runtime.request.agent_name == "Worker Test Agent"
+    assert runtime.request.agent_instructions == ""
+    assert runtime.request.runtime_config == {}
+    assert execution.agent_version_id == original_version_id
+    assert agent.current_version_id == new_version.id
