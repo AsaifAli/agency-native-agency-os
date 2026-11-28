@@ -54,6 +54,7 @@ Implemented workspace-scoped, payload-free summary warnings:
 - Counts by pending, processing, published, and dead-letter state.
 - Oldest pending age, expired lease count, exhausted pending count and an `as_of` timestamp.
 - Configurable warning thresholds: pending age (default 900 seconds), expired leases (default 1), and dead-letter count (default 1). These are starting operational defaults, not contractual SLAs; tune them to the agency's delivery objectives.
+- Exhausted pending events (attempts at or above the configured maximum while still pending) also trigger a dedicated warning; default threshold is 1. This catches inconsistent or stranded retry state before it is mistaken for healthy pending work.
 - Stable alert codes and a `healthy`/`warning` summary state. The founder-only route continues to require explicit Founder Authority and workspace access.
 
 Still incomplete:
