@@ -336,3 +336,27 @@ def test_qa_issue_assignee_must_have_workspace_access(client):
         },
     )
     assert response.status_code == 404
+
+
+def test_qa_issue_history_is_workspace_scoped_and_chronological(client):
+    created = create_issue(client)
+    assert created.status_code == 201, created.text
+    issue_id = created.json()["id"]
+    transition_url = f"/v1/orgs/{client.org_id}/qa/issues/{issue_id}/transition?workspace_id={client.ws_id}"
+    moved = client.patch(transition_url, headers=headers(), json={"status": "triaged"})
+    assert moved.status_code == 200, moved.text
+
+    history = client.get(
+        f"/v1/orgs/{client.org_id}/qa/issues/{issue_id}/history",
+        headers=headers(), params={"workspace_id": client.ws_id},
+    )
+    assert history.status_code == 200, history.text
+    assert [event["event_type"] for event in history.json()] == [
+        "qa_issue.created", "qa_issue.status_changed",
+    ]
+
+    wrong_workspace = client.get(
+        f"/v1/orgs/{client.org_id}/qa/issues/{issue_id}/history",
+        headers=headers(), params={"workspace_id": client.other_ws_id},
+    )
+    assert wrong_workspace.status_code == 404
