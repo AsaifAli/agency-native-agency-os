@@ -27,6 +27,7 @@ def test_rls_migration_covers_every_model_table_with_org_id():
     # Outcome tables were introduced by a later additive migration; keep the
     # original tenant-RLS revision immutable.
     expected.pop("project_outcomes", None)
+    expected.pop("qa_issues", None)  # introduced by the additive QA lifecycle migration
     expected.pop("outcome_measurements", None)
     expected.pop("orchestration_plan_delegations", None)
     expected.pop("knowledge_items", None)
@@ -97,7 +98,7 @@ def test_startup_rls_inventory_matches_all_migration_tables():
 
     expected = set(MIGRATION.ORG_TABLES) | {
         "organizations", "browser_sessions", "execution_attempts",
-        "project_outcomes", "outcome_measurements",
+        "project_outcomes", "outcome_measurements", "qa_issues",
         "orchestration_plan_delegations", "knowledge_items", "business_drafts",
         "machine_session_credentials", "learning_candidates", "artifacts",
     }
