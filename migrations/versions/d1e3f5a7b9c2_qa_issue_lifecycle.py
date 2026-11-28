@@ -151,7 +151,7 @@ def upgrade() -> None:
                 END IF;
 
                 RETURN NEW;
-            END
+            END;
             $function$
         """)
         op.execute("""
