@@ -197,13 +197,13 @@ def test_streamable_http_mcp_list_and_call_delegate_to_os_tool_gateway(monkeypat
         claude_managed_mcp_max_request_body_bytes=65536,
         claude_managed_mcp_requests_per_minute=30,
     )
-    _server, mcp_app, wrapped = mcp_server.create_mcp_gateway(
+    server, _mcp_app, wrapped = mcp_server.create_mcp_gateway(
         config=config, session_factory=FakeDB
     )
 
     @asynccontextmanager
     async def lifespan(_app):
-        async with mcp_app.router.lifespan_context(mcp_app):
+        async with server.session_manager.run():
             yield
 
     host_app = FastAPI(lifespan=lifespan)
