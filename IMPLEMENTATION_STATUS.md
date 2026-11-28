@@ -2,8 +2,9 @@
 
 **Last reconciled:** 2026-11-28 17:02 UTC  
 **Working branch:** `main` is the single active integration branch for founder-authorized work. Do not create parallel feature branches or PRs unless explicitly requested.  
-**Verified code baseline:** PR #71 was merged into `main` at 2026-11-28 16:28:33 UTC; merged code commit `f07a8b7b8a864cbc08da35bf4b4c422cd4baf25e`. PRs #68, #69 and #70, plus the learning/Cowork/Code integration work in PR #71, are included.  
-**Code-baseline CI:** [Run 46165349483](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46165349483) completed successfully. Backend and frontend jobs passed, including PostgreSQL role bootstrap/migrations/integration tests, Python compilation, hardened runtime image checks, frontend typecheck and production build. Subsequent changes to `IMPLEMENTATION_STATUS.md` and `CLAUDE.md` are documentation-only; follow-up CI is triggered by those commits. No new test count is inferred from job status alone.  
+**Verified code baseline:** PR #71 was merged into `main` at 2026-11-28 16:28:33 UTC. The current verified code baseline is `6d70292596beeea86eb778a09fa04faeed06305e`; reviewed Revenue/Delivery/Outreach changes from the historical integration branch have been ported onto `main`, and `main` remains the sole active working branch.  
+**Latest code-baseline CI:** [Run 46168046099](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46168046099) completed successfully: **687 backend tests passed in 54.82 seconds**, including PostgreSQL 16 integration, and frontend typecheck/production build passed. The subsequent commit `43c5e0f5c22594450e8fbd88bc75e607035c4e13` only reconciles the failure-injection documentation.  
+**Release posture:** **NO-GO for production.** Green CI does not establish live provider compatibility, staging isolation, backup restore, operational readiness or compliance.  
 **Release posture:** **NO-GO for production.** Green CI does not establish live provider compatibility, staging isolation, backup restore, operational readiness or compliance.
 
 This file describes the merged `main` baseline. Historical PR/branch checkpoints remain historical evidence, not active integration work. See `docs/CONSOLIDATION_EXECUTION_LEDGER.md` and `docs/PRODUCTION_GRADE_MASTER_CHECKLIST.md` for historical integration and release gates.
@@ -38,10 +39,10 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 ## Implemented foundations
 
 ### Core data, identity and founder governance
-- Organization/workspace-scoped clients, contacts, leads, opportunities, projects and milestones.
+- Organization/workspace-scoped clients, contacts, leads, opportunities, projects and milestones. Lead creation normalizes submitted and linked-contact emails and serializes duplicate checks per workspace; API regressions cover duplicate email and contact reuse.
 - Explicit Founder Authority distinct from organization-owner membership.
 - Founder-only provisioning and decisions; single-use approval consumption matches action/resource/workspace and rechecks active Founder Authority.
-- Protected commercial operations consume approval and mutate protected OS state in the same transaction, with audit.
+- Protected commercial operations consume approval and mutate protected OS state in the same transaction, with audit. Outreach sender activation and communication-block release are single-use approval-gated; the Founder Console exposes scoped approval requests and queue actions.
 - Central autonomy policy: explicitly allowlisted internal actions, founder-approval actions and manual-review default for unknown actions.
 - Authentik OIDC authorization-code + PKCE foundations, pre-provisioned subject linking, HttpOnly session cookies, CSRF checks, persistent browser-session revocation/rotation and expiry. Live Authentik/JWKS/MFA assurance remains unverified.
 
@@ -49,7 +50,7 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 - PostgreSQL RLS and role separation are implemented; application and worker roles are intended to be non-owner, least-privilege roles.
 - Human workspace-grant authorization was restored in PR #58.
 - The orchestration plan-to-delegation join table now carries organization/workspace scope, composite foreign keys to both parent records, and forced PostgreSQL RLS; the table is included in the startup RLS inventory. The migration backfills scope from the plan and refuses to proceed if existing links cross workspaces or are orphaned.
-- A model/RLS inventory regression test requires every mapped table to be present in the RLS inventory, with the shared global `users` identity table as the explicit exception. The `users` table still needs a separate privacy/access review.
+- A model/RLS inventory regression test requires every mapped table to be present in the RLS inventory, with the shared global `users` identity table as the explicit exception. The `users` table still needs a separate privacy/access review. A migration regression test also requires every migration-defined `SECURITY DEFINER` function to pin `pg_catalog` first in `search_path`.
 - Worker production startup verifies `PROCESS_ROLE=worker`, PostgreSQL and the `agency_os_worker` role with `NOBYPASSRLS`.
 - Worker execution and maintenance use database-verified, capability-bound claim/renew/release operations; caller-forgeable machine GUCs do not establish worker authorization.
 - Durable execution lifecycle includes persisted attempts, leases, heartbeats, bounded retries, expired-lease recovery, pause/cancel acknowledgement and workspace-scoped maintenance.
@@ -87,7 +88,7 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 - Service catalogue is founder-governed and versioned. Contract register requires approved proposal and signed evidence before executed status. Onboarding requires executed contract, evidence-backed checklist and founder approval before project activation.
 - Invoice register prevents overbilling, requires founder approval before issue evidence and maintains an append-only payment receipt ledger. No payment collection is integrated; this is not statutory accounting.
 - Delivery foundations include playbooks, founder-approved scope changes, time/cost records, provisional project financial summaries, exception inbox and project outcomes.
-- Project outcomes record problem, desired outcome, metric/unit, baseline, target, direction, date, measurement method and agreed acceptance criteria. Outcome measurements are append-only and source-backed as submitted metadata. Founder-only delivery acceptance is distinct from measured business impact.
+- Project outcomes record problem, desired outcome, metric/unit, baseline, target, direction, date, measurement method and agreed acceptance criteria. Outcome measurements are append-only and source-backed as submitted metadata; the UI links measurements to same-project milestones and workspace-scoped evaluation runs. Founder-only delivery acceptance is distinct from measured business impact.
 - Founder Console includes Client Outcomes page.
 
 ## Current gaps and blockers
@@ -128,7 +129,7 @@ Architecture remains a modular monolith: Next.js/React Founder Console, Python F
 
 ## Immediate work order
 
-1. Consolidated baseline: **PR #71 is merged**; `main` at `f07a8b7b8a864cbc08da35bf4b4c422cd4baf25e` has successful CI run `46165349483`.
+1. Consolidated baseline: **PR #71 is merged**; current code baseline `6d702925` has successful CI run `46168046099` (687 backend tests). The historical integration branch's reviewed code changes are ported to `main`; do not merge the stale branch wholesale.
 2. Continue tenant/RLS and Data Protection Gateway inventory and route-by-route negative tests. Live PostgreSQL 16 human/worker isolation suites now execute in CI; broader API/object/artifact coverage remains open.
 3. Artifact/object storage isolation and retention lifecycle.
 4. Phase 4 runtime hardening: prove the active Managed Agents custom-tool lifecycle and Code/Cowork Agency MCP path with synthetic data; only implement Vault cleanup if the disabled Vault compatibility transport remains selected. Add worker/provider recovery drills.

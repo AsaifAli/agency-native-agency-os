@@ -1,10 +1,10 @@
 # Agency OS — Full Production-Grade Readiness Master Checklist
 
-**Last reconciled:** 2026-11-27 (PR #58 merged; local/live gates remain open)  
+**Last reconciled:** 2026-11-28 (PR #71 merged; latest code CI run 46168046099 passed; local/live gates remain open)  
 **Release posture:** **NO-GO — engineering and verification in progress**  
 **Scope:** Founder-controlled internal AI agency operating system. This is not a SaaS product. The public agency website remains a separate trust boundary.
 
-This is the master release checklist. It restores the broader P0/P1/P2 scope from the earlier Production Readiness v2 and consolidates the later security, worker, Revenue, Delivery, AI workforce and operations work. The detailed evidence log remains in `PRODUCTION_READINESS_CHECKLIST.md`; the 20-point audit remains in `PRE_DEPLOY_SECURITY_AUDIT_20_POINT.md`.
+This is the master release checklist. It restores the broader P0/P1/P2 scope from the earlier Production Readiness v2 and consolidates the later security, worker, Revenue, Delivery, AI workforce and operations work. The detailed evidence log remains in `PRODUCTION_READINESS_CHECKLIST.md`; the 20-point audit remains in `PRE_DEPLOY_SECURITY_AUDIT_20_POINT.md`. For current merged-code implementation and verification evidence, use `IMPLEMENTATION_STATUS.md`; older checkbox notes below are historical until revalidated on the exact release candidate.
 
 A checkbox is complete only when code/infrastructure, tests, operational evidence and documentation exist on the exact release candidate. Design notes, UI scaffolds, mocks and authored-but-unrun tests are not completion evidence.
 
@@ -42,11 +42,11 @@ A checkbox is complete only when code/infrastructure, tests, operational evidenc
 ### 2. Tenant isolation and Data Protection Gateway
 - [ ] Apply all tenant RLS migrations on the supported PostgreSQL 16 version using the documented migration role.
 - [ ] Verify table ownership, grants, FORCE RLS, policies, SECURITY DEFINER ownership/search path and role attributes.
-- [x] Run RLS tests as the real non-owner, NOBYPASSRLS API role; the isolated PostgreSQL 16 suite passed 105 tests on the PR #58 merged candidate. Re-run after PR #62 because it adds a newly RLS-protected association table; its focused PostgreSQL regression is included but not yet executed.
+- [x] Run tenant/workspace and worker RLS tests as real non-owner, NOBYPASSRLS PostgreSQL roles. Current main CI run [46168046099](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46168046099) passed 687 backend tests in total, including live PostgreSQL 16 role bootstrap, migrations and integration suites. Repeat on every exact release candidate and staging topology.
 - [ ] Verify transaction-local tenant/user/machine context is set and cleared correctly under pooled connection reuse and rollback.
 - [x] Enforce exact machine workspace scope with post-authentication machine identity binding and dedicated RLS predicates; retain live deployment/pool-reuse verification as a separate gate.
 - [x] Remove broad worker BYPASSRLS: production worker role is verified as NOBYPASSRLS and uses database-verified execution/workspace capabilities with narrowly scoped claim, renewal and maintenance functions.
-- [ ] Test tenant isolation across API, ORM, worker, queue, files, object storage, browser sessions, caches, search/RAG, logs and generated artifacts. The model-to-RLS inventory parity regression is included in PR #62; the only mapped-model exception is the global `users` identity directory, which needs a separate privacy/access review.
+- [ ] Test tenant isolation across API, ORM, worker, queue, files, object storage, browser sessions, caches, search/RAG, logs and generated artifacts. The model-to-RLS inventory parity regression is included on merged main; the only mapped-model exception is the global `users` identity directory, which needs a separate privacy/access review. File/object storage, caches, search/RAG and generated artifact paths are not implemented and remain unverified.
 - [ ] Complete Data Protection Gateway (DPG) classification, minimization, PII/secret detection and redaction for uploads, extracted files, retrieval context, connector responses, tool inputs/outputs and provider callbacks.
 - [ ] Review the shared global `users` identity directory: prove there is no cross-organization directory enumeration, inventory every query path, and decide whether direct application-role table access should be replaced with narrowly scoped identity lookup functions without breaking OIDC/session bootstrap.
 - [ ] Enforce per-client data policy and runtime eligibility before any external provider receives data.
@@ -80,12 +80,12 @@ A checkbox is complete only when code/infrastructure, tests, operational evidenc
 
 ### 5. Durable execution, queue and worker reliability
 - [ ] Keep PostgreSQL as source of truth for executions, attempts, leases, results, errors, cancellation and audit.
-- [x] Verify PostgreSQL 16 migrations and integration tests, including concurrent claim, SKIP LOCKED behavior and lease expiry recovery; isolated Compose suite passed 105 tests on the PR #58 merged candidate. Re-run after schema changes.
+- [x] Verify PostgreSQL 16 migrations and integration tests, including concurrent claim, SKIP LOCKED behavior, claim-generation fencing, lease renewal and synthetic crash-after-effect idempotency; current main CI run 46168046099 passed. Re-run after schema changes; deployed multi-process acceptance remains open.
 - [ ] Verify independent worker service/container startup, health checks, graceful shutdown and bounded concurrency.
 - [ ] Kill a worker after claim and after provider call; prove lease recovery, safe retry/reconciliation and no duplicate business effect.
 - [ ] Test heartbeat loss, lease renewal races, expired lease recovery, retry scheduling, max attempts and dead-letter transitions.
 - [ ] Test cancellation before claim, during execution and after external side effect; define honest terminal states for ambiguous outcomes.
-- [ ] Verify pause/resume lifecycle: queued pause, provider-confirmed active pause, same-session resume, resume deduplication after worker crash, cancellation superseding pause, retry exhaustion and workspace isolation. Current merged-main backend suite passed 483 tests (19 skipped) and isolated PostgreSQL suite passed 105 tests; live Managed Agents interruption/resumption, deployed multi-worker behavior and end-to-end UI verification remain pending.
+- [ ] Verify pause/resume lifecycle: queued pause, provider-confirmed active pause, same-session resume, resume deduplication after worker crash, cancellation superseding pause, retry exhaustion and workspace isolation. Current merged-main CI run 46168046099 passed 687 backend tests including PostgreSQL integration; live Managed Agents interruption/resumption, deployed multi-worker behavior and end-to-end UI verification remain pending.
 - [ ] Implement idempotency keys and deduplication for every external action; reconcile provider outcomes after timeout rather than blindly resending.
 - [ ] Complete transactional outbox delivery, versioned events, at-least-once semantics, duplicate handling, replay permissions and reconciliation.
 - [ ] Test actual multi-process and multi-replica workers under sustained synthetic load; measure queue age, throughput, lock contention and resource usage.
@@ -267,7 +267,7 @@ A checkbox is complete only when code/infrastructure, tests, operational evidenc
 - [ ] Backup is restored into isolated environment → integrity, migrations and service startup verified.
 - [ ] Evaluation Harness detects a known tenant leak, prompt injection or authorization regression → release is blocked.
 
-## Known open blockers at the 2026-11-27 checkpoint
+## Known open blockers at the 2026-11-28 checkpoint
 
 - [x] PR #58 merged to `main` at `4541626d6fffc904d8ee3131bb2f408efbe27acf`; the consolidation branch is no longer the release candidate.
 - [x] Worker database role no longer relies on broad `BYPASSRLS`; the production worker role is verified as `NOBYPASSRLS`, and worker execution/maintenance uses database-verified capability-bound scope.

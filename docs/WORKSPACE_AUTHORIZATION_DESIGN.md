@@ -1,10 +1,10 @@
 # Human Workspace Authorization — Design and Implementation Plan
 
-**Status:** Design baseline; implementation not yet applied  
+**Status:** Implemented on `main`; verified code baseline `6d70292596beeea86eb778a09fa04faeed06305e` passed CI run [46168046099](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46168046099) (687 backend tests). This document preserves the design rationale and records remaining verification gaps.  
 **Scope:** Human API principals and PostgreSQL row-level security  
 **Security objective:** An organization membership must not, by itself, grant access to every workspace in that organization.
 
-## Confirmed current-state finding
+## Historical pre-implementation finding (resolved in the current baseline)
 
 The current authorization boundary is organization membership:
 
@@ -17,7 +17,21 @@ The current authorization boundary is organization membership:
 
 This is a cross-cutting authorization issue. Adding a Python check alone is insufficient because direct SQL and missed routes would remain exposed.
 
-## Target authorization model
+## Current implementation evidence (merged baseline)
+
+The original organization-wide workspace-access gap described below was addressed before the PR #71 merge. The current implementation includes:
+
+- A persisted `workspace_grants` model with organization/workspace/user scope, retained revocation state and founder-governed grant/revoke operations.
+- Explicit human workspace authorization through centralized guards, including `require_workspace_access` / `require_workspace_access_from_context` and module-level wrappers.
+- PostgreSQL RLS policies that use exact workspace grants for human access to workspace-owned rows; machine and worker authorization remain separate.
+- Founder-only grant/revoke actions bound to matching, single-use approvals; approval consumption, grant mutation and audit are committed atomically.
+- Workspace creation and creator access are handled through the current workspace lifecycle rather than relying on organization membership alone.
+- Structural route inventory checks in `tests/test_route_auth_inventory.py`, API authorization regressions in `tests/test_workspace_authorization.py`, and live PostgreSQL RLS coverage in `tests/test_tenant_rls_postgres.py` and related role-specific suites.
+- The shared `public.users` identity directory is deliberately outside tenant RLS; its API/worker column privileges are separately constrained and tested in `tests/test_user_identity_privileges_postgres.py`.
+
+**Evidence boundary:** these tests establish the covered authorization paths and database role contracts. They do not constitute an exhaustive independent BOLA assessment of every nested resource, nor do they prove isolation for file/object storage, caches or RAG ingestion paths that are not yet implemented. Continue the route-by-route and nested-object review before client-data activation.
+
+## Implemented authorization model
 
 Keep organization membership and workspace access as separate concepts:
 
@@ -27,9 +41,9 @@ Keep organization membership and workspace access as separate concepts:
 4. **Machine principals** retain their separate, narrowly scoped worker/machine authorization path. Human workspace grants must not widen machine access.
 5. **Workspace creation** and the creator's initial grant must commit atomically.
 
-### Proposed grant record
+### Implemented grant record and retained schema
 
-Add a `workspace_grants` table with:
+The persisted `workspace_grants` table contains:
 
 - `id`
 - `org_id`
@@ -39,25 +53,25 @@ Add a `workspace_grants` table with:
 - `created_at`
 - `revoked_at` (or an equivalent active/revoked state with retained history)
 
-Enforce a composite workspace/org foreign key and a unique active grant per `(org_id, workspace_id, user_id)`. Retain grant/revoke history rather than deleting authorization evidence. Grant and revoke operations must emit tamper-evident audit events in the same transaction.
+A composite workspace/org foreign key and a partial unique index enforce one active grant per `(org_id, workspace_id, user_id)`. Grant/revoke history is retained rather than deleted. Grant and revoke operations emit audit events in the same transaction.
 
 ### Migration compatibility
 
-The migration must preserve current access rather than silently locking existing users out:
+The migration preserved existing access without silently locking users out:
 
-- Backfill one active grant for every currently active organization membership × workspace pair in that organization.
-- Do not infer grants for future memberships or future workspaces.
+- Existing active organization memberships were backfilled to their existing workspaces.
+- Future memberships and future workspaces do not receive implicit grants.
 - New memberships receive no workspace access until a founder-authorized grant is created.
 - Workspace creation inserts the workspace and creator grant in one transaction.
-- If existing membership provisioning code is retained, explicitly decide whether the inviter must also grant one or more workspaces; do not restore implicit organization-wide access.
+- Membership invitation/provisioning does not automatically grant all workspaces.
 
-## PostgreSQL RLS design
+## PostgreSQL RLS implementation
 
-Introduce a narrowly owned SECURITY DEFINER predicate:
+The migration defines a narrowly owned SECURITY DEFINER predicate:
 
 `agency_os_private.user_has_workspace_access(target_org_id, target_workspace_id, actor_user_id)`
 
-It must return true only when:
+It returns true only when:
 
 - the actor is non-null and active;
 - the actor has an active membership in the organization; and
@@ -65,7 +79,7 @@ It must return true only when:
 
 Use a fixed safe search_path, revoke PUBLIC execution, grant only the API role what it needs, and ensure the function owner is a non-login migration/security role with the minimum required privileges.
 
-For every workspace-scoped table in the authoritative migration inventory, change the human branch of USING and WITH CHECK from organization membership to the workspace predicate. Keep org-only tables (for example memberships and other genuinely organization-wide records) governed by their intended organization-level policy. Keep machine predicates separate and exact-workspace scoped.
+Policies for every workspace-scoped table in the authoritative migration inventory use the exact workspace predicate in `USING` and `WITH CHECK`. Org-only tables (for example memberships and genuinely organization-wide records) retain their intended organization-level policy. Machine predicates remain separate and exact-workspace scoped.
 
 For tables whose `workspace_id` is nullable (for example, an explicitly organization-wide record), define the null case deliberately: allow `workspace_id IS NULL` only under the intended organization-level predicate, and require the exact workspace predicate for every non-null workspace row. Never let a nullable column turn a workspace-scoped row into an organization-wide bypass. Inventory nullability per table before writing policies.
 
@@ -75,13 +89,13 @@ The `workspaces` table needs command-specific policies:
 - UPDATE/DELETE: explicit policy aligned to the intended founder/admin lifecycle; do not silently infer this from SELECT access.
 - Workspace grant creation and revocation require both explicit Founder Authority and a matching, single-use `security.permission.change` approval. The approval resource ID is the stable UUIDv5 returned by `app.action_policy.workspace_access_resource_id(workspace_id, user_id, operation)` (with `operation` set to `grant` or `revoke`); approval consumption, grant mutation, and audit commit in one database transaction. A no-op revoke rolls back approval consumption.
 
-The `workspace_grants` table needs its own restrictive policies. A user may read their own grants; grant administration must require explicit founder authority in the API and must not be made possible by a broad organization-member policy. Evaluate a narrow SECURITY DEFINER write function if direct table grants would undermine the boundary.
+The `workspace_grants` table has restrictive policies. Ordinary users can read only their own grants; grant administration requires explicit Founder Authority and uses narrowly scoped database functions. The API role does not receive unrestricted grant-table mutation privileges.
 
-Execution attempts and other child records must inherit the parent execution's exact workspace authorization. Org-level outbox events remain organization-scoped only where their payload is genuinely org-wide; workspace events must require the matching workspace grant.
+Execution attempts and other child records inherit the parent execution's exact workspace authorization. Org-level outbox events remain organization-scoped only where their payload is genuinely org-wide; workspace events require the matching workspace grant.
 
-## API and lifecycle changes
+## API and lifecycle implementation
 
-Create centralized helpers with consistent semantics:
+Centralized helpers enforce consistent semantics:
 
 - `require_workspace_access(org_id, workspace_id, principal, db)`: require active organization membership, then an active exact workspace grant, then establish any request-local context needed by the application. Return a safe 404 for inaccessible workspace IDs to avoid disclosing their existence.
 - A founder-only grant/revoke service that checks explicit founder authority, validates target membership and workspace ownership, serializes concurrent changes, and writes the grant state plus audit event atomically.
@@ -90,9 +104,9 @@ Create centralized helpers with consistent semantics:
 - Membership invitation/provisioning that does not automatically grant all workspaces.
 - All workspace-scoped route families must call the centralized guard before reading or mutating workspace data. Resource-by-ID routes must not perform an unscoped read first; either require an explicit workspace identifier or use a narrowly scoped lookup that proves the grant before returning the row.
 
-Route families found during the initial audit include core workspace/bootstrap and execution routes in `app/main.py`; Revenue/Delivery in `app/domain_routes.py`; commercial and delivery operations in `app/operations_routes.py`; Outreach in `app/outreach/routes.py`; Workforce and orchestration in `app/workforce_routes.py`; Telephony in `app/telephony/routes.py`; and founder/security routes in `app/security_routes.py` and `app/revenue_research_routes.py`. The existing `tests/test_route_auth_inventory.py` proves that routes have an authentication boundary and that workspace routes reference a workspace identifier; it does **not** prove workspace authorization. Extend it to fail when any workspace-scoped route lacks the centralized workspace guard (or a documented, reviewed equivalent). The final implementation must build and test a complete endpoint inventory rather than relying on this initial list.
+Route families found during the initial audit include core workspace/bootstrap and execution routes in `app/main.py`; Revenue/Delivery in `app/domain_routes.py`; commercial and delivery operations in `app/operations_routes.py`; Outreach in `app/outreach/routes.py`; Workforce and orchestration in `app/workforce_routes.py`; Telephony in `app/telephony/routes.py`; and founder/security routes in `app/security_routes.py` and `app/revenue_research_routes.py`. The existing `tests/test_route_auth_inventory.py` now checks for authentication boundaries, organization membership/role checks, workspace identifier use and centralized workspace guards (or reviewed equivalents). This is a structural regression guard, not proof of semantic authorization for every nested object. Maintain the endpoint inventory as routes are added and extend negative BOLA tests for each resource family.
 
-## Required regression and integration tests
+## Regression and integration coverage
 
 ### Migration and data integrity
 - Backfill grants for every existing active membership/workspace pair.
@@ -122,14 +136,13 @@ Route families found during the initial audit include core workspace/bootstrap a
 - Transaction rollback, commit, pooled connection reuse and revocation are tested.
 - Worker/machine scope remains exact-workspace and is not widened by human grant changes.
 
-## Rollout and acceptance gates
+## Remaining validation and rollout gates
 
-1. Complete endpoint/schema inventory and threat review.
-2. Add failing API and PostgreSQL tests first.
-3. Implement grant model, migration/backfill, policies, lifecycle services and route guards as one coordinated change.
-4. Run unit, API, isolated PostgreSQL and full backend suites; verify migration upgrade/downgrade in disposable databases.
-5. Review generated SQL and policy semantics independently.
-6. Only then mark the PR ready. Do not enable production rollout until a production migration plan, backup/restore evidence and an approved rollback path exist.
+1. Keep the route/schema/function inventory current and complete the nested-object BOLA review.
+2. Add failing API and PostgreSQL regressions before each authorization behavior change.
+3. Re-run unit, API and isolated PostgreSQL suites on the exact release commit; review generated SQL and policy semantics independently.
+4. Test revocation, pooled-connection reuse, worker crash/recovery and approval/action atomicity in the target staging topology.
+5. Do not enable production rollout until a production migration plan, backup/restore evidence and an approved rollback path exist.
 
 ## Explicit non-goals
 
