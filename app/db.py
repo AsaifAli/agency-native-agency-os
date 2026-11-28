@@ -121,7 +121,7 @@ REQUIRED_RLS_TABLES = frozenset({
     "onboarding_checklist_items", "opportunities", "orchestration_plan_drafts",
     "orchestration_plan_delegations", "orchestration_plans", "outbound_message_events", "outbound_messages",
     "outbound_senders", "outbox_events", "outreach_drafts", "outcome_measurements", "payment_receipts",
-    "project_costs", "project_outcomes", "projects", "proposals", "retainer_service_periods",
+    "project_costs", "project_outcomes", "projects", "proposals", "qa_issues", "retainer_service_periods",
     "scope_change_requests", "service_offerings", "service_playbooks", "tasks",
     "time_entries", "tool_invocations", "workforce_capabilities",
     "workforce_members", "workforce_positions", "workforce_units", "workspaces",
