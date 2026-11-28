@@ -32,10 +32,12 @@ class TaskCreate(BaseModel):
     workspace_id: str
     title: str = Field(min_length=2, max_length=300)
     description: str = ""
+    milestone_id: str | None = None
 class TaskOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
     workspace_id: str
+    milestone_id: str | None = None
     title: str
     description: str
     status: str
