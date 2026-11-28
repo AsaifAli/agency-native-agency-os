@@ -362,7 +362,11 @@ def test_service_identity_mcp_credential_uses_narrow_database_capabilities():
                 data_class="public", status="active", created_at=now, last_seen_at=now,
                 expires_at=now + timedelta(minutes=30),
             )
-            db.add_all([identity, other_identity, other_session])
+            # Flush parent identities before inserting their scoped sessions;
+            # the composite FK is checked by PostgreSQL at each statement.
+            db.add_all([identity, other_identity])
+            db.flush()
+            db.add(other_session)
             db.commit()
             org_id, workspace_id = org.id, workspace.id
 
@@ -503,3 +507,4 @@ def test_service_identity_mcp_credential_uses_narrow_database_capabilities():
         # fixture rather than violating the audit retention boundary in cleanup.
         app_engine.dispose()
         admin_engine.dispose()
+
