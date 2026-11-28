@@ -228,10 +228,17 @@ def create_lead(
     # both pass the check before either transaction commits.
     db.query(Workspace).filter_by(id=body.workspace_id, org_id=org_id).with_for_update().first()
     normalized_email = (body.email or (contact.email if contact else "")).lower().strip()
+    candidate_emails = {
+        value.lower().strip()
+        for value in (body.email, contact.email if contact else "")
+        if value and value.strip()
+    }
     duplicate = None
-    if normalized_email:
-        duplicate = db.query(Lead).filter_by(
-            org_id=org_id, workspace_id=body.workspace_id, email=normalized_email,
+    if candidate_emails:
+        duplicate = db.query(Lead).filter(
+            Lead.org_id == org_id,
+            Lead.workspace_id == body.workspace_id,
+            Lead.email.in_(candidate_emails),
         ).first()
     if duplicate is None and body.contact_id:
         duplicate = db.query(Lead).filter_by(
