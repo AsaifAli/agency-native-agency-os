@@ -540,7 +540,7 @@ def test_worker_public_table_grants_are_least_privilege():
     expected_update = {
         "agent_sessions", "delegations", "execution_attempts",
         "executions", "orchestration_plan_drafts", "outbox_events",
-        "tasks", "tool_invocations", "workforce_capabilities", "workforce_members",
+        "tasks", "tool_invocations",
     }
 
     worker_engine = create_engine(WORKER_URL, pool_pre_ping=True)
@@ -580,5 +580,25 @@ def test_worker_public_table_grants_are_least_privilege():
                     'revoked_at', 'UPDATE'
                 )
             """)).scalar_one() is False
+
+            assert connection.execute(text("""
+                SELECT
+                    has_column_privilege(
+                        current_user, 'public.workforce_capabilities',
+                        'created_at', 'UPDATE'
+                    ),
+                    has_column_privilege(
+                        current_user, 'public.workforce_capabilities',
+                        'enabled', 'UPDATE'
+                    ),
+                    has_column_privilege(
+                        current_user, 'public.workforce_members',
+                        'updated_at', 'UPDATE'
+                    ),
+                    has_column_privilege(
+                        current_user, 'public.workforce_members',
+                        'status', 'UPDATE'
+                    )
+            """)).one() == (True, False, True, False)
     finally:
         worker_engine.dispose()
