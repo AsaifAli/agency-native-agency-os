@@ -357,8 +357,10 @@ def dispatch_outbox_batch(
         try:
             try:
                 handlers[message.event_type](message)
+            except OutboxOwnershipError:
+                # A handler that detects lost ownership must not mutate the event.
+                continue
             except Exception as exc:
-                heartbeat.stop()
                 recorded = _record_failure(
                     session_factory, message=message, worker_id=worker_id,
                     error=exc, base_retry_seconds=base_retry_seconds,
@@ -374,16 +376,13 @@ def dispatch_outbox_batch(
                     else:
                         retried += 1
             else:
-                heartbeat.stop()
-                _acknowledge(session_factory, message=message, worker_id=worker_id)
+                try:
+                    _acknowledge(session_factory, message=message, worker_id=worker_id)
+                except OutboxOwnershipError:
+                    continue
                 published += 1
-        except OutboxOwnershipError:
-            # A stale worker must not overwrite a newer owner's state.
-            heartbeat.stop()
-            continue
         finally:
-            if heartbeat._thread is not None and heartbeat._thread.is_alive():
-                heartbeat.stop()
+            heartbeat.stop()
     return published, retried, dead
 
 
