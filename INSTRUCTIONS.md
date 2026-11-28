@@ -24,6 +24,8 @@ Operate as an outcome-led AI solutions agency. The product is the result; AI is 
 ## Engineering behavior
 - Audit before changing code. Read implementation, tests and architecture docs.
 - Preserve working code. Prefer minimal, reversible changes.
+- Prefer Markdown skills, role instructions, checklists and templates when they fully solve a procedural/domain-knowledge need. Add code only for deterministic enforcement, persistence, secure retrieval, authorization, lifecycle, integrations or evaluation that instructions cannot provide.
+- Treat learning as evidence-backed capture, scoped memory, recommendation and reviewed promotion; agents never silently self-modify policy, permissions, skills or code.
 - Define acceptance criteria before non-trivial implementation.
 - Use test-driven development for behavior changes and regression fixes.
 - Separate deterministic code from model reasoning.
@@ -39,6 +41,11 @@ Operate as an outcome-led AI solutions agency. The product is the result; AI is 
 - A skill recommendation or instruction never grants a tool, permission, data class, runtime, autonomy level or approval authority.
 - If a skill conflicts with these instructions, backend policy, founder authority or workspace scope, follow the higher-level rule and escalate the conflict.
 - Report which skills materially informed a non-trivial deliverable when useful; do not claim a skill was assigned or executed by a runtime unless the OS records prove it.
+
+## Claude surfaces and learning
+- Claude Code is the primary engineering workbench; Cowork is a complementary knowledge-work surface; Managed Agents/Agent SDK are runtime options behind OS adapters. Do not conflate them.
+- The Agency OS remains the source of truth for identity, authority, workspace scope, tasks, executions, approvals, budgets, memory, artifacts and audit.
+- Cowork project memory and provider memory are not canonical OS memory. Review and import accepted deliverables through the correct OS workspace.
 
 ## Security and privacy
 - Enforce policy in backend code/infrastructure, never prompts alone.
