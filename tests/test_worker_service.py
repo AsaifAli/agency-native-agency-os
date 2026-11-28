@@ -2110,3 +2110,119 @@ def test_managed_agents_usage_uses_latest_cumulative_snapshot_for_resumed_sessio
     assert execution.provider_usage == second_usage
     assert first_attempt.result["usage"] == first_usage
     assert second_attempt.result["usage"] == second_usage
+
+
+
+def test_abandoned_managed_agent_session_usage_is_reconciled_idempotently(worker_context):
+    from sqlalchemy.orm import sessionmaker
+    from app.provider_usage_reconciliation import reconcile_abandoned_managed_agent_usage
+
+    ctx = worker_context
+    db = ctx["db"]
+    execution = create_worker_execution(ctx)
+    execution.runtime = "claude_managed_agents"
+    execution.status = ExecutionStatus.retry_wait
+    attempt = ExecutionAttempt(
+        execution_id=execution.id,
+        attempt_number=1,
+        runtime="claude_managed_agents",
+        status=ExecutionAttemptStatus.abandoned,
+        external_run_id="sesn_reconcile",
+        result=None,
+        finished_at=datetime.now(timezone.utc),
+    )
+    db.add(attempt)
+    db.commit()
+
+    class Runtime:
+        calls = 0
+
+        def fetch_idle_session_usage(self, session_id):
+            self.calls += 1
+            assert session_id == "sesn_reconcile"
+            return {
+                "input_tokens": 31,
+                "output_tokens": 12,
+                "list_cost_minor": 9,
+                "currency": "USD",
+            }
+
+    runtime = Runtime()
+    session_factory = sessionmaker(bind=db.get_bind(), autoflush=False, autocommit=False)
+
+    result = reconcile_abandoned_managed_agent_usage(
+        session_factory,
+        runtime=runtime,
+        limit=5,
+    )
+
+    assert result == {"reconciled": 1, "pending": 0, "skipped": 0}
+    db.expire_all()
+    persisted_attempt = db.get(ExecutionAttempt, attempt.id)
+    persisted_execution = db.get(Execution, execution.id)
+    assert persisted_attempt.result["usage"] == {
+        "input_tokens": 31,
+        "output_tokens": 12,
+        "list_cost_minor": 9,
+        "currency": "USD",
+    }
+    assert persisted_attempt.result["usage_reconciliation"]["status"] == "reconciled"
+    assert persisted_execution.result["usage"]["list_cost_minor"] == 9
+
+    second = reconcile_abandoned_managed_agent_usage(
+        session_factory,
+        runtime=runtime,
+        limit=5,
+    )
+    assert second == {"reconciled": 0, "pending": 0, "skipped": 0}
+    assert runtime.calls == 1
+
+
+def test_non_idle_managed_agent_usage_reconciliation_is_deferred(worker_context):
+    from sqlalchemy.orm import sessionmaker
+    from app.provider_usage_reconciliation import reconcile_abandoned_managed_agent_usage
+
+    ctx = worker_context
+    db = ctx["db"]
+    execution = create_worker_execution(ctx)
+    execution.runtime = "claude_managed_agents"
+    execution.status = ExecutionStatus.retry_wait
+    attempt = ExecutionAttempt(
+        execution_id=execution.id,
+        attempt_number=1,
+        runtime="claude_managed_agents",
+        status=ExecutionAttemptStatus.abandoned,
+        external_run_id="sesn_still_running",
+        result=None,
+        finished_at=datetime.now(timezone.utc),
+    )
+    db.add(attempt)
+    db.commit()
+
+    class Runtime:
+        calls = 0
+
+        def fetch_idle_session_usage(self, session_id):
+            self.calls += 1
+            return None
+
+    runtime = Runtime()
+    session_factory = sessionmaker(bind=db.get_bind(), autoflush=False, autocommit=False)
+    first = reconcile_abandoned_managed_agent_usage(
+        session_factory,
+        runtime=runtime,
+        limit=5,
+    )
+    assert first == {"reconciled": 0, "pending": 1, "skipped": 0}
+
+    db.expire_all()
+    persisted = db.get(ExecutionAttempt, attempt.id)
+    assert persisted.result["usage_reconciliation"]["status"] == "pending"
+
+    second = reconcile_abandoned_managed_agent_usage(
+        session_factory,
+        runtime=runtime,
+        limit=5,
+    )
+    assert second == {"reconciled": 0, "pending": 0, "skipped": 1}
+    assert runtime.calls == 1
