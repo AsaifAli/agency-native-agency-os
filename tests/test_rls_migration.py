@@ -23,6 +23,7 @@ def test_rls_migration_covers_every_model_table_with_org_id():
     # workspace_grants is introduced by the follow-up authorization migration;
     # the original migration remains an immutable historical baseline.
     expected.pop("workspace_grants")
+    expected.pop("artifacts", None)  # introduced by the additive artifact metadata migration
     # Outcome tables were introduced by a later additive migration; keep the
     # original tenant-RLS revision immutable.
     expected.pop("project_outcomes", None)
@@ -98,7 +99,7 @@ def test_startup_rls_inventory_matches_all_migration_tables():
         "organizations", "browser_sessions", "execution_attempts",
         "project_outcomes", "outcome_measurements",
         "orchestration_plan_delegations", "knowledge_items", "business_drafts",
-        "machine_session_credentials", "learning_candidates",
+        "machine_session_credentials", "learning_candidates", "artifacts",
     }
     assert REQUIRED_RLS_TABLES == expected | {"workspace_grants"}
 
@@ -132,7 +133,7 @@ def test_workspace_authorization_migration_covers_every_workspace_owned_table():
     expected.difference_update({
         "project_outcomes", "outcome_measurements",
         "orchestration_plan_delegations", "knowledge_items", "business_drafts",
-        "machine_session_credentials", "learning_candidates",
+        "machine_session_credentials", "learning_candidates", "artifacts",
     })
     assert set(migration.WORKSPACE_TABLES) == expected
 
@@ -360,3 +361,18 @@ def test_machine_identity_and_session_rls_are_bound_to_the_authenticated_identit
     assert "machine_identity_id = nullif(current_setting('agency_os.machine_identity_lookup_id', true), '')" in source
     assert "worker_has_execution_context" in source
     assert "user_has_workspace_access" in source
+
+
+def test_artifact_metadata_migration_enforces_workspace_rls_and_has_no_upload_surface():
+    path = PATH.with_name("f0a1b2c3d4e5_artifact_metadata.py")
+    source = path.read_text()
+    assert 'revision = "f0a1b2c3d4e5"' in source
+    assert 'down_revision = "e5f6a7b8c9d0"' in source
+    assert "ENABLE ROW LEVEL SECURITY" in source
+    assert "FORCE ROW LEVEL SECURITY" in source
+    assert "user_has_workspace_access" in source
+    assert "agency_os.machine_workspace_id" in source
+    assert "artifact_tenant_isolation" in source
+    assert "ck_artifacts_available_requires_clean_scan" in source
+    assert "TO agency_os_app, agency_os_worker" not in source
+    assert "UploadFile" not in source and "presigned" not in source.lower()

@@ -111,7 +111,7 @@ def set_rls_context(db: Session, *, user_id: str | None = None,
 # that samples only a few tables can silently miss a newly added unprotected
 # tenant table, so API and worker processes verify the complete set.
 REQUIRED_RLS_TABLES = frozenset({
-    "agent_sessions", "agents", "approvals", "audit_events",
+    "agent_sessions", "agents", "approvals", "artifacts", "audit_events",
     "call_sessions", "call_transcripts", "client_onboardings", "clients",
     "communication_blocks", "communication_consents", "contact_activities",
     "contacts", "contract_records", "delegations", "evaluation_runs",
