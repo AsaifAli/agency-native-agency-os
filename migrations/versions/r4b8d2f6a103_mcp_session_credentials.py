@@ -15,6 +15,12 @@ depends_on = None
 
 
 def upgrade() -> None:
+    with op.batch_alter_table("agent_sessions") as batch:
+        batch.create_unique_constraint(
+            "uq_agent_session_identity_scope_id",
+            ["org_id", "workspace_id", "machine_identity_id", "id"],
+        )
+
     op.create_table(
         "machine_session_credentials",
         sa.Column("id", sa.String(36), primary_key=True, nullable=False),
@@ -282,3 +288,5 @@ def downgrade() -> None:
         table_name="machine_session_credentials",
     )
     op.drop_table("machine_session_credentials")
+    with op.batch_alter_table("agent_sessions") as batch:
+        batch.drop_constraint("uq_agent_session_identity_scope_id", type_="unique")
