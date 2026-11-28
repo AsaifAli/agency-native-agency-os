@@ -5,6 +5,7 @@ os.environ["DEV_AUTH_ENABLED"] = "true"
 from fastapi.testclient import TestClient
 from app.main import app
 from app.db import Base, engine, SessionLocal
+from app.domain_models import Project, Milestone
 from app.models import (
     User, Organization, Membership, Workspace, Role,
     Agent, Task, DataClass, AuditEvent, Execution, ExecutionStatus, WorkspaceGrant,
@@ -44,6 +45,86 @@ def _org_id():
     finally:
         db.close()
 
+
+
+def _seed_project_milestone(workspace_id="ws-test"):
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(email="owner@test.local").one()
+        org = db.query(Organization).filter_by(name="Test Org").one()
+        project = Project(
+            org_id=org.id, workspace_id=workspace_id,
+            name=f"Delivery project {uuid.uuid4().hex[:8]}",
+            owner_user_id=user.id,
+        )
+        db.add(project)
+        db.flush()
+        milestone = Milestone(
+            org_id=org.id, workspace_id=workspace_id,
+            project_id=project.id, title="Implementation QA",
+        )
+        db.add(milestone)
+        db.commit()
+        return org.id, project.id, milestone.id
+    finally:
+        db.close()
+
+
+def test_task_can_be_linked_to_a_workspace_scoped_project_milestone():
+    org_id, project_id, milestone_id = _seed_project_milestone()
+    client = TestClient(app)
+    response = client.post(
+        f"/v1/orgs/{org_id}/tasks",
+        headers={"Authorization": "Bearer dev:owner@test.local"},
+        json={
+            "workspace_id": "ws-test",
+            "title": "Implement milestone acceptance tests",
+            "description": "Trace work to the delivery milestone",
+            "milestone_id": milestone_id,
+        },
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["milestone_id"] == milestone_id
+
+
+def test_task_rejects_a_milestone_from_another_workspace():
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(email="owner@test.local").one()
+        org = db.query(Organization).filter_by(name="Test Org").one()
+        other_workspace = Workspace(
+            id=f"ws-foreign-{uuid.uuid4().hex[:8]}",
+            org_id=org.id, name="Unrelated workspace", created_by=user.id,
+        )
+        db.add(other_workspace)
+        db.flush()
+        project = Project(
+            org_id=org.id, workspace_id=other_workspace.id,
+            name="Foreign project", owner_user_id=user.id,
+        )
+        db.add(project)
+        db.flush()
+        milestone = Milestone(
+            org_id=org.id, workspace_id=other_workspace.id,
+            project_id=project.id, title="Foreign milestone",
+        )
+        db.add(milestone)
+        db.commit()
+        milestone_id = milestone.id
+    finally:
+        db.close()
+
+    client = TestClient(app)
+    response = client.post(
+        f"/v1/orgs/{org.id}/tasks",
+        headers={"Authorization": "Bearer dev:owner@test.local"},
+        json={
+            "workspace_id": "ws-test",
+            "title": "Must not attach foreign milestone",
+            "milestone_id": milestone_id,
+        },
+    )
+    assert response.status_code == 404
 
 
 def _seed_execution_records(runtime):
