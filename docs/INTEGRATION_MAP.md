@@ -44,6 +44,12 @@ RAAS does not imply contingent/performance-based pricing. Pricing, attribution, 
 
 Native Python workers and the PostgreSQL transactional outbox are the initial automation architecture. No n8n, Activepieces, Temporal or second workflow engine is required. External calls run outside database transactions; consumers must be idempotent; delivery is at-least-once with bounded retries, dead letters and reconciliation.
 
+## Private AI and Business Operations layer (planned)
+
+The selective design from the ReStructure Brief's "The Private AI Operating System" is captured in [PRIVATE_AI_OPERATING_MODEL.md](PRIVATE_AI_OPERATING_MODEL.md). It proposes a workspace-scoped, versioned knowledge layer; grounded lead-response drafts; meeting-to-proposal preparation; receivables/reminder and payment-match proposals; a source-backed founder brief; and an optional private/local model route.
+
+These are planned capabilities, not implemented features. They must reuse the existing CRM, proposal, invoice, payment-receipt, approval, execution, audit and outbox foundations. The OS remains the only business control plane. Do not add a parallel Hermes/CRM/accounting/workflow stack or claim local-only processing without end-to-end data-flow and egress verification. File/RAG ingestion, auto-send, meeting recording, bank matching and local inference remain gated by the security and lifecycle prerequisites in the design document.
+
 ## Other systems
 
 - Public agency website: separate application; signed, idempotent server-to-server lead intake is implemented in both repositories and merged to main (website PR #30; OS endpoint already merged). It remains disabled until external configuration and end-to-end validation.
