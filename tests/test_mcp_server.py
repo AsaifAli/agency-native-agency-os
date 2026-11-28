@@ -417,3 +417,113 @@ def test_streamable_http_mcp_supports_founder_scoped_service_identity_draft_hand
     assert invoked["tool_key"] == "revenue.lead.research.capture"
     assert invoked["max_calls_per_session"] == 20
     assert invoked["allowed_tool_keys"] == {"revenue.lead.research.capture"}
+
+
+def test_modern_stateless_mcp_protocol_discovery_list_and_call(monkeypatch):
+    """2026-07-28 clients must work without initialize or protocol session IDs."""
+    from contextlib import asynccontextmanager
+    from fastapi import FastAPI
+    from mcp.shared.inbound import (
+        MCP_METHOD_HEADER,
+        MCP_NAME_HEADER,
+        MCP_PROTOCOL_VERSION_HEADER,
+    )
+    from mcp_types import (
+        CLIENT_CAPABILITIES_META_KEY,
+        CLIENT_INFO_META_KEY,
+        PROTOCOL_VERSION_META_KEY,
+    )
+
+    identity = SimpleNamespace(
+        id="identity-modern", org_id="org-1", workspace_id="workspace-1",
+        subject_type="service",
+        scopes=["tools:invoke", "sessions:create", "tool:system.health.read"],
+        allowed_data_classes=["public"],
+    )
+    principal = SimpleNamespace(identity=identity)
+    session = SimpleNamespace(id=SESSION_ID, data_class="public")
+    context = mcp_server.MachineIdentitySessionContext(
+        org_id="org-1", workspace_id="workspace-1",
+        machine_identity_id="identity-modern", session_id=SESSION_ID,
+        token_hash="b" * 64,
+    )
+    monkeypatch.setattr(
+        mcp_server, "authenticate_machine_session",
+        lambda _db, _auth, _session_id: context,
+    )
+    monkeypatch.setattr(
+        mcp_server, "load_mcp_session_context",
+        lambda _db, _context: (principal, session),
+    )
+    monkeypatch.setattr(mcp_server, "invoke_registered_tool", lambda *_a, **_kw: {
+        "result": {"status": "ok"}
+    })
+    monkeypatch.setattr(
+        mcp_server, "_visible_mcp_specs",
+        lambda *_a, **_kw: [mcp_server.get_tool("system.health.read")],
+    )
+    config = SimpleNamespace(
+        agency_mcp_enabled=True,
+        agency_mcp_enabled_tool_keys="system.health.read",
+        agency_mcp_public_base_url="https://mcp.example.test",
+        agency_mcp_max_concurrent_requests=2,
+        agency_mcp_max_request_body_bytes=65536,
+        agency_mcp_requests_per_minute=30,
+    )
+    server, _mcp_app, wrapped = mcp_server.create_mcp_gateway(
+        config=config, session_factory=FakeDB
+    )
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        async with server.session_manager.run():
+            yield
+
+    host_app = FastAPI(lifespan=lifespan)
+    host_app.mount("/mcp", wrapped)
+    base_headers = {
+        "Authorization": "Bearer aos_mi_service-test",
+        "Origin": "https://mcp.example.test",
+        "Accept": "application/json",
+        MCP_PROTOCOL_VERSION_HEADER: "2026-07-28",
+    }
+    meta = {
+        PROTOCOL_VERSION_META_KEY: "2026-07-28",
+        CLIENT_CAPABILITIES_META_KEY: {"extensions": {}},
+        CLIENT_INFO_META_KEY: {"name": "agency-os-modern-test", "version": "1"},
+    }
+
+    with TestClient(host_app, base_url="https://mcp.example.test") as client:
+        discovered = client.post(
+            f"/mcp/{SESSION_ID}",
+            headers={**base_headers, MCP_METHOD_HEADER: "server/discover"},
+            json={"jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": {"_meta": meta}},
+        )
+        assert discovered.status_code == 200
+        assert discovered.json()["result"]
+        assert "Mcp-Session-Id" not in discovered.headers
+
+        listed = client.post(
+            f"/mcp/{SESSION_ID}",
+            headers={**base_headers, MCP_METHOD_HEADER: "tools/list"},
+            json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {"_meta": meta}},
+        )
+        assert listed.status_code == 200
+        assert [tool["name"] for tool in listed.json()["result"]["tools"]] == ["system.health.read"]
+        assert "Mcp-Session-Id" not in listed.headers
+
+        called = client.post(
+            f"/mcp/{SESSION_ID}",
+            headers={
+                **base_headers,
+                MCP_METHOD_HEADER: "tools/call",
+                MCP_NAME_HEADER: "system.health.read",
+            },
+            json={
+                "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                "params": {"name": "system.health.read", "arguments": {}, "_meta": meta},
+            },
+        )
+        assert called.status_code == 200
+        assert called.json()["result"]["content"][0]["text"] == '{"status":"ok"}'
+        assert "Mcp-Session-Id" not in called.headers
