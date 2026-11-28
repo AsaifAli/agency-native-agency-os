@@ -526,7 +526,7 @@ def test_worker_public_table_grants_are_least_privilege():
     }
     expected_insert = {
         "audit_events", "executions",
-        "lead_research_drafts", "tool_invocations",
+        "lead_research_drafts", "machine_session_credentials", "tool_invocations",
     }
     expected_update = {
         "agent_sessions", "delegations", "execution_attempts",
