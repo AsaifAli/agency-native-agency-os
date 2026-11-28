@@ -14,6 +14,14 @@ type Block = { id: string; contact_id: string; channel: string; status: string; 
 type Consent = { id: string; contact_id: string; channel: string; status: string; recorded_at: string };
 type Approval = { id: string; workspace_id: string; action_type: string; resource_id: string; status: string; request_payload: Record<string, unknown>; consumed_at: string | null };
 function contactLabel(item: Contact) { return [item.first_name,item.last_name].filter(Boolean).join(" ") + " · " + item.email; }
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return "["+value.map(stableJson).join(",")+"]";
+  if (value && typeof value === "object") {
+    const entries=Object.entries(value as Record<string,unknown>).sort(([a],[b])=>a.localeCompare(b));
+    return "{"+entries.map(([key,item])=>JSON.stringify(key)+":"+stableJson(item)).join(",")+"}";
+  }
+  return JSON.stringify(value) ?? "null";
+}
 
 export default function OutreachPage() {
   const [workspaces,setWorkspaces] = useState<Workspace[]>([]);
@@ -109,7 +117,7 @@ export default function OutreachPage() {
   }
 
   async function requestOrFindApproval(resourceId:string,requestPayload:Record<string,unknown>):Promise<string|null> {
-    const matches=approvals.filter(item=>item.action_type==="external_communication.sensitive"&&item.resource_id===resourceId&&JSON.stringify(item.request_payload)===JSON.stringify(requestPayload));
+    const matches=approvals.filter(item=>item.action_type==="external_communication.sensitive"&&item.resource_id===resourceId&&stableJson(item.request_payload)===stableJson(requestPayload));
     const approved=matches.find(item=>item.status==="approved"&&!item.consumed_at);
     if(approved)return approved.id;
     if(matches.some(item=>item.status==="pending")){
