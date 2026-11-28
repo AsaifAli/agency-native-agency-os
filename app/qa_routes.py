@@ -16,7 +16,7 @@ from app.audit import record_event
 from app.db import get_db
 from app.data_protection import DataProtectionBlocked, sanitize_text
 from app.domain_models import Milestone, Project, QAIssue
-from app.models import EvaluationRun, Membership, Role, Task, WorkspaceGrant
+from app.models import AuditEvent, EvaluationRun, Membership, Role, Task, WorkspaceGrant
 
 
 router = APIRouter(prefix="/v1/orgs/{org_id}/qa", tags=["quality-assurance"])
@@ -77,6 +77,15 @@ class QAIssueOut(BaseModel):
     created_by_user_id: str
     created_at: datetime
     updated_at: datetime
+
+
+class QAIssueHistoryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    event_type: str
+    actor_user_id: str | None
+    payload: dict
+    created_at: datetime
 
 
 def _authorize(org_id: str, workspace_id: str, p: Principal, db: Session, *, write: bool):
@@ -269,3 +278,32 @@ def transition_qa_issue(
     db.commit()
     db.refresh(issue)
     return issue
+
+
+@router.get("/issues/{issue_id}/history", response_model=list[QAIssueHistoryOut])
+def list_qa_issue_history(
+    org_id: str,
+    issue_id: str,
+    workspace_id: str = Query(min_length=1),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    p: Principal = Depends(get_principal),
+):
+    _authorize(org_id, workspace_id, p, db, write=False)
+    issue = db.query(QAIssue.id).filter_by(
+        id=issue_id, org_id=org_id, workspace_id=workspace_id,
+    ).first()
+    if issue is None:
+        raise HTTPException(404, "QA issue not found")
+    return (
+        db.query(AuditEvent)
+        .filter_by(
+            org_id=org_id,
+            workspace_id=workspace_id,
+            resource_type="qa_issue",
+            resource_id=issue_id,
+        )
+        .order_by(AuditEvent.created_at.asc(), AuditEvent.id.asc())
+        .limit(limit)
+        .all()
+    )
