@@ -43,7 +43,7 @@ Lease renewal is implemented, but handlers remain disabled until all remaining a
 2. Python handlers are not forcibly interrupted when ownership is lost. They may finish, but must not acknowledge or mutate outbox state after losing ownership.
 3. Implemented: renew only when the event is still `processing`, the claimant and claim-generation attempt count match, and the current lease has not already expired.
 4. Implemented: use an independent session for renewal; stop the heartbeat on handler completion/failure and always perform an authoritative ownership check before acknowledgement/failure persistence.
-5. SQLite tests cover a long handler; PostgreSQL tests cover stale-generation renewal refusal and process crash/reclaim. A PostgreSQL long-handler renewal race is still required.
+5. SQLite and PostgreSQL tests cover long-handler renewal; PostgreSQL tests also cover stale-generation renewal refusal and process crash/reclaim.
 6. Retain consumer-side idempotency. Lease renewal reduces duplicate work; it does not create exactly-once delivery.
 
 ## Operational visibility acceptance
