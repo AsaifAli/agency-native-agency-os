@@ -10,6 +10,10 @@ type EvaluationRun = {
   id: string; task_id: string | null; pack_name: string; score: number;
   passed: boolean; evidence_trust: string; release_eligible: boolean; created_at: string;
 };
+type QAIssueHistory = {
+  id: string; event_type: string; actor_user_id: string | null;
+  payload: Record<string, unknown>; created_at: string;
+};
 type QAIssue = {
   id: string; workspace_id: string; project_id: string; task_id: string;
   title: string; description: string; severity: string; status: string;
@@ -23,14 +27,19 @@ const nextStep: Record<string, string> = {
   open: "triaged", triaged: "in_progress", in_progress: "fixed", fixed: "retest",
 };
 
-function QAIssueCard({ issue, evaluations, onTransition }: {
+function QAIssueCard({ issue, evaluations, workspaceId, onTransition }: {
   issue: QAIssue;
   evaluations: EvaluationRun[];
+  workspaceId: string;
   onTransition: (issue: QAIssue, status: string, evaluationId?: string, note?: string) => Promise<void>;
 }) {
   const [evaluationId, setEvaluationId] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [history, setHistory] = useState<QAIssueHistory[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [historyError, setHistoryError] = useState("");
   const eligibleRuns = evaluations.filter(run =>
     run.task_id === issue.task_id &&
     !!issue.fixed_at &&
@@ -45,6 +54,23 @@ function QAIssueCard({ issue, evaluations, onTransition }: {
     setBusy(true);
     try { await onTransition(issue, status, runId, note); setNote(""); setEvaluationId(""); }
     finally { setBusy(false); }
+  }
+
+  async function toggleHistory() {
+    if (!historyLoaded) {
+      try {
+        const rows = await api<QAIssueHistory[]>(
+          `/v1/orgs/${orgId()}/qa/issues/${issue.id}/history?workspace_id=${encodeURIComponent(workspaceId)}`
+        );
+        setHistory(rows);
+        setHistoryLoaded(true);
+        setHistoryError("");
+      } catch (error) {
+        setHistoryError((error as Error).message);
+        return;
+      }
+    }
+    setHistoryOpen(value => !value);
   }
 
   return (
@@ -93,6 +119,30 @@ function QAIssueCard({ issue, evaluations, onTransition }: {
         </>}
       </div>}
       {issue.closed_at && <div className="activity-meta" style={{ marginTop: 12 }}>Closed {new Date(issue.closed_at).toLocaleString()}</div>}
+      <div style={{ marginTop: 14 }}>
+        <button type="button" className="button secondary" onClick={() => void toggleHistory()}>
+          {historyOpen ? "Hide audit history" : "Show audit history"}
+        </button>
+        {historyError && <div className="error" role="alert">{historyError}</div>}
+        {historyOpen && <div className="activity" style={{ marginTop: 12 }}>
+          {history.map(event => {
+            const payload = event.payload;
+            const transition = payload.from_status && payload.to_status
+              ? `${String(payload.from_status).replaceAll("_", " ")} → ${String(payload.to_status).replaceAll("_", " ")}`
+              : String(payload.status || "Issue recorded");
+            return <div className="activity-row" key={event.id}>
+              <span className="activity-dot" />
+              <div>
+                <div className="activity-title">{event.event_type.replaceAll("_", " ")} · {transition}</div>
+                <div className="activity-meta">{new Date(event.created_at).toLocaleString()} · {event.actor_user_id || "System"}</div>
+                {typeof payload.note === "string" && payload.note && <div className="activity-meta">{payload.note}</div>}
+                {typeof payload.retest_evaluation_run_id === "string" && <div className="activity-meta">Retest evaluation: {payload.retest_evaluation_run_id} · {String(payload.retest_evidence_trust || "trust not recorded")}</div>}
+              </div>
+            </div>;
+          })}
+          {!history.length && <div className="empty">No audit events found.</div>}
+        </div>}
+      </div>
     </article>
   );
 }
@@ -224,7 +274,7 @@ export default function QAPage() {
       </div>
       <div style={{ height: 16 }} />
       <div style={{ display: "grid", gap: 16 }}>
-        {issues.map(issue => <QAIssueCard key={issue.id} issue={issue} evaluations={evaluations} onTransition={transition} />)}
+        {issues.map(issue => <QAIssueCard key={issue.id} issue={issue} evaluations={evaluations} workspaceId={workspaceId} onTransition={transition} />)}
         {!issues.length && <div className="panel empty">No QA issues recorded in this workspace.</div>}
       </div>
     </Page>
