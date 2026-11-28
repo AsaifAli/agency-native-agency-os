@@ -91,12 +91,11 @@ def test_forged_workspace_gucs_do_not_authorize_worker_reads():
             )
             db.rollback()
     finally:
+        # Keep fixture principals/workspaces: append-only audit rows may reference them.
+        # This CI database is disposable and each fixture uses a unique suffix.
         with Admin() as db:
             db.execute(text("DELETE FROM public.tasks WHERE org_id = :org"), {"org": org.id})
             db.execute(text("DELETE FROM public.agents WHERE org_id = :org"), {"org": org.id})
-            db.execute(text("DELETE FROM public.workspaces WHERE org_id = :org"), {"org": org.id})
-            db.execute(text("DELETE FROM public.organizations WHERE id = :org"), {"org": org.id})
-            db.execute(text("DELETE FROM public.users WHERE id = :user"), {"user": user.id})
             db.commit()
         worker_engine.dispose()
         admin_engine.dispose()
@@ -432,9 +431,6 @@ def test_worker_claim_rpc_issues_a_live_workspace_bound_capability():
             db.execute(text("DELETE FROM public.machine_identities WHERE org_id = :org"), {"org": org.id})
             db.execute(text("DELETE FROM public.tasks WHERE org_id = :org"), {"org": org.id})
             db.execute(text("DELETE FROM public.agents WHERE org_id = :org"), {"org": org.id})
-            db.execute(text("DELETE FROM public.workspaces WHERE org_id = :org"), {"org": org.id})
-            db.execute(text("DELETE FROM public.organizations WHERE id = :org"), {"org": org.id})
-            db.execute(text("DELETE FROM public.users WHERE id = :user"), {"user": user.id})
             db.commit()
         worker_engine.dispose()
         admin_engine.dispose()
@@ -505,7 +501,6 @@ def test_worker_processor_completes_execution_end_to_end_with_capability(monkeyp
             assert capability_state is not None, "Terminal execution must revoke its capability"
     finally:
         with Admin() as db:
-            db.execute(text("DELETE FROM public.audit_events WHERE org_id = :org"), {"org": org.id})
             db.execute(text("""
                 DELETE FROM public.execution_attempts
                 WHERE execution_id IN (
@@ -515,9 +510,6 @@ def test_worker_processor_completes_execution_end_to_end_with_capability(monkeyp
             db.execute(text("DELETE FROM public.executions WHERE org_id = :org"), {"org": org.id})
             db.execute(text("DELETE FROM public.tasks WHERE org_id = :org"), {"org": org.id})
             db.execute(text("DELETE FROM public.agents WHERE org_id = :org"), {"org": org.id})
-            db.execute(text("DELETE FROM public.workspaces WHERE org_id = :org"), {"org": org.id})
-            db.execute(text("DELETE FROM public.organizations WHERE id = :org"), {"org": org.id})
-            db.execute(text("DELETE FROM public.users WHERE id = :user"), {"user": user.id})
             db.commit()
         worker_engine.dispose()
         admin_engine.dispose()
