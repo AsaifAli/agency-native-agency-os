@@ -131,6 +131,57 @@ def _revoke_identity(client, identity_id):
     )
 
 
+
+@pytest.mark.parametrize(
+    ("agent_enabled", "member_status"),
+    [(False, "active"), (True, "paused"), (True, "retired")],
+)
+def test_agent_machine_identity_authentication_requires_live_agent_and_member(
+    security_client, agent_enabled, member_status
+):
+    from fastapi import HTTPException
+    from app.machine_identity import issue_machine_credential
+    from app.models import Agent, DataClass
+    from app.workforce_models import WorkforceMember
+
+    secret, digest, prefix = issue_machine_credential()
+    agent_id = f"lifecycle-agent-{uuid.uuid4().hex}"
+    db = security_client.factory()
+    try:
+        agent = Agent(
+            id=agent_id, org_id=security_client.org_id,
+            workspace_id=security_client.workspace_id,
+            name="Lifecycle Test Agent", department="Engineering",
+            instructions="Synthetic lifecycle test", runtime="mock",
+            data_class=DataClass.synthetic, enabled=agent_enabled,
+        )
+        member = WorkforceMember(
+            org_id=security_client.org_id, workspace_id=security_client.workspace_id,
+            agent_id=agent_id, member_type="agent", name="Lifecycle Test Agent",
+            title="Test Agent", department_key="engineering",
+            responsibilities=["Synthetic lifecycle test"], autonomy_level=1,
+            status=member_status, is_founder_reserved=False,
+        )
+        identity = MachineIdentity(
+            org_id=security_client.org_id, workspace_id=security_client.workspace_id,
+            name="Lifecycle Test Credential", subject_type="agent", subject_id=agent_id,
+            token_hash=digest, token_prefix=prefix,
+            scopes=["sessions:create"], allowed_data_classes=["synthetic"],
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            created_by_user_id=security_client.founder.id,
+        )
+        db.add_all([agent, member, identity])
+        db.commit()
+
+        with pytest.raises(HTTPException) as exc:
+            authenticate_machine_token(
+                f"Bearer aos_mi_{identity.id}.{secret}", db
+            )
+        assert exc.value.status_code == 401
+    finally:
+        db.close()
+
+
 def test_machine_identity_approval_is_bound_to_exact_scopes_and_data_classes(security_client):
     payload = {
         "workspace_id": security_client.workspace_id,
