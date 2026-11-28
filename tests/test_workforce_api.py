@@ -445,6 +445,35 @@ def test_founder_can_enable_capability_activate_execute_and_pause_member(app_cli
     finally:
         db.close()
 
+    from app.machine_identity import (
+        authenticate_machine_token, create_agent_session, issue_machine_credential,
+    )
+    from app.security_models import MachineIdentity
+    secret, token_hash, token_prefix = issue_machine_credential()
+    db = app_client.factory()
+    try:
+        identity = MachineIdentity(
+            org_id=i["org"].id, workspace_id=i["workspace"].id,
+            name="Pause lifecycle test", subject_type="agent", subject_id=agent_id,
+            token_hash=token_hash, token_prefix=token_prefix,
+            scopes=["sessions:create"], allowed_data_classes=["synthetic"],
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            created_by_user_id=i["user"].id,
+        )
+        db.add(identity)
+        db.flush()
+        principal = authenticate_machine_token(
+            f"Bearer aos_mi_{identity.id}.{secret}", db
+        )
+        session = create_agent_session(
+            db, principal, purpose="Pause lifecycle test",
+            data_class="synthetic", ttl_seconds=300,
+        )
+        identity_id, session_id = identity.id, session.id
+        db.commit()
+    finally:
+        db.close()
+
     paused = app_client.post(
         f"/v1/orgs/{i['org'].id}/workforce/{member_id}/pause",
         params={"workspace_id": i["workspace"].id},
@@ -459,6 +488,10 @@ def test_founder_can_enable_capability_activate_execute_and_pause_member(app_cli
         assert member.status == "paused"
         assert agent.enabled is False
         assert grant.enabled is False
+        from app.security_models import AgentSession
+        session = db.query(AgentSession).filter_by(id=session_id).one()
+        assert session.status == "cancelled"
+        assert session.ended_at is not None
     finally:
         db.close()
 
