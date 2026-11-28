@@ -2136,16 +2136,17 @@ def test_abandoned_managed_agent_session_usage_is_reconciled_idempotently(worker
 
     class Runtime:
         calls = 0
+        usage = {
+            "input_tokens": 31,
+            "output_tokens": 12,
+            "list_cost_minor": 9,
+            "currency": "USD",
+        }
 
         def fetch_idle_session_usage(self, session_id):
             self.calls += 1
             assert session_id == "sesn_reconcile"
-            return {
-                "input_tokens": 31,
-                "output_tokens": 12,
-                "list_cost_minor": 9,
-                "currency": "USD",
-            }
+            return self.usage
 
     runtime = Runtime()
     session_factory = sessionmaker(bind=db.get_bind(), autoflush=False, autocommit=False)
@@ -2174,8 +2175,28 @@ def test_abandoned_managed_agent_session_usage_is_reconciled_idempotently(worker
         runtime=runtime,
         limit=5,
     )
-    assert second == {"reconciled": 0, "pending": 0, "skipped": 0}
+    assert second == {"reconciled": 0, "pending": 0, "skipped": 1}
     assert runtime.calls == 1
+
+    # A later idle snapshot is cumulative and may have increased after the
+    # earlier idle point. Refresh it rather than freezing the first snapshot.
+    runtime.usage = {
+        "input_tokens": 44,
+        "output_tokens": 19,
+        "list_cost_minor": 12,
+        "currency": "USD",
+    }
+    third = reconcile_abandoned_managed_agent_usage(
+        session_factory,
+        runtime=runtime,
+        limit=5,
+        now=datetime.now(timezone.utc) + timedelta(seconds=301),
+    )
+    assert third == {"reconciled": 1, "pending": 0, "skipped": 0}
+    db.expire_all()
+    assert db.get(ExecutionAttempt, attempt.id).result["usage"]["list_cost_minor"] == 12
+    assert db.get(Execution, execution.id).result["usage"]["list_cost_minor"] == 12
+    assert runtime.calls == 2
 
 
 def test_non_idle_managed_agent_usage_reconciliation_is_deferred(worker_context):
