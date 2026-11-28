@@ -1286,3 +1286,60 @@ def test_tool_gateway_enforces_machine_scope_allowlist_default_limit_and_idempot
         assert disallowed.value.status_code == 403
     finally:
         db.close()
+
+
+
+def test_session_credential_is_bound_to_one_active_agent_session_and_hash_only(security_client):
+    from app.session_credentials import issue_session_credential
+    from app.security_models import MachineSessionCredential
+
+    issued = _create_identity(security_client)
+    db = security_client.factory()
+    try:
+        principal = authenticate_machine_token("Bearer " + issued["token"], db)
+        session = create_agent_session(
+            db, principal, purpose="Claude MCP session", data_class="public", ttl_seconds=600
+        )
+        db.commit()
+        credential = issue_session_credential(
+            db, principal, session_id=session.id, ttl_seconds=300
+        )
+        assert credential.token.startswith("aos_ms_")
+        row = db.query(MachineSessionCredential).filter_by(id=credential.credential_id).one()
+        assert credential.token.rsplit(".", 1)[1] not in row.token_hash
+        assert row.session_id == session.id
+        assert row.machine_identity_id == principal.identity.id
+        assert row.expires_at <= session.expires_at
+    finally:
+        db.close()
+
+
+def test_session_credential_authentication_rejects_wrong_token_and_revoked_session(security_client):
+    from app.session_credentials import issue_session_credential, authenticate_session_credential
+
+    issued = _create_identity(security_client)
+    db = security_client.factory()
+    try:
+        principal = authenticate_machine_token("Bearer " + issued["token"], db)
+        session = create_agent_session(
+            db, principal, purpose="Claude MCP session", data_class="public", ttl_seconds=600
+        )
+        db.commit()
+        credential = issue_session_credential(
+            db, principal, session_id=session.id, ttl_seconds=300
+        )
+        context = authenticate_session_credential(
+            db, "Bearer " + credential.token
+        )
+        assert context.session_id == session.id
+        assert context.machine_identity_id == principal.identity.id
+        with pytest.raises(Exception):
+            authenticate_session_credential(
+                db, "Bearer " + credential.token[:-1] + "x"
+            )
+        session.status = "cancelled"
+        db.commit()
+        with pytest.raises(Exception):
+            authenticate_session_credential(db, "Bearer " + credential.token)
+    finally:
+        db.close()
