@@ -200,7 +200,7 @@ def _acknowledge(session_factory, *, message: OutboxMessage, worker_id: str) -> 
 def _record_failure(
     session_factory, *, message: OutboxMessage, worker_id: str,
     error: Exception, base_retry_seconds: int, max_retry_seconds: int,
-) -> None:
+) -> bool:
     with session_factory() as db:
         row = db.query(OutboxEvent).filter(OutboxEvent.id == message.id).with_for_update().one_or_none()
         if (
@@ -210,7 +210,7 @@ def _record_failure(
             or not _lease_is_active(row)
         ):
             # The lease expired or ownership changed; stale workers cannot mutate it.
-            return
+            return False
         row.last_error = _safe_error(error)
         row.claimed_by = None
         row.lease_expires_at = None
@@ -226,6 +226,7 @@ def _record_failure(
             row.status = "pending"
             row.available_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
         db.commit()
+        return True
 
 
 def dispatch_outbox_batch(
@@ -265,11 +266,13 @@ def dispatch_outbox_batch(
             # A stale worker must not overwrite a newer owner's state.
             continue
         except Exception as exc:
-            _record_failure(
+            recorded = _record_failure(
                 session_factory, message=message, worker_id=worker_id,
                 error=exc, base_retry_seconds=base_retry_seconds,
                 max_retry_seconds=max_retry_seconds,
             )
+            if not recorded:
+                continue
             # Count based on the persisted state, not the exception type.
             with session_factory() as db:
                 row = db.query(OutboxEvent).filter_by(id=message.id).one_or_none()
