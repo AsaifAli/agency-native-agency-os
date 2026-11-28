@@ -205,7 +205,57 @@ def upgrade() -> None:
         FROM PUBLIC
     """)
     op.execute("""
-        GRANT EXECUTE ON FUNCTION agency_os_private.authenticate_mcp_session_credential(text, text, integer)
+        CREATE OR REPLACE FUNCTION agency_os_private.is_mcp_session_credential_active(
+            p_credential_id text,
+            p_token_hash text,
+            p_org_id text,
+            p_workspace_id text,
+            p_machine_identity_id text,
+            p_session_id text
+        ) RETURNS boolean
+        LANGUAGE sql
+        STABLE
+        SECURITY DEFINER
+        SET search_path = pg_catalog, public, agency_os_private
+        AS $function$
+            SELECT EXISTS (
+                SELECT 1
+                FROM public.machine_session_credentials AS cred
+                JOIN public.machine_identities AS mi
+                  ON mi.id = cred.machine_identity_id
+                 AND mi.org_id = cred.org_id
+                 AND mi.workspace_id = cred.workspace_id
+                JOIN public.agent_sessions AS s
+                  ON s.id = cred.session_id
+                 AND s.org_id = cred.org_id
+                 AND s.workspace_id = cred.workspace_id
+                 AND s.machine_identity_id = mi.id
+                WHERE cred.id = p_credential_id
+                  AND cred.token_hash = p_token_hash
+                  AND cred.org_id = p_org_id
+                  AND cred.workspace_id = p_workspace_id
+                  AND cred.machine_identity_id = p_machine_identity_id
+                  AND cred.session_id = p_session_id
+                  AND cred.revoked_at IS NULL
+                  AND cred.expires_at > clock_timestamp()
+                  AND mi.revoked_at IS NULL
+                  AND mi.expires_at > clock_timestamp()
+                  AND s.status = 'active'
+                  AND s.expires_at > clock_timestamp()
+                  AND s.data_class IN ('synthetic', 'public')
+            )
+        $function$
+    """)
+    op.execute("""
+        ALTER FUNCTION agency_os_private.is_mcp_session_credential_active(text, text, text, text, text, text)
+        OWNER TO agency_os_migrator
+    """)
+    op.execute("""
+        REVOKE ALL ON FUNCTION agency_os_private.is_mcp_session_credential_active(text, text, text, text, text, text)
+        FROM PUBLIC
+    """)
+    op.execute("""
+        GRANT EXECUTE ON FUNCTION agency_os_private.is_mcp_session_credential_active(text, text, text, text, text, text)
         TO agency_os_app
     """)
 
