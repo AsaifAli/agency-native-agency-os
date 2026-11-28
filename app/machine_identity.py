@@ -46,7 +46,7 @@ def _require_enabled_agent_subject(db: Session, identity: MachineIdentity) -> No
         id=identity.subject_id,
         org_id=identity.org_id,
         workspace_id=identity.workspace_id,
-    ).first()
+    ).with_for_update().first()
     if agent is None or not agent.enabled:
         raise HTTPException(401, "Agent machine identity is no longer active")
 
@@ -61,7 +61,7 @@ def _require_active_agent_workforce_member(db: Session, identity: MachineIdentit
         org_id=identity.org_id,
         workspace_id=identity.workspace_id,
         agent_id=identity.subject_id,
-    ).all()
+    ).with_for_update().all()
     if (
         len(members) != 1
         or members[0].status != "active"
