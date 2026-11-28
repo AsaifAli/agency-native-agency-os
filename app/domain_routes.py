@@ -227,7 +227,7 @@ def create_lead(
     # Serialize duplicate checks per workspace so concurrent lead creation cannot
     # both pass the check before either transaction commits.
     db.query(Workspace).filter_by(id=body.workspace_id, org_id=org_id).with_for_update().first()
-    normalized_email = (body.email or (contact.email if contact else "")).lower().strip()
+    normalized_email = (body.email.strip() or (contact.email if contact else "")).lower().strip()
     candidate_emails = {
         value.lower().strip()
         for value in (body.email, contact.email if contact else "")
