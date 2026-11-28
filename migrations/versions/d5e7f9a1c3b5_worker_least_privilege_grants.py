@@ -29,7 +29,6 @@ SELECT_TABLES = (
 )
 
 INSERT_TABLES = (
-    "agent_sessions",
     "audit_events",
     "executions",
     "lead_research_drafts",
