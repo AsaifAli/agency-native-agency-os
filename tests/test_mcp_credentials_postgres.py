@@ -416,15 +416,8 @@ def test_service_identity_mcp_credential_uses_narrow_database_capabilities():
             assert credential.revoked_at is not None
             assert credential.provider_credential_id is None
     finally:
-        with Admin() as db:
-            if credential_id:
-                db.query(MachineSessionCredential).filter_by(id=credential_id).delete(synchronize_session=False)
-            if session_id:
-                db.query(AgentSession).filter_by(id=session_id).delete(synchronize_session=False)
-            db.query(MachineIdentity).filter_by(id=identity_id).delete(synchronize_session=False)
-            db.query(Workspace).filter(Workspace.id == f"mcp-service-ws-{suffix}").delete(synchronize_session=False)
-            db.query(User).filter(User.id == user.id).delete(synchronize_session=False)
-            db.query(Organization).filter(Organization.id == org.id).delete(synchronize_session=False)
-            db.commit()
+        # audit_events are append-only and retain workspace references by design.
+        # The CI PostgreSQL database is disposable; keep this unique synthetic
+        # fixture rather than violating the audit retention boundary in cleanup.
         app_engine.dispose()
         admin_engine.dispose()
