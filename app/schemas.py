@@ -71,6 +71,7 @@ class ApprovalOut(BaseModel):
     requested_by: str
     decision_note: str
     created_at: datetime
+    consumed_at: datetime | None = None
 
 
 class EvaluationCreate(BaseModel):
