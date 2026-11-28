@@ -9,7 +9,7 @@ from app.auth import Principal, get_principal
 from app.db import Base, get_db, set_rls_context
 from app.domain_routes import router
 from app.models import EvaluationRun, FounderAuthority, Membership, Organization, Role, User, Workspace, WorkspaceGrant
-from app.domain_models import Client
+from app.domain_models import Client, Lead, Project
 import app.domain_models  # noqa: F401
 
 
@@ -731,3 +731,62 @@ def test_outcome_measurement_links_only_a_milestone_from_its_own_project(client)
         headers=auth(), json={**payload, "milestone_id": milestones[1]},
     )
     assert cross_project.status_code == 404
+
+def test_same_org_ungranted_workspace_objects_are_hidden_and_immutable(client):
+    db = client.testing_session_factory()
+    try:
+        private_workspace = Workspace(
+            org_id=client.org_id,
+            name="Same organization, no grant",
+        )
+        db.add(private_workspace)
+        db.flush()
+        lead = Lead(
+            org_id=client.org_id,
+            workspace_id=private_workspace.id,
+            company_name="Restricted prospect",
+            created_by=client.user_id,
+        )
+        project = Project(
+            org_id=client.org_id,
+            workspace_id=private_workspace.id,
+            name="Restricted project",
+            owner_user_id=client.user_id,
+        )
+        db.add_all([lead, project])
+        db.commit()
+        lead_id, project_id, private_workspace_id = lead.id, project.id, private_workspace.id
+    finally:
+        db.close()
+
+    # The caller is an organization owner, but has no grant to this second
+    # workspace. Knowing same-organization object IDs must not bypass the grant.
+    hidden_lead = client.patch(
+        f"/v1/orgs/{client.org_id}/leads/{lead_id}",
+        headers=auth(), json={"stage": "qualified"},
+    )
+    hidden_project = client.patch(
+        f"/v1/orgs/{client.org_id}/projects/{project_id}",
+        headers=auth(), json={"status": "completed"},
+    )
+    hidden_research = client.get(
+        f"/v1/orgs/{client.org_id}/leads/{lead_id}/research",
+        headers=auth(), params={"workspace_id": private_workspace_id},
+    )
+    hidden_milestones = client.get(
+        f"/v1/orgs/{client.org_id}/projects/{project_id}/milestones",
+        headers=auth(), params={"workspace_id": private_workspace_id},
+    )
+
+    assert hidden_lead.status_code == 404
+    assert hidden_project.status_code == 404
+    assert hidden_research.status_code == 404
+    assert hidden_milestones.status_code == 404
+
+    db = client.testing_session_factory()
+    try:
+        assert db.query(Lead).filter_by(id=lead_id).one().stage == "new"
+        assert db.query(Project).filter_by(id=project_id).one().status == "planned"
+    finally:
+        db.close()
+
