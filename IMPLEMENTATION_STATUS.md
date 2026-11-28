@@ -13,7 +13,7 @@ This file describes the verified `main` baseline. The historical integration bra
 
 | Check | Recorded result | Qualification |
 |---|---|---|
-| Backend pytest + PostgreSQL 16 integration | <badge color="success">713 passed</badge> | Latest CI run [46171022293](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46171022293); includes outbox crash recovery, provider usage reconciliation and retry-session accounting tests. |
+| Backend pytest + PostgreSQL 16 integration | 713 passed | Latest CI run [46171022293](https://github.com/AsaifAli/agency-native-agency-os/actions/runs/46171022293); includes outbox crash recovery, provider usage reconciliation and retry-session accounting tests. |
 | Human tenant/workspace RLS | Passed in live PostgreSQL 16 CI | Dedicated `agency_os_test_app` NOBYPASSRLS login; cross-org/workspace access, grants/revocation and pooled-context behavior executed. |
 | Worker capability boundary | Passed in live PostgreSQL 16 CI | Actual `agency_os_worker` NOBYPASSRLS login; capability, forged-GUC, direct-table/function privilege and scope checks executed. |
 | Browser-session retention, orchestration-link RLS, outcome isolation and audit immutability | Passed in live PostgreSQL 16 CI | Previously skipped suites now execute; append-only evidence is preserved by fixtures. |
