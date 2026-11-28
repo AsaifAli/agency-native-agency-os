@@ -676,9 +676,10 @@ class ManagedAgentsRuntime(AgentRuntime):
                 raise RuntimeManualReviewRequired(
                     "Claude Managed Agents returned a malformed session snapshot."
                 )
-            # A running session's usage is still changing. Never persist it as a
-            # terminal recovery snapshot; the next bounded maintenance pass retries.
-            if session.get("status") != "idle":
+            # A running/rescheduling session's usage is still changing.
+            # Idle is the normal completion state; terminated is also final
+            # (for example, an archived or unrecoverable session).
+            if session.get("status") not in {"idle", "terminated"}:
                 return None
             events = self._list_events(client, session_id)
         # Session-level idle can coexist with an open dynamic workflow run.
