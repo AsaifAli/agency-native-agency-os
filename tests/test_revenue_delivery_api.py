@@ -679,3 +679,55 @@ def test_project_outcome_rejects_cross_workspace_parent_and_mismatched_acceptanc
         },
     )
     assert mismatch.status_code == 422
+
+
+
+def test_outcome_measurement_links_only_a_milestone_from_its_own_project(client):
+    org, ws = client.org_id, client.ws_id
+    projects = []
+    for name in ("Primary delivery", "Unrelated delivery"):
+        created = client.post(f"/v1/orgs/{org}/projects", headers=auth(), json={
+            "workspace_id": ws, "name": name,
+        })
+        assert created.status_code == 201, created.text
+        projects.append(created.json()["id"])
+
+    outcome = client.post(
+        f"/v1/orgs/{org}/projects/{projects[0]}/outcomes",
+        headers=auth(), json={
+            "workspace_id": ws, "title": "Improve workflow throughput",
+            "problem_statement": "Manual processing is slow and inconsistent.",
+            "desired_outcome": "Increase reliable workflow throughput.",
+            "metric_name": "Processed items", "metric_unit": "items per day",
+            "direction": "increase", "target_value": "100",
+            "measurement_method": "Count completed items over a full operating day.",
+            "acceptance_criteria": ["The workflow completes the agreed test cases."],
+        },
+    )
+    assert outcome.status_code == 201, outcome.text
+    milestones = []
+    for project_id in projects:
+        created = client.post(f"/v1/orgs/{org}/milestones", headers=auth(), json={
+            "workspace_id": ws, "project_id": project_id, "title": "QA verification",
+        })
+        assert created.status_code == 201, created.text
+        milestones.append(created.json()["id"])
+
+    payload = {
+        "workspace_id": ws, "value": "110", "source_type": "agency_measured",
+        "source_reference": "QA run evidence bundle",
+        "evidence_summary": "The measured throughput was recorded during the agreed QA window.",
+        "milestone_id": milestones[0],
+    }
+    linked = client.post(
+        f"/v1/orgs/{org}/outcomes/{outcome.json()['id']}/measurements",
+        headers=auth(), json=payload,
+    )
+    assert linked.status_code == 201, linked.text
+    assert linked.json()["milestone_id"] == milestones[0]
+
+    cross_project = client.post(
+        f"/v1/orgs/{org}/outcomes/{outcome.json()['id']}/measurements",
+        headers=auth(), json={**payload, "milestone_id": milestones[1]},
+    )
+    assert cross_project.status_code == 404
