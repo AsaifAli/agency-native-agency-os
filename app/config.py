@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     claude_managed_mcp_vault_id: str = ""
     claude_managed_mcp_enabled_tool_keys: str = ""
     claude_managed_mcp_requests_per_minute: int = Field(default=120, ge=1, le=1000)
+    # Anthropic currently limits each Vault to 20 credentials. Keep headroom
+    # for pending/manual-reconciliation credentials and serialize reservations in PostgreSQL.
+    claude_managed_mcp_max_active_credentials: int = Field(default=16, ge=1, le=20)
     claude_managed_mcp_max_concurrent_requests: int = Field(default=8, ge=1, le=64)
     claude_managed_mcp_max_request_body_bytes: int = Field(default=1048576, ge=1024, le=4194304)
 
