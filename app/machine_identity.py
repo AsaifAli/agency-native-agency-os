@@ -36,6 +36,40 @@ def issue_machine_credential() -> tuple[str, str, str]:
     secret = secrets.token_urlsafe(32)
     return secret, _token_digest(secret), TOKEN_PREFIX + secret[:8]
 
+def _require_enabled_agent_subject(db: Session, identity: MachineIdentity) -> None:
+    """Reject credentials whose bound Agent definition has been disabled."""
+    if identity.subject_type != "agent":
+        return
+    from app.models import Agent
+
+    agent = db.query(Agent).filter_by(
+        id=identity.subject_id,
+        org_id=identity.org_id,
+        workspace_id=identity.workspace_id,
+    ).first()
+    if agent is None or not agent.enabled:
+        raise HTTPException(401, "Agent machine identity is no longer active")
+
+
+def _require_active_agent_workforce_member(db: Session, identity: MachineIdentity) -> None:
+    """Require one active workforce owner before an agent can create a session."""
+    if identity.subject_type != "agent":
+        return
+    from app.workforce_models import WorkforceMember
+
+    members = db.query(WorkforceMember).filter_by(
+        org_id=identity.org_id,
+        workspace_id=identity.workspace_id,
+        agent_id=identity.subject_id,
+    ).all()
+    if (
+        len(members) != 1
+        or members[0].status != "active"
+        or members[0].is_founder_reserved
+    ):
+        raise HTTPException(403, "Agent has no single active workforce assignment")
+
+
 def authenticate_machine_token(authorization: str | None, db: Session) -> MachinePrincipal:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "Machine bearer token required")
@@ -53,8 +87,9 @@ def authenticate_machine_token(authorization: str | None, db: Session) -> Machin
         raise HTTPException(401, "Machine credential expired")
     if not hmac.compare_digest(identity.token_hash, _token_digest(secret)):
         raise HTTPException(401, "Invalid machine credential")
-    identity.last_used_at = _utcnow()
     set_rls_context(db, machine_org_id=identity.org_id, machine_workspace_id=identity.workspace_id, machine_identity_lookup_id=identity.id)
+    _require_enabled_agent_subject(db, identity)
+    identity.last_used_at = _utcnow()
     return MachinePrincipal(identity=identity)
 
 def get_machine_principal(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> MachinePrincipal:
@@ -68,12 +103,14 @@ def _lock_active_identity(db: Session, principal: MachinePrincipal) -> MachineId
     ).with_for_update().first()
     if identity is None or identity.revoked_at is not None or _as_utc(identity.expires_at) <= _utcnow():
         raise HTTPException(401, "Machine credential is no longer active")
+    _require_enabled_agent_subject(db, identity)
     return identity
 
 def create_agent_session(db: Session, principal: MachinePrincipal, *, purpose: str, data_class: str, ttl_seconds: int) -> AgentSession:
     # Serialize with founder revocation so a session cannot be created concurrently
     # after the identity has been revoked.
     identity = _lock_active_identity(db, principal)
+    _require_active_agent_workforce_member(db, identity)
     now = _utcnow()
     identity_expiry = _as_utc(identity.expires_at)
     if "sessions:create" not in identity.scopes:
