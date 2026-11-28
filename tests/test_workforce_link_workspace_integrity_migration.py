@@ -68,6 +68,9 @@ def _base_schema(engine, *, cross_workspace_member=False):
                 "(:id_b, 'org-a', 'workspace-b')"
             ), {"id_a": f"{table}-a", "id_b": f"{table}-b"})
         connection.execute(sa.text(
+            "INSERT INTO tasks (id, org_id, workspace_id) VALUES ('tasks-c', 'org-a', 'workspace-a')"
+        ))
+        connection.execute(sa.text(
             "INSERT INTO workforce_members "
             "(id, org_id, workspace_id, unit_id, manager_member_id, agent_id) "
             "VALUES ('member-a', 'org-a', 'workspace-a', 'workforce_units-a', NULL, 'agents-a'), "
@@ -107,7 +110,7 @@ def test_workforce_links_are_workspace_scoped_at_database_boundary():
         connection.execute(sa.text(
             "INSERT INTO delegations (id, org_id, workspace_id, parent_task_id, "
             "child_task_id, delegated_by_member_id, assigned_to_member_id) "
-            "VALUES ('delegation-a', 'org-a', 'workspace-a', 'tasks-a', 'tasks-b', "
+            "VALUES ('delegation-a', 'org-a', 'workspace-a', 'tasks-a', 'tasks-c', "
             "'member-a', 'member-a')"
         ))
 
