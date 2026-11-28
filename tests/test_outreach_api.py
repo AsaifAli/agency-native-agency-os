@@ -157,7 +157,6 @@ def _create_sender(client, email="hello@example.test", max_per_hour=10):
         sender = db.query(OutboundSender).filter_by(id=sender_id).one()
         payload = {
             "operation": "activate_outbound_sender", "sender_id": sender.id,
-            "display_name": sender.display_name, "email_address": sender.email_address,
             "max_per_hour": sender.max_per_hour, "max_per_day": sender.max_per_day,
         }
     finally:

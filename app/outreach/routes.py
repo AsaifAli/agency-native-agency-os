@@ -198,7 +198,6 @@ def update_sender_status(
             actor_user_id=p.user.id,
             expected_request_payload={
                 "operation": "activate_outbound_sender", "sender_id": item.id,
-                "display_name": item.display_name, "email_address": item.email_address,
                 "max_per_hour": item.max_per_hour, "max_per_day": item.max_per_day,
             },
         )
