@@ -373,6 +373,8 @@ def process_one_execution(
                     attempt_id=attempt_id,
                     worker_id=worker_id,
                     session_ttl_seconds=min(settings.claude_managed_timeout_seconds, 3600),
+                    provider_vault_id=settings.claude_managed_mcp_vault_id,
+                    max_active_vault_credentials=settings.claude_managed_mcp_max_active_credentials,
                 )
                 from app.session_credentials import (
                     load_provider_credential_info,
