@@ -620,3 +620,17 @@ def test_worker_public_table_grants_are_least_privilege():
             """)).one() == (True, False, True, False)
     finally:
         worker_engine.dispose()
+
+
+def test_worker_runtime_role_cannot_create_objects_in_public_schema():
+    engine = create_engine(WORKER_URL, pool_pre_ping=True)
+    try:
+        with engine.connect() as connection:
+            can_create, can_use = connection.execute(text(
+                "SELECT has_schema_privilege(current_user, 'public', 'CREATE'), "
+                "has_schema_privilege(current_user, 'public', 'USAGE')"
+            )).one()
+        assert can_create is False
+        assert can_use is True
+    finally:
+        engine.dispose()
