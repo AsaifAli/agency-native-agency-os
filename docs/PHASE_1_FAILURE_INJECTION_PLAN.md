@@ -1,7 +1,7 @@
 # Phase 1 — Failure-Injection Acceptance Plan
 
 **Verified code baseline:** `main` at `6d70292596beeea86eb778a09fa04faeed06305e` (2026-11-28).
-**Current posture:** lease ownership, generation fencing, long-handler renewal and synthetic crash-after-effect idempotency tests are implemented and CI-tested; the full failure-injection matrix and operational release gates remain incomplete.
+**Current posture:** lease ownership, generation fencing, long-handler renewal and synthetic crash-after-effect idempotency tests are implemented and CI-tested. Additional PostgreSQL process-crash tests now cover failure before handler start and failure after a handler exception but before retry-state persistence; those new tests are awaiting a non-cancelled CI run. The full failure-injection matrix and operational release gates remain incomplete.
 **Safety:** synthetic events and disposable PostgreSQL only. Never point these tests at a development, staging, or production database containing business data.
 
 ## Verified baseline
@@ -18,6 +18,7 @@ This confirms CI success for that commit. It does not establish a worker process
 - Outbox delivery now renews active leases from an independent session while a handler runs. Renewal is conditional on processing status, worker ID, claim-generation attempt count, and an unexpired current lease.
 - If renewal fails or ownership is reclaimed, the handler is not forcibly interrupted. Its eventual acknowledgement/failure is rejected by the authoritative ownership check. Any external side effect still requires consumer-side idempotency.
 - PostgreSQL coverage simulates a real subprocess crash after a synthetic consumer side effect commits but before acknowledgement. The event is reclaimed and the consumer replay uses a unique idempotency key; the test asserts exactly one effect. This is a database-backed test consumer, not a live external provider. The test is included in the 687-test passing CI run.
+- Additional PostgreSQL subprocess tests now inject process death after a claim commits but before the handler starts, and after a handler exception reaches the failure-persistence boundary but before retry state commits. These tests assert that the still-leased event is recovered after expiry and can be completed by a subsequent worker. Their current-head CI verification is pending; do not count them as passed yet.
 - Health summaries are workspace-scoped and payload-free. Alert delivery and metrics export are not yet implemented.
 
 ## Required failure-injection matrix
@@ -26,7 +27,7 @@ Run every case against a disposable PostgreSQL database with the same role separ
 
 | Case | Injection point | Required assertion |
 |---|---|---|
-| A | Kill worker after claim commit, before handler starts | Lease expires; event is reclaimed; one effect is recorded |
+| A | Kill worker after claim commit, before handler starts | Lease expires; event is reclaimed; event can be completed by the next worker |
 | B | Kill worker after consumer effect commits, before outbox acknowledgement | Event is redelivered; consumer deduplicates; exactly one effect is recorded |
 | C | Kill worker after handler raises, before failure state commits | Lease recovery eventually retries or dead-letters according to persisted attempt count |
 | D | Pause handler beyond lease expiry, start second worker | Stale worker cannot acknowledge or overwrite the new owner's state; consumer idempotency prevents duplicate effect |
