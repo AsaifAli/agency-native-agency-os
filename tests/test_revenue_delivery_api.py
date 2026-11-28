@@ -176,11 +176,13 @@ def test_lead_creation_rejects_reusing_same_contact(client):
     assert contact.status_code == 201, contact.text
     payload = {
         "workspace_id": ws, "company_name": "Contact-linked Prospect",
-        "contact_id": contact.json()["id"], "source": "referral",
+        "contact_id": contact.json()["id"], "email": "first-buyer@example.test",
+        "source": "referral",
     }
     first = client.post(f"/v1/orgs/{org}/leads", headers=auth(), json=payload)
     assert first.status_code == 201, first.text
-    duplicate = client.post(f"/v1/orgs/{org}/leads", headers=auth(), json=payload)
+    duplicate_payload = {**payload, "email": "different-buyer@example.test"}
+    duplicate = client.post(f"/v1/orgs/{org}/leads", headers=auth(), json=duplicate_payload)
     assert duplicate.status_code == 409
     assert "duplicate lead" in duplicate.json()["detail"].lower()
 
