@@ -108,7 +108,7 @@ class SessionPathAuthMiddleware:
         ):
             raise ValueError("Claude MCP public URL must be a public HTTPS origin")
         self.origin = f"https://{parsed.netloc}"
-        self.host = parsed.netloc.lower()
+        self.hosts = {parsed.netloc.lower(), f"{parsed.hostname.lower()}:443"}
         self.session_factory = session_factory
         self.requests_per_minute = requests_per_minute
         self.semaphore = semaphore or asyncio.Semaphore(
@@ -129,7 +129,7 @@ class SessionPathAuthMiddleware:
             key.decode("latin-1").lower(): value.decode("latin-1")
             for key, value in scope.get("headers", [])
         }
-        if headers.get("host", "").lower() != self.host:
+        if headers.get("host", "").lower() not in self.hosts:
             await PlainTextResponse("Misdirected request", status_code=421)(scope, receive, send)
             return
         origin = headers.get("origin")
@@ -290,7 +290,7 @@ def create_mcp_gateway(config=settings, session_factory=SessionLocal):
     )
     transport_security = TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
-        allowed_hosts=[parsed.netloc],
+        allowed_hosts=[parsed.hostname, f"{parsed.hostname}:*"],
         allowed_origins=[origin],
     )
     mcp_app = server.streamable_http_app(
