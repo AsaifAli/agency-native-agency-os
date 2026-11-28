@@ -45,11 +45,16 @@ jobs:
           cache-dependency-path: requirements.txt
       - name: Install backend dependencies
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
+      - name: Bootstrap isolated PostgreSQL test roles
+        env:
+          PGPASSWORD: agency_os_test_password
+        run: psql -h localhost -U agency_os -d agency_os_worker_test -v ON_ERROR_STOP=1 -f docker/postgres/test-init.sql
       - name: Validate migration graph
         run: alembic heads
       - name: Apply migrations to disposable PostgreSQL test database
         env:
-          DATABASE_URL: postgresql+psycopg://agency_os:agency_os_test_password@localhost:5432/agency_os_worker_test
+          DATABASE_URL: postgresql+psycopg://agency_os_migrator:local-only-test-migrator-password@localhost:5432/agency_os_worker_test
+          MIGRATION_DATABASE_URL: postgresql+psycopg://agency_os_migrator:local-only-test-migrator-password@localhost:5432/agency_os_worker_test
         run: alembic upgrade head
       - name: Compile Python source
         run: python -m compileall -q app migrations tests
