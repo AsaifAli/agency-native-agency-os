@@ -13,7 +13,7 @@ Claude Code is the primary engineering workbench for this repository. It is not 
 - Preserve working code; prefer a reviewed Markdown skill/instruction when it fully solves the need.
 - Add code only for deterministic enforcement, persistence, retrieval, authorization, lifecycle, integration or evaluation that Markdown cannot provide.
 - Use test-driven development for behavior changes. Documentation-only changes do not need artificial code tests, but must be checked for valid links, catalog consistency and contradictions.
-- Work on a dedicated feature branch. Do not push to or merge into `main` without the founder's explicit direction.
+- Use `main` as the single active working/integration branch for founder-authorized repository work. Do not create parallel feature branches or PRs unless the founder explicitly requests them. If an already-open branch/PR exists, inspect and resolve it before starting another workstream. Never force-push, bypass required CI, or treat a code merge as production-release approval.
 - Never claim a feature is live because an instruction, skill, role or provider setting exists.
 
 ## Agency domain
