@@ -455,9 +455,11 @@ def test_modern_stateless_mcp_protocol_discovery_list_and_call(monkeypatch):
         mcp_server, "load_mcp_session_context",
         lambda _db, _context: (principal, session),
     )
-    monkeypatch.setattr(mcp_server, "invoke_registered_tool", lambda *_a, **_kw: {
-        "result": {"status": "ok"}
-    })
+    invocations = []
+    def invoke_registered_tool(*_args, **_kwargs):
+        invocations.append(True)
+        return {"result": {"status": "ok"}}
+    monkeypatch.setattr(mcp_server, "invoke_registered_tool", invoke_registered_tool)
     monkeypatch.setattr(
         mcp_server, "_visible_mcp_specs",
         lambda *_a, **_kw: [mcp_server.get_tool("system.health.read")],
@@ -527,3 +529,28 @@ def test_modern_stateless_mcp_protocol_discovery_list_and_call(monkeypatch):
         assert called.status_code == 200
         assert called.json()["result"]["content"][0]["text"] == '{"status":"ok"}'
         assert "Mcp-Session-Id" not in called.headers
+
+        mismatched_method = client.post(
+            f"/mcp/{SESSION_ID}",
+            headers={**base_headers, MCP_METHOD_HEADER: "tools/list"},
+            json={
+                "jsonrpc": "2.0", "id": 4, "method": "tools/call",
+                "params": {"name": "system.health.read", "arguments": {}, "_meta": meta},
+            },
+        )
+        assert mismatched_method.status_code == 400
+
+        mismatched_name = client.post(
+            f"/mcp/{SESSION_ID}",
+            headers={
+                **base_headers,
+                MCP_METHOD_HEADER: "tools/call",
+                MCP_NAME_HEADER: "workspace.knowledge.search",
+            },
+            json={
+                "jsonrpc": "2.0", "id": 5, "method": "tools/call",
+                "params": {"name": "system.health.read", "arguments": {}, "_meta": meta},
+            },
+        )
+        assert mismatched_name.status_code == 400
+        assert len(invocations) == 1
