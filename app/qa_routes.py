@@ -295,7 +295,7 @@ def list_qa_issue_history(
     ).first()
     if issue is None:
         raise HTTPException(404, "QA issue not found")
-    return (
+    events = (
         db.query(AuditEvent)
         .filter_by(
             org_id=org_id,
@@ -303,7 +303,8 @@ def list_qa_issue_history(
             resource_type="qa_issue",
             resource_id=issue_id,
         )
-        .order_by(AuditEvent.created_at.asc(), AuditEvent.id.asc())
+        .order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc())
         .limit(limit)
         .all()
     )
+    return list(reversed(events))
