@@ -9,7 +9,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import sessionmaker
 
-from app.models import Agent, DataClass, Organization, User, Workspace
+from app.models import Agent, DataClass, Execution, ExecutionStatus, Organization, Task, User, Workspace
 from app.security_models import AgentSession, MachineIdentity, MachineSessionCredential
 
 ADMIN_URL = os.getenv("AGENCY_OS_TEST_RLS_ADMIN_DATABASE_URL")
@@ -66,6 +66,21 @@ def test_mcp_credential_hash_is_not_readable_and_auth_is_database_owned():
             )
             db.add(session)
             db.flush()
+            task = Task(
+                id=f"mcp-task-{suffix}", org_id=org.id, workspace_id=workspace.id,
+                title="MCP credential boundary test", created_by=user.id,
+            )
+            db.add(task)
+            db.flush()
+            execution = Execution(
+                id=f"mcp-exec-{suffix}", org_id=org.id, workspace_id=workspace.id,
+                task_id=task.id, agent_id=agent.id, requested_by=user.id,
+                idempotency_key=f"mcp-credential-{suffix}", runtime="claude_managed_agents",
+                data_class=DataClass.public, status=ExecutionStatus.running,
+                machine_session_id=session.id,
+            )
+            db.add(execution)
+            db.flush()
             credential = MachineSessionCredential(
                 id=credential_id, org_id=org.id, workspace_id=workspace.id,
                 machine_identity_id=identity.id, session_id=session.id,
@@ -103,6 +118,32 @@ def test_mcp_credential_hash_is_not_readable_and_auth_is_database_owned():
                 "workspace": expected[1], "identity": expected[2], "session": expected[3],
             }).scalar_one()
             assert active is True
+
+            with Admin() as db:
+                db.query(Execution).filter_by(id=f"mcp-exec-{suffix}").update(
+                    {"status": ExecutionStatus.paused}
+                )
+                db.commit()
+            paused_active = connection.execute(text("""
+                SELECT agency_os_private.is_mcp_session_credential_active(
+                    :id, :digest, :org, :workspace, :identity, :session
+                )
+            """), {
+                "id": credential_id, "digest": token_hash, "org": expected[0],
+                "workspace": expected[1], "identity": expected[2], "session": expected[3],
+            }).scalar_one()
+            assert paused_active is False
+            paused_auth = connection.execute(text("""
+                SELECT * FROM agency_os_private.authenticate_mcp_session_credential(
+                    :id, :digest, 120
+                )
+            """), {"id": credential_id, "digest": token_hash}).all()
+            assert paused_auth == []
+            with Admin() as db:
+                db.query(Execution).filter_by(id=f"mcp-exec-{suffix}").update(
+                    {"status": ExecutionStatus.running}
+                )
+                db.commit()
 
             invalid = connection.execute(text("""
                 SELECT auth_status FROM agency_os_private.authenticate_mcp_session_credential(
@@ -198,8 +239,10 @@ def test_mcp_credential_hash_is_not_readable_and_auth_is_database_owned():
     finally:
         with Admin() as db:
             db.query(MachineSessionCredential).filter_by(id=credential_id).delete(synchronize_session=False)
+            db.query(Execution).filter(Execution.id == f"mcp-exec-{suffix}").delete(synchronize_session=False)
             db.query(AgentSession).filter(AgentSession.id == f"mcp-session-{suffix}").delete(synchronize_session=False)
             db.query(MachineIdentity).filter(MachineIdentity.id == f"mcp-mi-{suffix}").delete(synchronize_session=False)
+            db.query(Task).filter(Task.id == f"mcp-task-{suffix}").delete(synchronize_session=False)
             db.query(Agent).filter(Agent.id == f"mcp-agent-{suffix}").delete(synchronize_session=False)
             db.query(Workspace).filter(Workspace.id == f"mcp-ws-{suffix}").delete(synchronize_session=False)
             db.query(User).filter(User.id == user.id).delete(synchronize_session=False)
