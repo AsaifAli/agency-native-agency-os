@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     outbox_pending_age_warning_seconds: int = Field(default=900, ge=1, le=604800)
     outbox_expired_lease_warning_count: int = Field(default=1, ge=1, le=1000000)
     outbox_dead_letter_warning_count: int = Field(default=1, ge=1, le=1000000)
+    outbox_exhausted_pending_warning_count: int = Field(default=1, ge=1, le=1000000)
 
     # Claude Managed Agents is beta and remains opt-in. Keep credentials in
     # environment/secrets management; never place them in agent prompts.
