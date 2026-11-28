@@ -18,14 +18,19 @@ export default function PrivateOperationsPage(){
  const [kind,setKind]=useState("front_desk"),[sourceId,setSourceId]=useState(""),[draftContent,setDraftContent]=useState(""),[sourceOptions,setSourceOptions]=useState<SourceOption[]>([]);
  const [error,setError]=useState(""),[busy,setBusy]=useState(false);
  const [learningTitle,setLearningTitle]=useState(""),[learningContent,setLearningContent]=useState(""),[learningEvidence,setLearningEvidence]=useState(""),[learningSourceId,setLearningSourceId]=useState(""),[learningConfidence,setLearningConfidence]=useState("0.8");
- const load=useCallback(async(id:string)=>{if(!id)return;try{setError("");const [b,a,k,d,l,executions]=await Promise.all([
+ const load=useCallback(async(id:string)=>{if(!id)return;try{setError("");const [b,a,k,d,l]=await Promise.all([
   api<Brief>(base()+"/founder-brief?workspace_id="+encodeURIComponent(id)),
   api<Aging>(base()+"/receivables/aging?workspace_id="+encodeURIComponent(id)),
   api<Knowledge[]>(base()+"/knowledge?workspace_id="+encodeURIComponent(id)),
   api<Draft[]>(base()+"/business-drafts?workspace_id="+encodeURIComponent(id)),
-  api<LearningCandidate[]>(base()+"/learning/candidates?workspace_id="+encodeURIComponent(id)),
-  api<SourceExecution[]>(base()+"/executions?workspace_id="+encodeURIComponent(id)+"&status=succeeded&limit=100")]);
-  setBrief(b);setAging(a);setKnowledge(k);setDrafts(d);setLearning(l);setSourceExecutions(executions.filter(row=>["synthetic","public","internal"].includes(row.data_class)));setLearningSourceId(current=>executions.some(row=>row.id===current&&["synthetic","public","internal"].includes(row.data_class))?current:executions.find(row=>["synthetic","public","internal"].includes(row.data_class))?.id??"");
+  api<LearningCandidate[]>(base()+"/learning/candidates?workspace_id="+encodeURIComponent(id))]);
+  setBrief(b);setAging(a);setKnowledge(k);setDrafts(d);setLearning(l);
+  try {
+   const executions=await api<SourceExecution[]>(base()+"/executions?workspace_id="+encodeURIComponent(id)+"&status=succeeded&limit=100");
+   const safeExecutions=executions.filter(row=>["synthetic","public","internal"].includes(row.data_class));
+   setSourceExecutions(safeExecutions);
+   setLearningSourceId(current=>safeExecutions.some(row=>row.id===current)?current:safeExecutions[0]?.id??"");
+  } catch { setSourceExecutions([]);setLearningSourceId(""); }
   const suffix="?workspace_id="+encodeURIComponent(id);
   const sourceRows=kind==="front_desk"
     ? await api<{id:string;company_name:string;stage:string}[]>(base()+"/leads"+suffix)
