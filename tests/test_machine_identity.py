@@ -1309,7 +1309,8 @@ def test_session_credential_is_bound_to_one_active_agent_session_and_hash_only(s
         assert credential.token.rsplit(".", 1)[1] not in row.token_hash
         assert row.session_id == session.id
         assert row.machine_identity_id == principal.identity.id
-        assert row.expires_at <= session.expires_at
+        from app.session_credentials import _utc
+        assert _utc(row.expires_at) <= _utc(session.expires_at)
     finally:
         db.close()
 
