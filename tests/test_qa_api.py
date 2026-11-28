@@ -309,3 +309,30 @@ def test_qa_issue_blocks_provider_secrets(client):
     )
     assert response.status_code == 422
     assert "data-protection" in response.json()["detail"].lower()
+
+
+def test_qa_issue_assignee_must_have_workspace_access(client):
+    db = client.session_factory()
+    try:
+        ungranted = User(email="qa-ungranted@example.test", display_name="No Workspace Grant")
+        db.add(ungranted)
+        db.flush()
+        db.add(Membership(org_id=client.org_id, user_id=ungranted.id, role=Role.operator))
+        db.commit()
+        ungranted_id = ungranted.id
+    finally:
+        db.close()
+
+    response = client.post(
+        f"/v1/orgs/{client.org_id}/qa/issues",
+        headers=headers(),
+        json={
+            "workspace_id": client.ws_id,
+            "project_id": client.project_id,
+            "task_id": client.task_id,
+            "title": "Assignee scope must be checked",
+            "description": "Organization membership alone is insufficient.",
+            "assigned_to_user_id": ungranted_id,
+        },
+    )
+    assert response.status_code == 404
