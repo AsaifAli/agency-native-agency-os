@@ -59,6 +59,18 @@ def _safe_error(value: Exception | str) -> str:
     return f"{error_type}: delivery handler failed"
 
 
+def _lease_is_active(row: OutboxEvent, *, now: datetime | None = None) -> bool:
+    """Return whether a processing row still has a live lease.
+
+    Normalize SQLite's naive DateTime values as UTC for deterministic tests;
+    PostgreSQL DateTime(timezone=True) values remain timezone-aware.
+    """
+    if row.lease_expires_at is None:
+        return False
+    current = _utc(now or datetime.now(timezone.utc))
+    return _utc(row.lease_expires_at) > current
+
+
 def _message(row: OutboxEvent) -> OutboxMessage:
     return OutboxMessage(
         id=row.id,
@@ -170,7 +182,12 @@ def claim_outbox_batch(
 def _acknowledge(session_factory, *, message: OutboxMessage, worker_id: str) -> None:
     with session_factory() as db:
         row = db.query(OutboxEvent).filter(OutboxEvent.id == message.id).with_for_update().one_or_none()
-        if row is None or row.status != "processing" or row.claimed_by != worker_id:
+        if (
+            row is None
+            or row.status != "processing"
+            or row.claimed_by != worker_id
+            or not _lease_is_active(row)
+        ):
             raise OutboxOwnershipError("Outbox delivery lease is no longer owned by this worker")
         row.status = "published"
         row.published_at = datetime.now(timezone.utc)
@@ -186,8 +203,13 @@ def _record_failure(
 ) -> None:
     with session_factory() as db:
         row = db.query(OutboxEvent).filter(OutboxEvent.id == message.id).with_for_update().one_or_none()
-        if row is None or row.status != "processing" or row.claimed_by != worker_id:
-            # A later owner has already reclaimed the expired lease.
+        if (
+            row is None
+            or row.status != "processing"
+            or row.claimed_by != worker_id
+            or not _lease_is_active(row)
+        ):
+            # The lease expired or ownership changed; stale workers cannot mutate it.
             return
         row.last_error = _safe_error(error)
         row.claimed_by = None
