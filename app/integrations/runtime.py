@@ -12,6 +12,7 @@ class ExecutionRequest:
     task_id: str
     agent_id: str
     data_class: DataClass
+    execution_id: str | None = None
     client_authorized: bool = False
     agent_name: str = ""
     agent_department: str = ""
