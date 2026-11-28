@@ -15,6 +15,7 @@ from typing import Callable, Mapping
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.telephony.models import OutboxEvent
 
 # MAX_OUTBOX_ERROR_LENGTH = 1000
@@ -433,12 +434,29 @@ def summarize_outbox(
     )
     oldest_pending_utc = _utc(oldest_pending) if oldest_pending else None
     age = max(0, int((now - oldest_pending_utc).total_seconds())) if oldest_pending_utc else None
+    expired_lease_count = int(expired_leases or 0)
+    dead_letter_count = counts["dead_letter"]
+    thresholds = {
+        "pending_age_warning_seconds": settings.outbox_pending_age_warning_seconds,
+        "expired_lease_warning_count": settings.outbox_expired_lease_warning_count,
+        "dead_letter_warning_count": settings.outbox_dead_letter_warning_count,
+    }
+    alerts = []
+    if age is not None and age >= thresholds["pending_age_warning_seconds"]:
+        alerts.append("pending_age_exceeded")
+    if expired_lease_count >= thresholds["expired_lease_warning_count"]:
+        alerts.append("expired_leases_detected")
+    if dead_letter_count >= thresholds["dead_letter_warning_count"]:
+        alerts.append("dead_letter_threshold_exceeded")
     return {
+        "health": "warning" if alerts else "healthy",
+        "alerts": alerts,
+        "thresholds": thresholds,
         "counts": counts,
         "total": sum(counts.values()),
         "oldest_pending_at": oldest_pending_utc.isoformat() if oldest_pending_utc else None,
         "oldest_pending_age_seconds": age,
-        "expired_leases": int(expired_leases or 0),
+        "expired_leases": expired_lease_count,
         "exhausted_pending": int(exhausted_pending or 0),
         "as_of": now.isoformat(),
     }
