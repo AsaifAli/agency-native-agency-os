@@ -143,7 +143,7 @@ export default function OutcomesPage() {
   const [notice, setNotice] = useState("");
 
   async function loadOutcomeRows(selectedProject: string, selectedWorkspace: string) {
-    const [rows, measurements, projectMilestones] = await Promise.all([
+    const [rows, measurements, projectMilestones, projectEvaluations] = await Promise.all([
       api<OutcomeRecord[]>(`/v1/orgs/${orgId()}/projects/${selectedProject}/outcomes?workspace_id=${encodeURIComponent(selectedWorkspace)}`),
       api<Measurement[]>(`/v1/orgs/${orgId()}/projects/${selectedProject}/outcome-measurements?workspace_id=${encodeURIComponent(selectedWorkspace)}&limit=1000`),
       api<Milestone[]>(`/v1/orgs/${orgId()}/projects/${selectedProject}/milestones?workspace_id=${encodeURIComponent(selectedWorkspace)}`),
