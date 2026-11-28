@@ -746,3 +746,25 @@ def test_managed_agent_created_session_must_be_persisted_before_polling():
         ("GET", "/v1/agents/agent_test"),
         ("POST", "/v1/sessions"),
     ]
+
+
+def test_malformed_managed_agent_session_create_response_requires_manual_review():
+    def handler(req):
+        if req.method == "GET" and req.url.path == "/v1/agents/agent_test":
+            return httpx.Response(200, json={"id": "agent_test", "archived_at": None,
+                "tools": [], "mcp_servers": [], "skills": [], "multiagent": None})
+        if req.method == "POST" and req.url.path == "/v1/sessions":
+            return httpx.Response(200, json=[])
+        return httpx.Response(404)
+
+    runtime = ManagedAgentsRuntime(
+        config(),
+        client_factory=lambda: httpx.Client(
+            base_url="https://api.anthropic.com",
+            transport=httpx.MockTransport(handler),
+        ),
+        sleep=lambda _seconds: None,
+    )
+
+    with pytest.raises(RuntimeManualReviewRequired, match="malformed"):
+        runtime.start(request())
