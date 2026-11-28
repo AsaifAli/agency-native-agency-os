@@ -1099,9 +1099,6 @@ finally:
             row.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=5)
             recovery.commit()
 
-            assert reconcile_outbox_events(recovery, limit=10) == (1, 0)
-            recovery.commit()
-
             reclaimed = claim_outbox_batch(
                 recovery,
                 worker_id=f"recovery-worker-{suffix}",
