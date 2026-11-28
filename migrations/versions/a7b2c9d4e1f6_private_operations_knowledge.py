@@ -69,18 +69,23 @@ def upgrade() -> None:
         for table in ("knowledge_items", "business_drafts"):
             op.execute(f'ALTER TABLE public."{table}" ENABLE ROW LEVEL SECURITY')
             op.execute(f'ALTER TABLE public."{table}" FORCE ROW LEVEL SECURITY')
+            # These records are currently accessed through authenticated human OS
+            # routes only. Do not grant worker access until an explicit, tested
+            # execution-capability adapter is introduced; forged machine GUCs
+            # must never authorize the worker role.
             policy = """(
                 agency_os_private.user_has_workspace_access(
                     org_id, workspace_id, nullif(current_setting('agency_os.user_id', true), '')
                 )
                 OR (
-                    org_id = nullif(current_setting('agency_os.machine_org_id', true), '')
+                    session_user <> 'agency_os_worker'
+                    AND org_id = nullif(current_setting('agency_os.machine_org_id', true), '')
                     AND workspace_id = nullif(current_setting('agency_os.machine_workspace_id', true), '')
                 )
             )"""
             op.execute(f'CREATE POLICY tenant_isolation ON public."{table}" USING ({policy}) WITH CHECK ({policy})')
             op.execute(f'GRANT SELECT, INSERT, UPDATE, DELETE ON public."{table}" TO agency_os_app')
-            op.execute(f'GRANT SELECT, INSERT, UPDATE, DELETE ON public."{table}" TO agency_os_worker')
+            op.execute(f'REVOKE ALL ON public."{table}" FROM agency_os_worker')
 
 
 def downgrade() -> None:
