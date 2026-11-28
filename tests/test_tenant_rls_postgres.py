@@ -9,6 +9,7 @@ from sqlalchemy.exc import DBAPIError
 from app.db import set_rls_context, verify_postgres_role
 from app.models import AuditEvent, FounderAuthority, Membership, Organization, Role, Task, User, Workspace, WorkspaceGrant
 from app.security_models import BrowserSession, MachineIdentity
+from app.private_ops_models import LearningCandidate
 
 ADMIN_URL = os.getenv("AGENCY_OS_TEST_RLS_ADMIN_DATABASE_URL")
 APP_URL = os.getenv("AGENCY_OS_TEST_RLS_DATABASE_URL")
@@ -44,12 +45,28 @@ def test_postgres_rls_blocks_cross_org_reads_writes_and_pool_context_leaks():
                 Task(org_id=org_a.id, workspace_id=ws_a.id, title="Tenant A", created_by=user_a.id),
                 Task(org_id=org_a.id, workspace_id=ws_a2.id, title="Tenant A Other Workspace", created_by=user_a.id),
                 Task(org_id=org_b.id, workspace_id=ws_b.id, title="Tenant B", created_by=user_b.id),
+                LearningCandidate(org_id=org_a.id, workspace_id=ws_a.id, title="Learning A",
+                    content="Workspace A lesson", evidence_summary="Verified synthetic source",
+                    source_type="execution", source_reference=f"execution-a-{suffix}",
+                    data_class="synthetic", confidence=0.9, idempotency_key=f"learning-a-{suffix}",
+                    created_by=user_a.id),
+                LearningCandidate(org_id=org_a.id, workspace_id=ws_a2.id, title="Learning A2",
+                    content="Workspace A2 lesson", evidence_summary="Verified synthetic source",
+                    source_type="execution", source_reference=f"execution-a2-{suffix}",
+                    data_class="synthetic", confidence=0.9, idempotency_key=f"learning-a2-{suffix}",
+                    created_by=user_a.id),
+                LearningCandidate(org_id=org_b.id, workspace_id=ws_b.id, title="Learning B",
+                    content="Workspace B lesson", evidence_summary="Verified synthetic source",
+                    source_type="execution", source_reference=f"execution-b-{suffix}",
+                    data_class="synthetic", confidence=0.9, idempotency_key=f"learning-b-{suffix}",
+                    created_by=user_b.id),
             ]); db.commit()
         with App() as db:
             set_rls_context(db, user_id=user_a.id)
             assert {r.title for r in db.query(Task).all()} == {"Tenant A"}
             assert {r.id for r in db.query(Workspace).all()} == {ws_a.id}
             assert {r.token_hash for r in db.query(BrowserSession).all()} == {session_hash_a}
+            assert {r.title for r in db.query(LearningCandidate).all()} == {"Learning A"}
             db.commit()
         # Revocation must take effect on the next transaction even when the
         # same pooled API connection is reused.
@@ -63,6 +80,7 @@ def test_postgres_rls_blocks_cross_org_reads_writes_and_pool_context_leaks():
         with App() as db:
             set_rls_context(db, user_id=user_a.id)
             assert db.query(Task).count() == 0
+            assert db.query(LearningCandidate).count() == 0
             db.commit()
         with Admin() as db:
             grant = db.query(WorkspaceGrant).filter_by(id=grant.id).one()
@@ -86,6 +104,13 @@ def test_postgres_rls_blocks_cross_org_reads_writes_and_pool_context_leaks():
             with pytest.raises(DBAPIError):
                 db.flush()
             db.rollback()
+            db.add(LearningCandidate(org_id=org_a.id, workspace_id=ws_a2.id, title="Cross-workspace lesson",
+                content="Must not write", evidence_summary="No", source_type="execution",
+                source_reference=f"execution-cross-{suffix}", data_class="synthetic", confidence=0.5,
+                idempotency_key=f"learning-cross-{suffix}", created_by=user_a.id))
+            with pytest.raises(DBAPIError):
+                db.flush()
+            db.rollback()
             db.add(Task(org_id=org_b.id, workspace_id=ws_b.id, title="Cross-org write", created_by=user_a.id))
             with pytest.raises(DBAPIError):
                 db.flush()
@@ -93,6 +118,7 @@ def test_postgres_rls_blocks_cross_org_reads_writes_and_pool_context_leaks():
     finally:
         with Admin() as db:
             db.query(BrowserSession).filter(BrowserSession.token_hash.in_([session_hash_a, session_hash_b])).delete(synchronize_session=False)
+            db.query(LearningCandidate).filter(LearningCandidate.org_id.in_([org_a.id, org_b.id])).delete(synchronize_session=False)
             db.query(WorkspaceGrant).filter(WorkspaceGrant.org_id.in_([org_a.id, org_b.id])).delete(synchronize_session=False)
             db.query(Task).filter(Task.org_id.in_([org_a.id, org_b.id])).delete(synchronize_session=False)
             db.query(Membership).filter(Membership.org_id.in_([org_a.id, org_b.id])).delete(synchronize_session=False)
