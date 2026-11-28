@@ -271,6 +271,183 @@ def upgrade() -> None:
         TO agency_os_app
     """)
 
+    op.execute("""
+        CREATE OR REPLACE FUNCTION agency_os_private.attach_mcp_provider_credential(
+            p_credential_id text, p_vault_id text, p_provider_credential_id text
+        ) RETURNS boolean
+        LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+        SET search_path = pg_catalog, public, agency_os_private
+        AS $function$
+        DECLARE v_count integer;
+        BEGIN
+            IF session_user <> 'agency_os_worker'
+               OR p_credential_id IS NULL OR length(p_credential_id) <> 36
+               OR p_vault_id IS NULL OR length(p_vault_id) > 160
+               OR p_provider_credential_id IS NULL OR length(p_provider_credential_id) > 160 THEN
+                RETURN false;
+            END IF;
+            UPDATE public.machine_session_credentials AS cred
+               SET provider_vault_id = p_vault_id,
+                   provider_credential_id = p_provider_credential_id,
+                   provider_credential_status = 'active',
+                   provider_credential_created_at = coalesce(provider_credential_created_at, clock_timestamp())
+              FROM public.executions AS e
+             WHERE cred.id = p_credential_id
+               AND e.org_id = cred.org_id
+               AND e.workspace_id = cred.workspace_id
+               AND e.machine_session_id = cred.session_id
+               AND e.status::text = 'running'
+               AND agency_os_private.worker_has_execution_context(e.org_id, e.workspace_id, e.id)
+               AND cred.revoked_at IS NULL
+               AND cred.provider_credential_status IN ('not_created', 'active')
+               AND (cred.provider_vault_id IS NULL OR cred.provider_vault_id = p_vault_id)
+               AND (cred.provider_credential_id IS NULL OR cred.provider_credential_id = p_provider_credential_id);
+            GET DIAGNOSTICS v_count = ROW_COUNT;
+            RETURN v_count = 1;
+        END
+        $function$
+    """)
+    op.execute("""
+        ALTER FUNCTION agency_os_private.attach_mcp_provider_credential(text, text, text)
+        OWNER TO agency_os_migrator
+    """)
+    op.execute("""
+        REVOKE ALL ON FUNCTION agency_os_private.attach_mcp_provider_credential(text, text, text)
+        FROM PUBLIC, agency_os_app
+    """)
+    op.execute("""
+        GRANT EXECUTE ON FUNCTION agency_os_private.attach_mcp_provider_credential(text, text, text)
+        TO agency_os_worker
+    """)
+
+    op.execute("""
+        CREATE OR REPLACE FUNCTION agency_os_private.revoke_mcp_session_credential(
+            p_credential_id text, p_reason text
+        ) RETURNS boolean
+        LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+        SET search_path = pg_catalog, public, agency_os_private
+        AS $function$
+        DECLARE v_count integer;
+        BEGIN
+            IF session_user <> 'agency_os_worker'
+               OR p_credential_id IS NULL OR length(p_credential_id) <> 36
+               OR p_reason IS NULL OR p_reason !~ '^[A-Z0-9_]{1,80}
+    op.execute("GRANT INSERT ON public.machine_session_credentials TO agency_os_worker")
+
+
+def downgrade() -> None:
+    if op.get_bind().dialect.name == "postgresql":
+        op.execute("""
+            REVOKE ALL ON FUNCTION agency_os_private.authenticate_mcp_session_credential(text, text, integer)
+            FROM PUBLIC, agency_os_app
+        """)
+        op.execute("""
+            DROP FUNCTION IF EXISTS agency_os_private.authenticate_mcp_session_credential(text, text, integer)
+        """)
+        op.execute("""
+            DROP FUNCTION IF EXISTS agency_os_private.is_mcp_session_credential_active(text, text, text, text, text, text)
+        """)
+        op.execute("""
+            DROP FUNCTION IF EXISTS agency_os_private.attach_mcp_provider_credential(text, text, text)
+        """)
+        op.execute("""
+            DROP FUNCTION IF EXISTS agency_os_private.revoke_mcp_session_credential(text, text)
+        """)
+        op.execute("""
+            DROP FUNCTION IF EXISTS agency_os_private.mark_mcp_provider_credential_archived(text, text)
+        """)
+        op.execute("""
+            DROP POLICY IF EXISTS worker_mcp_credential_insert
+            ON public.machine_session_credentials
+        """)
+        op.execute("REVOKE ALL ON public.machine_session_credentials FROM agency_os_worker, agency_os_app")
+    op.drop_index(
+        "ix_machine_session_credential_session_revoked",
+        table_name="machine_session_credentials",
+    )
+    op.drop_table("machine_session_credentials")
+    with op.batch_alter_table("agent_sessions") as batch:
+        batch.drop_constraint("uq_agent_session_identity_scope_id", type_="unique")
+ THEN
+                RETURN false;
+            END IF;
+            UPDATE public.machine_session_credentials AS cred
+               SET revoked_at = coalesce(revoked_at, clock_timestamp()),
+                   revocation_reason = coalesce(revocation_reason, p_reason),
+                   provider_credential_status = CASE
+                       WHEN provider_credential_id IS NULL THEN 'deleted'
+                       ELSE 'delete_pending'
+                   END
+              FROM public.executions AS e
+             WHERE cred.id = p_credential_id
+               AND e.org_id = cred.org_id
+               AND e.workspace_id = cred.workspace_id
+               AND e.machine_session_id = cred.session_id
+               AND e.status::text = 'running'
+               AND agency_os_private.worker_has_execution_context(e.org_id, e.workspace_id, e.id);
+            GET DIAGNOSTICS v_count = ROW_COUNT;
+            RETURN v_count = 1;
+        END
+        $function$
+    """)
+    op.execute("""
+        ALTER FUNCTION agency_os_private.revoke_mcp_session_credential(text, text)
+        OWNER TO agency_os_migrator
+    """)
+    op.execute("""
+        REVOKE ALL ON FUNCTION agency_os_private.revoke_mcp_session_credential(text, text)
+        FROM PUBLIC, agency_os_app
+    """)
+    op.execute("""
+        GRANT EXECUTE ON FUNCTION agency_os_private.revoke_mcp_session_credential(text, text)
+        TO agency_os_worker
+    """)
+
+    op.execute("""
+        CREATE OR REPLACE FUNCTION agency_os_private.mark_mcp_provider_credential_archived(
+            p_credential_id text, p_provider_credential_id text
+        ) RETURNS boolean
+        LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+        SET search_path = pg_catalog, public, agency_os_private
+        AS $function$
+        DECLARE v_count integer;
+        BEGIN
+            IF session_user <> 'agency_os_worker'
+               OR p_credential_id IS NULL OR length(p_credential_id) <> 36
+               OR p_provider_credential_id IS NULL OR length(p_provider_credential_id) > 160 THEN
+                RETURN false;
+            END IF;
+            UPDATE public.machine_session_credentials AS cred
+               SET provider_credential_status = 'deleted',
+                   provider_credential_deleted_at = coalesce(provider_credential_deleted_at, clock_timestamp()),
+                   revoked_at = coalesce(revoked_at, clock_timestamp()),
+                   revocation_reason = coalesce(revocation_reason, 'PROVIDER_CREDENTIAL_ARCHIVED')
+              FROM public.executions AS e
+             WHERE cred.id = p_credential_id
+               AND cred.provider_credential_id = p_provider_credential_id
+               AND e.org_id = cred.org_id
+               AND e.workspace_id = cred.workspace_id
+               AND e.machine_session_id = cred.session_id
+               AND e.status::text = 'running'
+               AND agency_os_private.worker_has_execution_context(e.org_id, e.workspace_id, e.id);
+            GET DIAGNOSTICS v_count = ROW_COUNT;
+            RETURN v_count = 1;
+        END
+        $function$
+    """)
+    op.execute("""
+        ALTER FUNCTION agency_os_private.mark_mcp_provider_credential_archived(text, text)
+        OWNER TO agency_os_migrator
+    """)
+    op.execute("""
+        REVOKE ALL ON FUNCTION agency_os_private.mark_mcp_provider_credential_archived(text, text)
+        FROM PUBLIC, agency_os_app
+    """)
+    op.execute("""
+        GRANT EXECUTE ON FUNCTION agency_os_private.mark_mcp_provider_credential_archived(text, text)
+        TO agency_os_worker
+    """)
+
     op.execute("REVOKE ALL ON public.machine_session_credentials FROM PUBLIC, agency_os_app, agency_os_worker")
     op.execute("GRANT INSERT ON public.machine_session_credentials TO agency_os_worker")
 
