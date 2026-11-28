@@ -731,3 +731,63 @@ def test_outcome_measurement_links_only_a_milestone_from_its_own_project(client)
         headers=auth(), json={**payload, "milestone_id": milestones[1]},
     )
     assert cross_project.status_code == 404
+
+
+def test_outcome_measurement_links_workspace_scoped_evaluation_run(client):
+    org, ws = client.org_id, client.ws_id
+    project = client.post(f"/v1/orgs/{org}/projects", headers=auth(), json={
+        "workspace_id": ws, "name": "Evaluation evidence delivery",
+    })
+    assert project.status_code == 201, project.text
+    outcome = client.post(
+        f"/v1/orgs/{org}/projects/{project.json()['id']}/outcomes",
+        headers=auth(), json={
+            "workspace_id": ws, "title": "Improve agent workflow reliability",
+            "problem_statement": "Workflow completion is not consistently verified.",
+            "desired_outcome": "Verify the workflow against an agreed evaluation pack.",
+            "metric_name": "Workflow evaluation score", "metric_unit": "score",
+            "direction": "increase", "target_value": "1",
+            "measurement_method": "Run the agent workflow evaluation pack against synthetic evidence.",
+            "acceptance_criteria": ["The agreed workflow evaluation is reviewed."],
+        },
+    )
+    assert outcome.status_code == 201, outcome.text
+
+    evaluation = client.post(
+        f"/v1/orgs/{org}/evaluations", headers=auth(), json={
+            "workspace_id": ws, "pack_name": "agent_workflow",
+            "expected": {"required_steps": ["plan"]},
+            "actual": {
+                "status": "completed", "completed_steps": ["plan"],
+                "tool_call_validity": 1, "policy_pass_rate": 1,
+                "approval_compliant": True, "execution_reliability": 1,
+                "fallback_rate": 0,
+            },
+        },
+    )
+    assert evaluation.status_code == 201, evaluation.text
+    assert evaluation.json()["evidence_trust"] == "self_reported"
+    assert evaluation.json()["release_eligible"] is False
+
+    measurement = client.post(
+        f"/v1/orgs/{org}/outcomes/{outcome.json()['id']}/measurements",
+        headers=auth(), json={
+            "workspace_id": ws, "value": "1", "source_type": "agency_measured",
+            "source_reference": "Evaluation run " + evaluation.json()["id"],
+            "evidence_summary": "Evaluation result attached for review; not independent release verification.",
+            "supporting_evaluation_run_id": evaluation.json()["id"],
+        },
+    )
+    assert measurement.status_code == 201, measurement.text
+    assert measurement.json()["supporting_evaluation_run_id"] == evaluation.json()["id"]
+
+    wrong_scope = client.post(
+        f"/v1/orgs/{org}/outcomes/{outcome.json()['id']}/measurements",
+        headers=auth(), json={
+            "workspace_id": ws, "value": "1", "source_type": "agency_measured",
+            "source_reference": "Foreign evaluation reference",
+            "evidence_summary": "This evaluation identifier must not cross workspace boundaries.",
+            "supporting_evaluation_run_id": "not-a-run-in-this-workspace",
+        },
+    )
+    assert wrong_scope.status_code == 404
