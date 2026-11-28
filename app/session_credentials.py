@@ -360,3 +360,27 @@ def mark_provider_credential_archived(
         "machine_session_credential", credential_id, workspace_id,
     )
     db.commit()
+
+
+
+def load_provider_credential_info(db: Session, *, execution_id: str) -> dict | None:
+    """Return only non-secret provider references for the current worker execution."""
+    if db.get_bind().dialect.name != "postgresql":
+        raise RuntimeError("Provider credential lookup requires the PostgreSQL worker capability.")
+    row = db.execute(
+        text("""
+            SELECT credential_id, session_id, vault_id,
+                   provider_credential_id, credential_expires_at
+            FROM agency_os_private.load_mcp_provider_credential(:execution_id)
+        """),
+        {"execution_id": execution_id},
+    ).first()
+    if row is None:
+        return None
+    return {
+        "credential_id": row.credential_id,
+        "session_id": row.session_id,
+        "vault_id": row.vault_id,
+        "provider_credential_id": row.provider_credential_id,
+        "expires_at": row.credential_expires_at,
+    }
