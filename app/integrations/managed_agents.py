@@ -672,13 +672,18 @@ class ManagedAgentsRuntime(AgentRuntime):
             session = self._request(
                 client, "GET", f"/v1/sessions/{session_id}"
             )
-        if not isinstance(session, dict):
-            raise RuntimeManualReviewRequired(
-                "Claude Managed Agents returned a malformed session snapshot."
-            )
-        # A running session's usage is still changing. Never persist it as a
-        # terminal recovery snapshot; the next bounded maintenance pass retries.
-        if session.get("status") != "idle":
+            if not isinstance(session, dict):
+                raise RuntimeManualReviewRequired(
+                    "Claude Managed Agents returned a malformed session snapshot."
+                )
+            # A running session's usage is still changing. Never persist it as a
+            # terminal recovery snapshot; the next bounded maintenance pass retries.
+            if session.get("status") != "idle":
+                return None
+            events = self._list_events(client, session_id)
+        # Session-level idle can coexist with an open dynamic workflow run.
+        # Such a snapshot is not terminal for recovery accounting.
+        if self._open_workflow_runs(events):
             return None
         return self._normalize_usage(session.get("usage"))
 
