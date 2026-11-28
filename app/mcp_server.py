@@ -107,7 +107,10 @@ def load_mcp_session_context(db, context: MCPAuthContext):
     if isinstance(context, SessionCredentialContext):
         return load_active_session_context(db, context)
     set_rls_context(
-        db, machine_org_id=context.org_id, machine_workspace_id=context.workspace_id,
+        db,
+        machine_org_id=context.org_id,
+        machine_workspace_id=context.workspace_id,
+        machine_identity_lookup_id=context.machine_identity_id,
     )
     identity = db.query(MachineIdentity).filter_by(
         id=context.machine_identity_id,

@@ -98,9 +98,24 @@ Until the relevant review is complete:
 
 Cowork capabilities vary by plan, platform, rollout and settings. Local-file access, local connectors and some browser/computer actions may require the desktop app to remain available. Scheduled cloud tasks may continue without the device, but they cannot be assumed to have access to local files. Confirm current Anthropic documentation and account settings before relying on any specific capability.
 
-## 10. Implementation status
+## 10. OS communication and implementation status
 
-This document defines our intended operating model. It does not install Cowork plugins/connectors, provision Cowork Projects, synchronize OS memory, create an OS-Cowork integration or authorize client-data processing. Those require separate configuration, review and evidence.
+The OS-owned generic remote MCP transport is implemented as a feature-gated integration foundation at `/v1/integrations/agency/mcp/sessions/{session_id}`. Claude Code and Cowork can act as remote MCP clients without receiving database credentials or direct core-table access. The transport is disabled by default; a live Cowork/Code client connection and production ingress have not been verified.
+
+The secure handoff is:
+
+1. A founder provisions a distinct service machine identity for each client/runtime and workspace, with explicit tool scopes, allowed data classes and a short expiry.
+2. The client uses that bearer to create a bounded OS session. The session ID is part of the MCP URL; it is not itself a credential.
+3. The client sends the machine bearer in its Authorization header to `/v1/integrations/agency/mcp/sessions/{session_id}`. Cowork's fixed-header connector is organization-shared and currently beta; use it only for a founder-only connector with a dedicated narrow identity. Claude Code should use a local secret-store helper, never a repository or prompt secret.
+4. The API validates the bearer, exact identity/session/workspace binding, expiry, data class, tool scopes, host/origin and server-side tool allowlist on each request. It exposes only registered read-only or pending-draft tools.
+5. Every call enters the shared OS Tool Gateway, which rechecks authorization and applies data protection, schema validation, idempotency, durable invocation records and audit. Draft tools cannot approve, send, pay, deploy or perform other protected side effects.
+6. Revoke the session to cut off one connection, or revoke the machine identity to invalidate all of its sessions.
+
+This is an API/tool boundary, not a sandbox for the Cowork or Claude Code process. Those clients execute in their own desktop/cloud/workstation environments. Their local shell, repository, filesystem, browser and native connectors are not sandboxed or governed by Agency OS RLS. Keep those permissions narrow and review them separately. The OS currently exposes no arbitrary shell, SQL, filesystem or browser tool through MCP.
+
+Claude Managed Agents is a separate provider-hosted runtime path. Its built-in Bash/file/browser tools remain rejected, and only OS-owned callbacks are permitted by the active architecture. Provider-side sandbox isolation, egress, retention and tenant boundaries remain unverified. The API/worker Docker hardening is not per-execution sandboxing; see [Execution Sandbox Design](EXECUTION_SANDBOX_DESIGN.md). Do not run untrusted generated code or hostile file-processing workloads in the API or ordinary worker.
+
+This document does not install Cowork plugins/connectors, provision Cowork Projects, synchronize OS memory, automatically import local files, verify a live client connection or authorize client-data processing. Those require separate configuration, review and evidence. The detailed machine identity, session, MCP and rollout contract is in [Agent Integration Contract](AGENT_INTEGRATION_CONTRACT.md).
 
 
 ## MCP protocol evolution and adoption

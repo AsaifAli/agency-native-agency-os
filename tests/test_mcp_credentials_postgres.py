@@ -306,6 +306,7 @@ def test_mcp_credential_hash_is_not_readable_and_auth_is_database_owned():
 def test_service_identity_mcp_credential_uses_narrow_database_capabilities():
     """Interactive service credentials must not grant app-role table access."""
     from app.machine_identity import authenticate_machine_token, create_agent_session
+    from app.mcp_server import authenticate_machine_session, load_mcp_session_context
     from app.session_credentials import (
         authenticate_session_credential,
         issue_session_credential,
@@ -391,6 +392,17 @@ def test_service_identity_mcp_credential_uses_narrow_database_capabilities():
             )
             db.commit()
             session_id = session.id
+
+            # Exercise the exact RLS-protected MCP revalidation path under the
+            # PostgreSQL API role, not only the SQLite service-client fixture.
+            machine_context = authenticate_machine_session(
+                db, f"Bearer aos_mi_{identity_id}.{raw_secret}", session_id
+            )
+            loaded_principal, loaded_session = load_mcp_session_context(db, machine_context)
+            assert loaded_principal.identity.id == identity_id
+            assert loaded_session.id == session_id
+            assert db.info["agency_os_rls_context"]["machine_identity_lookup_id"] == identity_id
+
             issued = issue_session_credential(
                 db, principal, session_id=session_id, ttl_seconds=600
             )
@@ -463,4 +475,3 @@ def test_service_identity_mcp_credential_uses_narrow_database_capabilities():
         # fixture rather than violating the audit retention boundary in cleanup.
         app_engine.dispose()
         admin_engine.dispose()
-

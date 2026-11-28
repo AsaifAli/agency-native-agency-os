@@ -1537,6 +1537,7 @@ def test_service_machine_bearer_is_bound_to_its_active_mcp_session_path(security
         assert context.machine_identity_id == issued["id"]
         assert context.session_id == session_id
         loaded_principal, loaded_session = load_mcp_session_context(db, context)
+        assert db.info["agency_os_rls_context"]["machine_identity_lookup_id"] == issued["id"]
         assert loaded_principal.identity.id == issued["id"]
         assert loaded_session.id == session_id
 
