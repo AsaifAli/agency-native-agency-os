@@ -92,7 +92,7 @@ def _validate_relationship(
          AND target.org_id = source.org_id
          AND target.workspace_id = source.workspace_id
         WHERE source.{source_column} IS NOT NULL
-          AND target.id IS NULL
+          AND target.{target_column} IS NULL
     """)).scalar_one()
     if invalid:
         raise RuntimeError(
