@@ -1018,7 +1018,19 @@ class ManagedAgentsRuntime(AgentRuntime):
                             raise RuntimeManualReviewRequired("No durable resume-event persistence callback is available.")
                         request.persist_resume_event(resume_token, sent_events[0]["id"])
 
-            deadline = self.clock() + self.config.claude_managed_timeout_seconds
+            runtime_config = request.runtime_config or {}
+            timeout_seconds = runtime_config.get(
+                "timeout_seconds", self.config.claude_managed_timeout_seconds,
+            )
+            if (
+                isinstance(timeout_seconds, bool)
+                or not isinstance(timeout_seconds, int)
+                or not 30 <= timeout_seconds <= 3600
+            ):
+                raise RuntimeNotConfiguredError(
+                    "The versioned Managed Agents timeout is outside the permitted range."
+                )
+            deadline = self.clock() + timeout_seconds
             tool_calls_processed = 0
             persisted_control = (request.request_metadata or {}).get("control_request") or {}
             persisted_interrupt_id = persisted_control.get("interrupt_event_id")
