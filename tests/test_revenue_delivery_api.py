@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 from app.auth import Principal, get_principal
 from app.db import Base, get_db, set_rls_context
 from app.domain_routes import router
-from app.models import FounderAuthority, Membership, Organization, Role, User, Workspace, WorkspaceGrant
+from app.models import EvaluationRun, FounderAuthority, Membership, Organization, Role, User, Workspace, WorkspaceGrant
 from app.domain_models import Client
 import app.domain_models  # noqa: F401
 
@@ -753,33 +753,56 @@ def test_outcome_measurement_links_workspace_scoped_evaluation_run(client):
     )
     assert outcome.status_code == 201, outcome.text
 
-    evaluation = client.post(
-        f"/v1/orgs/{org}/evaluations", headers=auth(), json={
-            "workspace_id": ws, "pack_name": "agent_workflow",
-            "expected": {"required_steps": ["plan"]},
-            "actual": {
-                "status": "completed", "completed_steps": ["plan"],
-                "tool_call_validity": 1, "policy_pass_rate": 1,
-                "approval_compliant": True, "execution_reliability": 1,
-                "fallback_rate": 0,
-            },
-        },
-    )
-    assert evaluation.status_code == 201, evaluation.text
-    assert evaluation.json()["evidence_trust"] == "self_reported"
-    assert evaluation.json()["release_eligible"] is False
+    # This fixture intentionally mounts only the domain router. Evaluation
+    # creation is tested through the full application in test_evaluation_api.py;
+    # seed persisted runs here to isolate the outcome-to-evaluation link contract.
+    with client.testing_session_factory() as db:
+        foreign_workspace = Workspace(
+            id="domain-evaluation-other-workspace",
+            org_id=org,
+            name="Other Evaluation Workspace",
+        )
+        db.add(foreign_workspace)
+        db.flush()
+        evaluation_run = EvaluationRun(
+            org_id=org,
+            workspace_id=ws,
+            pack_name="agent_workflow",
+            score=1.0,
+            passed=True,
+            metrics={"execution_reliability": 1.0},
+            gate_results={"execution_reliability": {"passed": True}},
+            evidence_trust="self_reported",
+            created_by=client.user_id,
+        )
+        foreign_evaluation_run = EvaluationRun(
+            org_id=org,
+            workspace_id=foreign_workspace.id,
+            pack_name="agent_workflow",
+            score=1.0,
+            passed=True,
+            metrics={"execution_reliability": 1.0},
+            gate_results={"execution_reliability": {"passed": True}},
+            evidence_trust="self_reported",
+            created_by=client.user_id,
+        )
+        db.add_all([evaluation_run, foreign_evaluation_run])
+        db.flush()
+        evaluation_id = evaluation_run.id
+        foreign_evaluation_id = foreign_evaluation_run.id
+        db.commit()
 
     measurement = client.post(
         f"/v1/orgs/{org}/outcomes/{outcome.json()['id']}/measurements",
         headers=auth(), json={
             "workspace_id": ws, "value": "1", "source_type": "agency_measured",
-            "source_reference": "Evaluation run " + evaluation.json()["id"],
+            "source_reference": "Evaluation run " + evaluation_id,
             "evidence_summary": "Evaluation result attached for review; not independent release verification.",
-            "supporting_evaluation_run_id": evaluation.json()["id"],
+            "supporting_evaluation_run_id": evaluation_id,
         },
     )
     assert measurement.status_code == 201, measurement.text
-    assert measurement.json()["supporting_evaluation_run_id"] == evaluation.json()["id"]
+    assert measurement.json()["supporting_evaluation_run_id"] == evaluation_id
 
     wrong_scope = client.post(
         f"/v1/orgs/{org}/outcomes/{outcome.json()['id']}/measurements",
@@ -787,7 +810,7 @@ def test_outcome_measurement_links_workspace_scoped_evaluation_run(client):
             "workspace_id": ws, "value": "1", "source_type": "agency_measured",
             "source_reference": "Foreign evaluation reference",
             "evidence_summary": "This evaluation identifier must not cross workspace boundaries.",
-            "supporting_evaluation_run_id": "not-a-run-in-this-workspace",
+            "supporting_evaluation_run_id": foreign_evaluation_id,
         },
     )
     assert wrong_scope.status_code == 404
