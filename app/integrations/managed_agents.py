@@ -446,10 +446,10 @@ class ManagedAgentsRuntime(AgentRuntime):
                         "agency_os_workspace_id": request.workspace_id[:512],
                         "agency_os_task_id": request.task_id[:512],
                         "agency_os_agent_id": request.agent_id[:512],
-                    **(
-                        {"agency_os_execution_id": request.execution_id[:512]}
-                        if request.execution_id else {}
-                    ),
+                        **(
+                            {"agency_os_execution_id": request.execution_id[:512]}
+                            if request.execution_id else {}
+                        ),
                     },
                     "initial_events": [
                         {
@@ -474,6 +474,11 @@ class ManagedAgentsRuntime(AgentRuntime):
                         "reconcile the provider session before retrying."
                     ) from exc
 
+                if not isinstance(created, dict):
+                    raise RuntimeManualReviewRequired(
+                        "Claude Managed Agents returned a malformed session creation "
+                        "response; provider reconciliation is required."
+                    )
                 session_id = created.get("id")
                 if not isinstance(session_id, str) or not session_id.strip():
                     raise RuntimeManualReviewRequired(
