@@ -2226,3 +2226,88 @@ def test_non_idle_managed_agent_usage_reconciliation_is_deferred(worker_context)
     )
     assert second == {"reconciled": 0, "pending": 0, "skipped": 1}
     assert runtime.calls == 1
+
+
+
+def test_provider_usage_read_failure_is_backed_off(worker_context):
+    from sqlalchemy.orm import sessionmaker
+    from app.provider_usage_reconciliation import reconcile_abandoned_managed_agent_usage
+
+    ctx = worker_context
+    db = ctx["db"]
+    execution = create_worker_execution(ctx)
+    execution.runtime = "claude_managed_agents"
+    execution.status = ExecutionStatus.retry_wait
+    attempt = ExecutionAttempt(
+        execution_id=execution.id,
+        attempt_number=1,
+        runtime="claude_managed_agents",
+        status=ExecutionAttemptStatus.abandoned,
+        external_run_id="sesn_read_error",
+        result=None,
+        finished_at=datetime.now(timezone.utc),
+    )
+    db.add(attempt)
+    db.commit()
+
+    class Runtime:
+        calls = 0
+
+        def fetch_idle_session_usage(self, _session_id):
+            self.calls += 1
+            raise RuntimeError("provider request failed with sensitive request metadata")
+
+    runtime = Runtime()
+    session_factory = sessionmaker(bind=db.get_bind(), autoflush=False, autocommit=False)
+    first = reconcile_abandoned_managed_agent_usage(
+        session_factory, runtime=runtime, limit=5,
+    )
+    assert first == {"reconciled": 0, "pending": 1, "skipped": 0}
+
+    db.expire_all()
+    persisted = db.get(ExecutionAttempt, attempt.id)
+    assert persisted.result["usage_reconciliation"]["reason"] == "provider_read_failed"
+
+    second = reconcile_abandoned_managed_agent_usage(
+        session_factory, runtime=runtime, limit=5,
+    )
+    assert second == {"reconciled": 0, "pending": 0, "skipped": 1}
+    assert runtime.calls == 1
+
+
+def test_provider_usage_snapshot_is_not_written_after_execution_resumes(worker_context):
+    from sqlalchemy.orm import sessionmaker
+    from app.provider_usage_reconciliation import reconcile_abandoned_managed_agent_usage
+
+    ctx = worker_context
+    db = ctx["db"]
+    execution = create_worker_execution(ctx)
+    execution.runtime = "claude_managed_agents"
+    execution.status = ExecutionStatus.retry_wait
+    attempt = ExecutionAttempt(
+        execution_id=execution.id,
+        attempt_number=1,
+        runtime="claude_managed_agents",
+        status=ExecutionAttemptStatus.abandoned,
+        external_run_id="sesn_resumed",
+        result=None,
+        finished_at=datetime.now(timezone.utc),
+    )
+    db.add(attempt)
+    db.commit()
+
+    class Runtime:
+        def fetch_idle_session_usage(self, _session_id):
+            execution.status = ExecutionStatus.running
+            db.commit()
+            return {"input_tokens": 5, "output_tokens": 2}
+
+    session_factory = sessionmaker(bind=db.get_bind(), autoflush=False, autocommit=False)
+    result = reconcile_abandoned_managed_agent_usage(
+        session_factory, runtime=Runtime(), limit=5,
+    )
+    assert result == {"reconciled": 0, "pending": 0, "skipped": 1}
+
+    db.expire_all()
+    persisted = db.get(ExecutionAttempt, attempt.id)
+    assert persisted.result is None
