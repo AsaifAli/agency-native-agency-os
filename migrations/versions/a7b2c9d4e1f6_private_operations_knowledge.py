@@ -74,13 +74,15 @@ def upgrade() -> None:
             # execution-capability adapter is introduced; forged machine GUCs
             # must never authorize the worker role.
             policy = """(
-                agency_os_private.user_has_workspace_access(
-                    org_id, workspace_id, nullif(current_setting('agency_os.user_id', true), '')
-                )
-                OR (
-                    session_user <> 'agency_os_worker'
-                    AND org_id = nullif(current_setting('agency_os.machine_org_id', true), '')
-                    AND workspace_id = nullif(current_setting('agency_os.machine_workspace_id', true), '')
+                session_user <> 'agency_os_worker'
+                AND (
+                    agency_os_private.user_has_workspace_access(
+                        org_id, workspace_id, nullif(current_setting('agency_os.user_id', true), '')
+                    )
+                    OR (
+                        org_id = nullif(current_setting('agency_os.machine_org_id', true), '')
+                        AND workspace_id = nullif(current_setting('agency_os.machine_workspace_id', true), '')
+                    )
                 )
             )"""
             op.execute(f'CREATE POLICY tenant_isolation ON public."{table}" USING ({policy}) WITH CHECK ({policy})')
