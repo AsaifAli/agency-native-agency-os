@@ -186,6 +186,7 @@ export default function QAPage() {
         <label className="field">Workspace
           <select className="field" value={workspaceId} onChange={event => {
             const selected = event.target.value; setWorkspaceId(selected);
+            setIssues([]); setProjects([]); setTasks([]); setEvaluations([]);
             load(selected).catch(error => setError(error.message));
           }}>
             {workspaces.map(workspace => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
