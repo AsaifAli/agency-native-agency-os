@@ -181,8 +181,8 @@ def upgrade() -> None:
                  WHERE id = c.id;
             ELSIF c.request_count_window >= v_limit THEN
                 RETURN QUERY SELECT
-                    'rate_limited'::text, c.org_id, c.workspace_id,
-                    c.machine_identity_id, c.session_id, c.id;
+                    'rate_limited'::text, c.org_id::text, c.workspace_id::text,
+                    c.machine_identity_id::text, c.session_id::text, c.id::text;
                 RETURN;
             ELSE
                 UPDATE public.machine_session_credentials
@@ -197,8 +197,8 @@ def upgrade() -> None:
              WHERE id = c.session_id;
 
             RETURN QUERY SELECT
-                'ok'::text, c.org_id, c.workspace_id,
-                c.machine_identity_id, c.session_id, c.id;
+                'ok'::text, c.org_id::text, c.workspace_id::text,
+                c.machine_identity_id::text, c.session_id::text, c.id::text;
         END
         $function$
     """)
