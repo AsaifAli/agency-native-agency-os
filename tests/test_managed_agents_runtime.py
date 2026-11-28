@@ -29,6 +29,13 @@ def config(**overrides):
         "claude_managed_timeout_seconds": 60,
         "claude_managed_poll_interval_seconds": 0.2,
         "anthropic_request_timeout_seconds": 5,
+        "claude_managed_mcp_enabled": False,
+        "claude_managed_mcp_public_base_url": "",
+        "claude_managed_mcp_vault_id": "",
+        "claude_managed_mcp_enabled_tool_keys": "",
+        "claude_managed_mcp_requests_per_minute": 120,
+        "claude_managed_mcp_max_concurrent_requests": 8,
+        "claude_managed_mcp_max_request_body_bytes": 1048576,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
