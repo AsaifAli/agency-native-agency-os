@@ -1095,6 +1095,8 @@ def test_managed_agents_reconciles_usage_only_from_idle_authoritative_session():
                     "list_cost": {"amount": "9", "currency": "USD"},
                 },
             })
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_reconcile/events":
+            return httpx.Response(200, json={"data": []})
         return httpx.Response(404)
 
     runtime = ManagedAgentsRuntime(
@@ -1118,7 +1120,7 @@ def test_managed_agents_reconciles_usage_only_from_idle_authoritative_session():
         "list_cost_minor": 9,
         "currency": "USD",
     }
-    assert calls == [("GET", "/v1/sessions/sesn_reconcile")]
+    assert calls == [("GET", "/v1/sessions/sesn_reconcile"), ("GET", "/v1/sessions/sesn_reconcile/events")]
 
 
 def test_managed_agents_does_not_reconcile_usage_from_non_idle_session():
@@ -1146,3 +1148,34 @@ def test_managed_agents_does_not_reconcile_usage_from_non_idle_session():
 
     assert runtime.fetch_idle_session_usage("sesn_active") is None
 
+
+
+
+def test_managed_agents_defers_usage_when_idle_session_has_open_workflow_run():
+    def handler(req):
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_open_run":
+            return httpx.Response(200, json={
+                "id": "sesn_open_run",
+                "status": "idle",
+                "usage": {"input_tokens": 31, "output_tokens": 12},
+            })
+        if req.method == "GET" and req.url.path == "/v1/sessions/sesn_open_run/events":
+            return httpx.Response(200, json={"data": [
+                {"type": "workflow_run.created", "workflow_run_id": "wfr_open"},
+            ]})
+        return httpx.Response(404)
+
+    runtime = ManagedAgentsRuntime(
+        config(),
+        client_factory=lambda: httpx.Client(
+            base_url="https://api.anthropic.com",
+            headers={
+                "Authorization": "Bearer test-key",
+                "anthropic-version": "2026-10-21",
+                "anthropic-beta": "managed-agents-2026-04-01",
+            },
+            transport=httpx.MockTransport(handler),
+        ),
+    )
+
+    assert runtime.fetch_idle_session_usage("sesn_open_run") is None
