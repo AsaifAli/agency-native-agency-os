@@ -65,7 +65,7 @@ These are planned capabilities, not implemented features. They must reuse the ex
 
 1. OS owns users, organizations, clients, workspaces, workforce members, tasks, executions, approvals, budgets, artifacts and audit.
 2. Workforce bootstrap does not activate agents. Founder-only capability enablement and member activation are opt-in and policy-checked.
-3. Tool grants remain disabled until a governed OS MCP gateway exists.
+3. An opt-in, session-authenticated MCP transport now delegates to the OS Tool Gateway; production enablement remains blocked pending CI, staging, cross-workspace and provider/Vault verification. See [CLAUDE_MANAGED_MCP_GATEWAY.md](CLAUDE_MANAGED_MCP_GATEWAY.md).
 4. Unknown actions default to manual review; protected actions require founder approval.
 5. Runtime eligibility, data classification, tenant scope and authorization are enforced by backend code.
 6. Managed Agents remains opt-in, beta and synthetic-first; no ZDR/BAA eligibility or production readiness is implied.
