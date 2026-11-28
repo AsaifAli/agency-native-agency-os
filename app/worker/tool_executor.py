@@ -295,6 +295,7 @@ def build_machine_mcp_session_preparer(
                 identity is None
                 or _as_utc(identity.expires_at) <= now
                 or "tools:invoke" not in (identity.scopes or [])
+                or "sessions:create" not in (identity.scopes or [])
             ):
                 raise RuntimeManualReviewRequired("The agent has no active OS machine identity for MCP access.")
 
