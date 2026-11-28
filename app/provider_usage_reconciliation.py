@@ -14,14 +14,17 @@ from typing import Callable
 
 from sqlalchemy.orm import Session
 
-from app.audit import record_event
 from app.models import (
     Execution,
     ExecutionAttempt,
     ExecutionAttemptStatus,
     ExecutionStatus,
 )
-from app.worker_service import _aggregate_provider_usage, _validate_provider_usage
+from app.worker_service import (
+    _aggregate_provider_usage,
+    _record_provider_usage_observation,
+    _validate_provider_usage,
+)
 
 logger = logging.getLogger(__name__)
 SessionFactory = Callable[[], Session]
@@ -156,22 +159,12 @@ def _persist_snapshot(
             execution_result["usage"] = aggregated
             execution.result = execution_result
 
-        record_event(
+        _record_provider_usage_observation(
             db,
-            execution.org_id,
-            None,
-            "execution.provider_usage_reconciled",
-            "execution_attempt",
-            attempt.id,
-            execution.workspace_id,
-            {
-                "execution_id": execution.id,
-                "provider": "claude_managed_agents",
-                "external_run_id": external_run_id,
-                "snapshot_sha256": snapshot_hash,
-                "list_cost_minor": normalized.get("list_cost_minor"),
-                "currency": normalized.get("currency"),
-            },
+            execution,
+            attempt,
+            normalized,
+            source="provider_session_reconciliation",
         )
         db.commit()
         return "reconciled"
