@@ -97,3 +97,19 @@ Do not add a local-disk fallback, public bucket, direct-to-provider client uploa
 | Workspace/member cumulative reservation ledger | Not implemented | Requires explicit scope/currency decision |
 
 No production storage credentials, provider account, scanner, object bucket, FX source, or spend-account policy was configured or tested during this audit.
+
+## 4. Artifact ingestion primitives — 2026-11-28
+
+Implemented in `app/artifact_gateway.py` (not wired to an HTTP route or worker):
+
+- Bounded streaming read with a 20 MiB default cap and a hard 100 MiB configurable ceiling.
+- Strict allowlist for PDF, PNG, JPEG, UTF-8 plain text and CSV; extension and declared media type must agree.
+- Basic magic/signature validation for PDF and images; text must be valid UTF-8 and contain no NUL/binary control bytes.
+- Rejects empty content, unsupported/archive formats, path components, control/format characters in filenames, and oversized streams.
+- Computes SHA-256 while reading and returns an immutable inspected payload.
+- Generates tenant/workspace/artifact-scoped opaque object keys from validated server-side identifiers; filenames are never part of storage keys.
+- `require_clean_scan` accepts only an explicit clean result with scanner name and version. Missing, errored, unknown or incomplete scanner results fail closed.
+
+Tests: `tests/test_artifact_gateway.py` covers content-type/signature mismatch, path traversal, size limits, empty/archive rejection, binary text, digest/size, opaque keys and scanner fail-closed behavior.
+
+**Still deliberately not implemented/enabled:** provider adapter, credentials, private bucket verification, quarantine persistence, scanner integration, lifecycle transactions, upload/download endpoints, worker permissions, cleanup/reconciliation. The inspected bytes are currently bounded in memory; do not expose this helper to large or untrusted traffic until a streaming-to-private-quarantine adapter and scanner are selected and integrated. PDF/image signature checks are not malware scanning and do not make files safe for parsing or runtime execution.
