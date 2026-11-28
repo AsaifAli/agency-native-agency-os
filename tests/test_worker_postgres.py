@@ -36,6 +36,7 @@ from app.outbox_service import (
     _acknowledge,
     _record_failure,
     _renew_lease,
+    dispatch_outbox_batch,
     reconcile_outbox_events,
     claim_outbox_batch,
 )
@@ -1122,6 +1123,109 @@ finally:
                 process.stdout.close()
             if process.stderr:
                 process.stderr.close()
+        if org_id is not None:
+            cleanup = Session()
+            try:
+                if event_id:
+                    cleanup.query(OutboxEvent).filter_by(id=event_id).delete(
+                        synchronize_session=False
+                    )
+                if workspace_id:
+                    cleanup.query(Workspace).filter_by(id=workspace_id).delete(
+                        synchronize_session=False
+                    )
+                cleanup.query(Organization).filter_by(id=org_id).delete(
+                    synchronize_session=False
+                )
+                cleanup.commit()
+            except Exception:
+                cleanup.rollback()
+                raise
+            finally:
+                cleanup.close()
+        engine.dispose()
+
+
+def test_postgres_outbox_heartbeat_renews_lease_during_long_handler():
+    """A live handler retains its lease through conditional PostgreSQL heartbeats."""
+    database_url = os.getenv("AGENCY_OS_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("Set AGENCY_OS_TEST_DATABASE_URL to run PostgreSQL outbox heartbeat test")
+
+    parsed_url = make_url(database_url)
+    assert parsed_url.get_backend_name() == "postgresql"
+    assert parsed_url.database == "agency_os_worker_test", (
+        "Safety check: this test may only use agency_os_worker_test"
+    )
+
+    engine = create_engine(database_url, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    suffix = uuid.uuid4().hex[:12]
+    org_id = workspace_id = event_id = None
+    event_type = f"test.postgres.outbox.heartbeat.{suffix}"
+
+    try:
+        setup = Session()
+        try:
+            org = Organization(name=f"Outbox Heartbeat Test {suffix}")
+            setup.add(org)
+            setup.flush()
+            workspace = Workspace(
+                id=f"outbox-heartbeat-{suffix}",
+                org_id=org.id,
+                name="Outbox Heartbeat Test Workspace",
+            )
+            setup.add(workspace)
+            setup.flush()
+            org_id, workspace_id = org.id, workspace.id
+            event = OutboxEvent(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                event_type=event_type,
+                schema_version=1,
+                aggregate_type="test",
+                aggregate_id=f"aggregate-{suffix}",
+                idempotency_key=f"outbox-heartbeat-{suffix}",
+                payload={"synthetic": True},
+                status="pending",
+                attempts=0,
+                max_attempts=5,
+            )
+            setup.add(event)
+            setup.flush()
+            event_id = event.id
+            setup.commit()
+        finally:
+            setup.close()
+
+        def long_handler(_message):
+            # Force a short but still-live lease, then keep the handler active
+            # long enough that the heartbeat must extend it several times.
+            with Session() as db:
+                row = db.query(OutboxEvent).filter_by(id=event_id).one()
+                row.lease_expires_at = datetime.now(timezone.utc) + timedelta(seconds=0.2)
+                db.commit()
+            time.sleep(0.6)
+            with Session() as db:
+                row = db.query(OutboxEvent).filter_by(id=event_id).one()
+                assert row.lease_expires_at > datetime.now(timezone.utc) + timedelta(seconds=5)
+
+        result = dispatch_outbox_batch(
+            Session,
+            worker_id=f"heartbeat-worker-{suffix}",
+            handlers={event_type: long_handler},
+            limit=1,
+            lease_seconds=15,
+            heartbeat_interval_seconds=0.05,
+        )
+        assert result == (1, 0, 0)
+
+        with Session() as verification:
+            row = verification.query(OutboxEvent).filter_by(id=event_id).one()
+            assert row.status == "published"
+            assert row.claimed_by is None
+            assert row.lease_expires_at is None
+    finally:
         if org_id is not None:
             cleanup = Session()
             try:
