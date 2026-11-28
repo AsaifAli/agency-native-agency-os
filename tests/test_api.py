@@ -111,12 +111,13 @@ def test_task_rejects_a_milestone_from_another_workspace():
         db.add(milestone)
         db.commit()
         milestone_id = milestone.id
+        org_id = org.id
     finally:
         db.close()
 
     client = TestClient(app)
     response = client.post(
-        f"/v1/orgs/{org.id}/tasks",
+        f"/v1/orgs/{org_id}/tasks",
         headers={"Authorization": "Bearer dev:owner@test.local"},
         json={
             "workspace_id": "ws-test",
