@@ -216,8 +216,22 @@ def transition_qa_issue(
             raise HTTPException(409, "A failed evaluation cannot close a QA issue")
         if issue.fixed_at is None or _utc(evaluation.created_at) < _utc(issue.fixed_at):
             raise HTTPException(409, "Retest evaluation must be created after the issue was marked fixed")
+    elif previous == "retest" and body.status == "in_progress" and body.retest_evaluation_run_id:
+        evaluation = db.query(EvaluationRun).filter_by(
+            id=body.retest_evaluation_run_id,
+            org_id=org_id,
+            workspace_id=workspace_id,
+        ).first()
+        if evaluation is None:
+            raise HTTPException(404, "Retest evaluation not found in this workspace")
+        if evaluation.task_id != issue.task_id:
+            raise HTTPException(409, "Retest evaluation must reference the QA issue's task")
+        if evaluation.passed:
+            raise HTTPException(409, "A passing retest should close the issue, not reopen it")
+        if issue.fixed_at is None or _utc(evaluation.created_at) < _utc(issue.fixed_at):
+            raise HTTPException(409, "Retest evaluation must be created after the issue was marked fixed")
     elif body.retest_evaluation_run_id is not None:
-        raise HTTPException(422, "Retest evaluation can only be attached when closing an issue")
+        raise HTTPException(422, "Retest evaluation can only be attached during closure or failed-retest rework")
 
     now = datetime.now(timezone.utc)
     issue.status = body.status
