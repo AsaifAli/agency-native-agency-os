@@ -25,6 +25,7 @@ class ExecutionRequest:
     persist_resume_event: Callable[[str, str], None] | None = None
     persist_control_event: Callable[[str, str], None] | None = None
     execute_custom_tool: Callable[[str, dict, str], dict] | None = None
+    prepare_mcp_session: Callable[[], dict] | None = None
     control_check: Callable[[], str | None] | None = None
     request_metadata: dict = field(default_factory=dict)
 
