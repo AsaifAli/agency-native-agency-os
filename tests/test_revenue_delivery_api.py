@@ -145,6 +145,46 @@ def test_revenue_delivery_vertical_slice_and_audit(client):
     assert r.json()["status"] == "completed"
 
 
+def test_lead_creation_rejects_duplicate_email_but_allows_distinct_prospects(client):
+    org, ws = client.org_id, client.ws_id
+    first = client.post(f"/v1/orgs/{org}/leads", headers=auth(), json={
+        "workspace_id": ws, "company_name": "Northstar Systems",
+        "email": "Sales@northstar.example", "source": "referral",
+    })
+    assert first.status_code == 201, first.text
+
+    duplicate = client.post(f"/v1/orgs/{org}/leads", headers=auth(), json={
+        "workspace_id": ws, "company_name": "Northstar Systems",
+        "email": "  SALES@NORTHSTAR.EXAMPLE ", "source": "website",
+    })
+    assert duplicate.status_code == 409
+    assert "duplicate lead" in duplicate.json()["detail"].lower()
+
+    distinct = client.post(f"/v1/orgs/{org}/leads", headers=auth(), json={
+        "workspace_id": ws, "company_name": "Northstar Systems",
+        "email": "different-buyer@northstar.example", "source": "event",
+    })
+    assert distinct.status_code == 201, distinct.text
+
+
+def test_lead_creation_rejects_reusing_same_contact(client):
+    org, ws = client.org_id, client.ws_id
+    contact = client.post(f"/v1/orgs/{org}/contacts", headers=auth(), json={
+        "workspace_id": ws, "first_name": "Mira",
+        "email": "mira-lead@example.test",
+    })
+    assert contact.status_code == 201, contact.text
+    payload = {
+        "workspace_id": ws, "company_name": "Contact-linked Prospect",
+        "contact_id": contact.json()["id"], "source": "referral",
+    }
+    first = client.post(f"/v1/orgs/{org}/leads", headers=auth(), json=payload)
+    assert first.status_code == 201, first.text
+    duplicate = client.post(f"/v1/orgs/{org}/leads", headers=auth(), json=payload)
+    assert duplicate.status_code == 409
+    assert "duplicate lead" in duplicate.json()["detail"].lower()
+
+
 def test_agent_research_and_outreach_drafts_are_source_backed_and_never_send(client):
     org, ws = client.org_id, client.ws_id
     lead = client.post(f"/v1/orgs/{org}/leads", headers=auth(), json={
