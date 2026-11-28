@@ -57,6 +57,7 @@ class AgentSession(Base):
     __tablename__ = "agent_sessions"
     __table_args__ = (
         UniqueConstraint("org_id", "workspace_id", "id", name="uq_agent_session_scope_id"),
+        UniqueConstraint("org_id", "workspace_id", "machine_identity_id", "id", name="uq_agent_session_identity_scope_id"),
         ForeignKeyConstraint(["org_id", "workspace_id", "machine_identity_id"], ["machine_identities.org_id", "machine_identities.workspace_id", "machine_identities.id"], ondelete="CASCADE", name="fk_agent_session_identity_scope"),
         CheckConstraint("status IN ('active','cancelled','expired','closed')", name="ck_agent_session_status"),
         CheckConstraint("data_class IN ('synthetic','public','commercial','confidential','regulated')", name="ck_agent_session_data_class"),
