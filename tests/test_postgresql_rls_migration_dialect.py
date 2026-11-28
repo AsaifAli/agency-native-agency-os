@@ -38,3 +38,23 @@ def test_postgresql_rls_migration_is_noop_on_sqlite_upgrade_and_downgrade():
     inspector = sa.inspect(engine)
     assert inspector.get_table_names() == ["browser_sessions", "organizations"]
     assert inspector.get_schema_names() == ["main"]
+
+
+def test_public_schema_lockdown_migration_is_noop_on_sqlite_upgrade_and_downgrade():
+    path = Path(__file__).parents[1] / "migrations/versions/d6f8a0b2c4e6_public_schema_runtime_lockdown.py"
+    spec = importlib.util.spec_from_file_location("public_schema_lockdown_migration", path)
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    engine = sa.create_engine("sqlite://")
+    with engine.begin() as connection:
+        operations = Operations(MigrationContext.configure(connection))
+        original_op = migration.op
+        try:
+            migration.op = operations
+            migration.upgrade()
+            migration.downgrade()
+        finally:
+            migration.op = original_op
+
+    assert sa.inspect(engine).get_table_names() == []
