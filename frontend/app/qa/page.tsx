@@ -28,10 +28,12 @@ const nextStep: Record<string, string> = {
   open: "triaged", triaged: "in_progress", in_progress: "fixed", fixed: "retest",
 };
 
-function QAIssueCard({ issue, evaluations, workspaceId, onTransition }: {
+function QAIssueCard({ issue, evaluations, workspaceId, projectName, taskTitle, onTransition }: {
   issue: QAIssue;
   evaluations: EvaluationRun[];
   workspaceId: string;
+  projectName: string;
+  taskTitle: string;
   onTransition: (issue: QAIssue, status: string, evaluationId?: string, note?: string) => Promise<void>;
 }) {
   const [evaluationId, setEvaluationId] = useState("");
@@ -79,7 +81,7 @@ function QAIssueCard({ issue, evaluations, workspaceId, onTransition }: {
       <div className="panel-head">
         <div>
           <div className="panel-title">{issue.title}</div>
-          <div className="activity-meta">Issue {issue.id} · Task {issue.task_id}</div>
+          <div className="activity-meta">{projectName} · {taskTitle} · Issue {issue.id}</div>
         </div>
         <div className="button-row">
           <span className={`status ${issue.severity === "blocker" || issue.severity === "critical" ? "rejected" : "pending"}`}>{issue.severity}</span>
@@ -290,7 +292,15 @@ export default function QAPage() {
       </div>
       <div style={{ height: 16 }} />
       <div style={{ display: "grid", gap: 16 }}>
-        {issues.map(issue => <QAIssueCard key={issue.id} issue={issue} evaluations={evaluations} workspaceId={workspaceId} onTransition={transition} />)}
+        {issues.map(issue => <QAIssueCard
+          key={issue.id}
+          issue={issue}
+          evaluations={evaluations}
+          workspaceId={workspaceId}
+          projectName={projects.find(project => project.id === issue.project_id)?.name || issue.project_id}
+          taskTitle={tasks.find(task => task.id === issue.task_id)?.title || issue.task_id}
+          onTransition={transition}
+        />)}
         {!issues.length && <div className="panel empty">No QA issues recorded in this workspace.</div>}
       </div>
     </Page>
