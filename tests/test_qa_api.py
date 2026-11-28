@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime, timezone
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -190,6 +191,15 @@ def test_qa_issue_requires_a_passing_task_linked_retest_before_closure(client):
         json={"status": "closed", "retest_evaluation_run_id": client.wrong_task_eval_id},
     )
     assert wrong_task_evidence.status_code == 409
+
+    # Retest evidence must be generated after the issue was marked fixed.
+    db = client.session_factory()
+    try:
+        evaluation = db.get(EvaluationRun, client.passing_eval_id)
+        evaluation.created_at = datetime.now(timezone.utc)
+        db.commit()
+    finally:
+        db.close()
 
     closed = client.patch(
         url, headers=headers(),
