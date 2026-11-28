@@ -105,3 +105,54 @@ class ToolInvocation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     payload_purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MachineSessionCredential(Base):
+    """One-time bearer credential bound to exactly one active AgentSession."""
+
+    __tablename__ = "machine_session_credentials"
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_machine_session_credential_token_hash"),
+        UniqueConstraint(
+            "org_id", "workspace_id", "session_id", "credential_version",
+            name="uq_machine_session_credential_version",
+        ),
+        ForeignKeyConstraint(
+            ["org_id", "workspace_id", "machine_identity_id", "session_id"],
+            [
+                "agent_sessions.org_id",
+                "agent_sessions.workspace_id",
+                "agent_sessions.machine_identity_id",
+                "agent_sessions.id",
+            ],
+            ondelete="CASCADE",
+            name="fk_machine_session_credential_session_identity_scope",
+        ),
+        CheckConstraint("credential_version >= 1", name="ck_machine_session_credential_version"),
+        CheckConstraint("request_count_window >= 0", name="ck_machine_session_credential_request_count"),
+        Index(
+            "ix_machine_session_credential_session_revoked",
+            "org_id", "workspace_id", "session_id", "revoked_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    org_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    machine_identity_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    session_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    token_prefix: Mapped[str] = mapped_column(String(80), nullable=False)
+    credential_version: Mapped[int] = mapped_column(default=1, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revocation_reason: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    request_window_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    request_count_window: Mapped[int] = mapped_column(default=0, nullable=False)
+    provider_vault_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    provider_credential_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    provider_credential_status: Mapped[str] = mapped_column(String(24), default="not_created", nullable=False)
+    provider_credential_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    provider_credential_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
