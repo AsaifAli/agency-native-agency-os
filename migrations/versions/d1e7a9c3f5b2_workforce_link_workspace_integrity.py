@@ -23,6 +23,10 @@ UNIQUE_INDEXES = (
 )
 
 SCOPED_FOREIGN_KEYS = {
+    "workforce_units": (
+        ("fk_workforce_unit_parent_workspace", ["org_id", "workspace_id", "parent_unit_id"],
+         "workforce_units", ["org_id", "workspace_id", "id"]),
+    ),
     "workforce_members": (
         ("fk_workforce_member_unit_workspace", ["org_id", "workspace_id", "unit_id"],
          "workforce_units", ["org_id", "workspace_id", "id"]),
@@ -34,6 +38,17 @@ SCOPED_FOREIGN_KEYS = {
     "workforce_capabilities": (
         ("fk_workforce_capability_member_workspace", ["org_id", "workspace_id", "member_id"],
          "workforce_members", ["org_id", "workspace_id", "id"]),
+    ),
+    "workforce_positions": (
+        ("fk_workforce_position_unit_workspace", ["org_id", "workspace_id", "unit_id"],
+         "workforce_units", ["org_id", "workspace_id", "id"]),
+        ("fk_workforce_position_team_unit_workspace", ["org_id", "workspace_id", "team_unit_id"],
+         "workforce_units", ["org_id", "workspace_id", "id"]),
+        ("fk_workforce_position_member_workspace", ["org_id", "workspace_id", "assigned_member_id"],
+         "workforce_members", ["org_id", "workspace_id", "id"]),
+        ("fk_workforce_position_reports_to_workspace",
+         ["org_id", "workspace_id", "reports_to_position_key"],
+         "workforce_positions", ["org_id", "workspace_id", "position_key"]),
     ),
     "delegations": (
         ("fk_delegation_parent_task_workspace", ["org_id", "workspace_id", "parent_task_id"],
@@ -67,12 +82,13 @@ def _validate_relationship(
     source_column: str,
     target_table: str,
     label: str,
+    target_column: str = "id",
 ) -> None:
     invalid = bind.execute(sa.text(f"""
         SELECT count(*)
         FROM {source_table} AS source
         LEFT JOIN {target_table} AS target
-          ON target.id = source.{source_column}
+          ON target.{target_column} = source.{source_column}
          AND target.org_id = source.org_id
          AND target.workspace_id = source.workspace_id
         WHERE source.{source_column} IS NOT NULL
@@ -88,7 +104,7 @@ def _validate_relationship(
 def _validate_existing_relationships(bind: sa.Connection) -> None:
     required = {
         "agents", "tasks", "workforce_units", "workforce_members",
-        "workforce_capabilities", "delegations",
+        "workforce_capabilities", "workforce_positions", "delegations",
     }
     inspector = sa.inspect(bind)
     missing = sorted(table for table in required if not inspector.has_table(table))
@@ -99,10 +115,14 @@ def _validate_existing_relationships(bind: sa.Connection) -> None:
         )
 
     checks = (
+        ("workforce_units", "parent_unit_id", "workforce_units", "workforce unit parent"),
         ("workforce_members", "unit_id", "workforce_units", "member unit"),
         ("workforce_members", "manager_member_id", "workforce_members", "member manager"),
         ("workforce_members", "agent_id", "agents", "member agent"),
         ("workforce_capabilities", "member_id", "workforce_members", "capability member"),
+        ("workforce_positions", "unit_id", "workforce_units", "position unit"),
+        ("workforce_positions", "team_unit_id", "workforce_units", "position team unit"),
+        ("workforce_positions", "assigned_member_id", "workforce_members", "position assignee"),
         ("delegations", "parent_task_id", "tasks", "delegation parent task"),
         ("delegations", "child_task_id", "tasks", "delegation child task"),
         ("delegations", "dependency_task_id", "tasks", "delegation dependency task"),
@@ -114,6 +134,12 @@ def _validate_existing_relationships(bind: sa.Connection) -> None:
             bind, source_table=source, source_column=column,
             target_table=target, label=label,
         )
+    _validate_relationship(
+        bind, source_table="workforce_positions",
+        source_column="reports_to_position_key",
+        target_table="workforce_positions", target_column="position_key",
+        label="position reporting line",
+    )
 
 
 def _install_foreign_keys(bind: sa.Connection, table: str, definitions: tuple) -> None:
