@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": "1.1.0",
+  "catalog_version": "1.2.0",
   "policy": {
     "default_enabled": false,
     "default_allowed_tools": [],
@@ -77,6 +77,12 @@
       "revision": "83067222c3d99b5afed2cb90c4c3dc301a4b0729",
       "license": "CC-BY-4.0 for content; Apache-2.0 for code",
       "use": "Reviewed as a founder operating-system reference. Original Agency OS skills independently authored from stage-aware triage, recurring review, advisor perspectives and evidence-backed learning concepts; no source files or scripts copied."
+    },
+    "anthropic-cowork-docs": {
+      "repository": "https://support.claude.com/en/articles/13345190-get-started-with-claude-cowork",
+      "revision": "Documentation reviewed 2026-11-28; page reference rather than a Git revision.",
+      "license": "Anthropic product documentation; summarized facts only, no source text copied.",
+      "use": "Grounded Cowork capabilities and operating caveats including Projects, connectors, browser work, local files, subagents, scheduled tasks and deliverables."
     }
   },
   "skills": [
@@ -552,6 +558,56 @@
         "chief-of-staff",
         "project-management-office",
         "quality-assurance-security"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "agency-learning-loop",
+      "path": "agency-learning-loop/SKILL.md",
+      "category": "operations",
+      "description": "Review completed Revenue and Delivery work, turn verified outcomes into scoped operational lessons, and propose evaluated improvements without self-modifying authority or policy.",
+      "sources": [
+        "ainative-os",
+        "founder-os"
+      ],
+      "recommended_departments": [
+        "chief-of-staff",
+        "business-development-sales",
+        "project-management-office",
+        "quality-assurance-security"
+      ],
+      "review_status": "reviewed",
+      "enabled": false,
+      "allowed_data_classes": [
+        "public",
+        "synthetic"
+      ],
+      "allowed_tools": []
+    },
+    {
+      "name": "cowork-hybrid-operations",
+      "path": "cowork-hybrid-operations/SKILL.md",
+      "category": "operations",
+      "description": "Use Claude Cowork as a bounded knowledge-work surface for the agency's Revenue and Delivery engines while preserving Agency OS authority, client isolation and human review.",
+      "sources": [
+        "anthropic-cowork-docs",
+        "agent-skills-spec"
+      ],
+      "recommended_departments": [
+        "chief-of-staff",
+        "market-research-intelligence",
+        "business-development-sales",
+        "solutions-consulting-strategy",
+        "marketing-brand",
+        "finance-accounts",
+        "project-management-office",
+        "delivery-implementation"
       ],
       "review_status": "reviewed",
       "enabled": false,
