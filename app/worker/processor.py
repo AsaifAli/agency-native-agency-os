@@ -22,7 +22,7 @@ from app.integrations.runtime import (
     RuntimeTransientError,
 )
 from app.worker.runtime_factory import get_runtime
-from app.worker.tool_executor import build_machine_tool_executor
+from app.worker.tool_executor import build_machine_mcp_session_preparer, build_machine_tool_executor
 from app.execution_controls import (
     acknowledge_execution_cancel,
     get_execution_control_request,
@@ -365,6 +365,15 @@ def process_one_execution(
                 worker_id=worker_id,
                 session_ttl_seconds=settings.claude_managed_timeout_seconds,
             )
+            if settings.claude_managed_mcp_enabled:
+                request.prepare_mcp_session = build_machine_mcp_session_preparer(
+                    session_factory=session_factory,
+                    request=request,
+                    execution_id=execution_id,
+                    attempt_id=attempt_id,
+                    worker_id=worker_id,
+                    session_ttl_seconds=min(settings.claude_managed_timeout_seconds, 3600),
+                )
         runtime_result = runtime.start(request)
         if request.control_check is not None and request.control_check() == "cancel":
             raise RuntimeCancelled("OS cancellation request observed after provider return.")
